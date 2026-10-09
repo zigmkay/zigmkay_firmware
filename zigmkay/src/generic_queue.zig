@@ -8,7 +8,7 @@ pub fn GenericQueue(comptime T: type, comptime max_capacity: usize) type {
         data: [max_capacity]T,
         size: usize = 0,
         pub fn Create() Self {
-            return Self{ .data = [1]T{undefined} ** max_capacity };
+            return Self{ .data = @splat(undefined) };
         }
         pub fn Count(self: *Self) usize {
             return self.size;

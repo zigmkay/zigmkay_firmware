@@ -135,6 +135,20 @@ pub const TimeSpan = struct {
 pub const KeyIndex = u7;
 pub const LayerIndex = u4;
 
+pub const RAWHID_SIGNAL_KEY_EVENT: u8 = 0x03;
+
+/// Optional Raw HID diagnostics for matrix events consumed by the processor.
+/// Events use the companion-compatible `LogMessage` payload.
+pub const MatrixEventTrace = struct {
+    signal_id: u8 = RAWHID_SIGNAL_KEY_EVENT,
+    key_range: ?struct { first: KeyIndex, last: KeyIndex } = null,
+
+    pub fn includes(self: MatrixEventTrace, key_index: KeyIndex) bool {
+        const range = self.key_range orelse return true;
+        return key_index >= range.first and key_index <= range.last;
+    }
+};
+
 const queue_capacities = 250;
 
 // Matrix events: switch press/release,
@@ -150,17 +164,43 @@ pub const UartMessage = packed struct {
 };
 
 pub const LogMessage = extern struct {
-    pressed: bool,
+    pressed: u8,
     key_index: u8,
     layer: u8,
-    modifiers: Modifiers,
-    pub fn toBytes(self: LogMessage) [4]u8 {
-        return @bitCast(self);
+    modifiers: u8,
+
+    pub fn init(pressed: bool, key_index: KeyIndex, layer: LayerIndex, modifiers: Modifiers) LogMessage {
+        return .{
+            .pressed = @intFromBool(pressed),
+            .key_index = key_index,
+            .layer = layer,
+            .modifiers = modifiers.toByte(),
+        };
     }
+
+    pub fn toBytes(self: LogMessage) [4]u8 {
+        return .{ self.pressed, self.key_index, self.layer, self.modifiers };
+    }
+
     pub fn fromBytes(bytes: [4]u8) LogMessage {
-        return @bitCast(bytes);
+        return .{
+            .pressed = bytes[0],
+            .key_index = bytes[1],
+            .layer = bytes[2],
+            .modifiers = bytes[3],
+        };
     }
 };
+
+comptime {
+    std.debug.assert(@sizeOf(LogMessage) == 4);
+    std.debug.assert(@alignOf(LogMessage) == 1);
+    std.debug.assert(@offsetOf(LogMessage, "pressed") == 0);
+    std.debug.assert(@offsetOf(LogMessage, "key_index") == 1);
+    std.debug.assert(@offsetOf(LogMessage, "layer") == 2);
+    std.debug.assert(@offsetOf(LogMessage, "modifiers") == 3);
+}
+
 pub const MatrixStateChange = struct { pressed: bool, key_index: KeyIndex, time: TimeSinceBoot };
 pub const MatrixStateChangeQueue = generic_queue.GenericQueue(MatrixStateChange, queue_capacities);
 pub const EncoderEventQueue = generic_queue.GenericQueue(EncoderEvent, queue_capacities);
@@ -199,7 +239,7 @@ pub const OutputCommand = union(enum) {
 };
 pub const OutputCommandQueue = struct {
     const QueueType = generic_queue.GenericQueue(OutputCommand, queue_capacities);
-    currently_pressed_keycodes: [256]bool = [1]bool{false} ** 256,
+    currently_pressed_keycodes: [256]bool = @splat(false),
     queue: QueueType = QueueType.Create(),
     current_mods: Modifiers = .{}, // holds the latest submitted
     pub fn Create() OutputCommandQueue {
@@ -261,7 +301,7 @@ pub const OutputCommandQueue = struct {
     }
 
     pub fn send_raw_hid_signal(self: *OutputCommandQueue, signal_id: u8, data: []const u8) !void {
-        var buf: [8]u8 = [_]u8{0} ** 8;
+        var buf: [8]u8 = @splat(0);
         const len = @min(data.len, 8);
         @memcpy(buf[0..len], data[0..len]);
         try self.queue.enqueue(.{ .RawHidSignal = .{ .signal_id = signal_id, .data = buf, .len = @intCast(len) } });
@@ -306,7 +346,7 @@ pub const TimeSinceBoot = struct {
 pub const DiffError = error{ CurrentIsEarlierThanInput, CurrentIsLaterThanInput };
 
 pub const LayerActivations = struct {
-    layers: [32]bool = [_]bool{false} ** 32,
+    layers: [32]bool = @splat(false),
     top_most_active_layer: LayerIndex = 0,
     const Self = @This();
     pub fn activate(self: *Self, layer_index: LayerIndex) void {

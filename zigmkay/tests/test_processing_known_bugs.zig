@@ -25,7 +25,7 @@ const dummy_time = core.TimeStamp{ .time_us_since_boot = 0 };
 test "Exceeding 28 keys - a bug with 28 being hardcoded caused following keys to behave unpredictable" {
     const current_time: core.TimeSinceBoot = core.TimeSinceBoot.from_absolute_us(100);
 
-    const base_layer = comptime [_]?core.KeyDef{A} ** 30;
+    const base_layer: [30]?core.KeyDef = @splat(A);
     const keymap = comptime [_][base_layer.len]?core.KeyDef{base_layer};
     var o = init_with_config(.{ .key_count = base_layer.len, .layer_count = keymap.len }, .{ .keymap = &keymap }){};
 
@@ -38,4 +38,3 @@ test "Exceeding 28 keys - a bug with 28 being hardcoded caused following keys to
 }
 
 test "Combos not working cause the tail was always +1 in the processor instead of the dequeue_count" {}
-

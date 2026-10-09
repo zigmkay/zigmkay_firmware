@@ -31,7 +31,7 @@ pub const PioUartTx = struct {
 };
 
 pub fn init_pio_uart_tx(pin: rp2xxx.gpio.Pin, comptime baud_rate: u32) PioUartTx {
-    const pio: rp2xxx.pio.Pio = rp2xxx.pio.num(0);
+    const pio: rp2xxx.pio.Pio = .pio0;
     const sm: rp2xxx.pio.StateMachine = .sm0;
 
     pio.gpio_init(pin);
@@ -65,7 +65,7 @@ pub const UartClient = union(enum) {
         switch (self.*) {
             .uart => |uart| {
                 const uart_send_buffer = [1]u8{data};
-                uart.write_blocking(&uart_send_buffer, microzig.drivers.time.Deadline{ .timeout = microzig.drivers.time.Absolute.from_us(100 * 1000) }) catch |e| {
+                _ = uart.write_blocking(&uart_send_buffer, microzig.drivers.time.Deadline{ .timeout = microzig.drivers.time.Absolute.from_us(100 * 1000) }) catch |e| {
                     uart.clear_errors();
                     return e;
                 };

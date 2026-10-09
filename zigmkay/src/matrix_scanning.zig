@@ -46,13 +46,14 @@ pub fn CreateMatrixScannerType(
                         @compileError(std.fmt.comptimePrint("A row index {d} exceeds the total number of pin_rows provided ({d}).", .{ row_idx, matrix_settings.pin_rows.len }));
                     }
 
-                    row_col_to_keyindex[col_idx][row_idx] = key_index;
+                    row_col_to_keyindex[col_idx][row_idx] = @intCast(key_index);
                 }
             };
+            const mapping = row_col_to_keyindex;
             return struct {
                 // current_states should be a packed struct
-                var current_states: [matrix_settings.pins_to_keys_mapping.len]bool = [1]bool{false} ** (matrix_settings.pins_to_keys_mapping.len);
-                var current_states_last_changed: [matrix_settings.pins_to_keys_mapping.len]u64 = [1]u64{0} ** (matrix_settings.pins_to_keys_mapping.len);
+                var current_states: [matrix_settings.pins_to_keys_mapping.len]bool = @splat(false);
+                var current_states_last_changed: [matrix_settings.pins_to_keys_mapping.len]u64 = @splat(0);
 
                 // map col+row coordinates to keymap positions
 
@@ -65,7 +66,7 @@ pub fn CreateMatrixScannerType(
 
                             for (matrix_settings.pin_rows, 0..) |row, row_idx| {
                                 // find the key index for this combination
-                                const key_index_or_null = row_col_to_keyindex[col_idx][row_idx];
+                                const key_index_or_null = mapping[col_idx][row_idx];
                                 if (key_index_or_null) |key_index| {
                                     const pressed = row.read() == 1;
 
@@ -91,7 +92,7 @@ pub fn CreateMatrixScannerType(
 
                             for (matrix_settings.pin_cols, 0..) |col, col_idx| {
                                 // find the key index for this combination
-                                const key_index_or_null = row_col_to_keyindex[col_idx][row_idx];
+                                const key_index_or_null = mapping[col_idx][row_idx];
                                 if (key_index_or_null) |key_index| {
                                     const pressed = col.read() == 1;
 
@@ -118,8 +119,8 @@ pub fn CreateMatrixScannerType(
             return struct {
                 const Self = @This();
                 // current_states should be a packed struct
-                current_states: [keymap_dimensions.key_count]bool = [1]bool{false} ** (keymap_dimensions.key_count),
-                current_states_last_changed: [keymap_dimensions.key_count]u64 = [1]u64{0} ** (keymap_dimensions.key_count),
+                current_states: [keymap_dimensions.key_count]bool = @splat(false),
+                current_states_last_changed: [keymap_dimensions.key_count]u64 = @splat(0),
                 pub fn DetectKeyboardChanges(self: *Self, output_queue: *core.MatrixStateChangeQueue, current_time: core.TimeSinceBoot) !void {
                     for (pins.switch_pins, 0..) |pin_or_null, key_index| {
                         if (pin_or_null) |pin| {

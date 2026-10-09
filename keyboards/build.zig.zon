@@ -2,7 +2,7 @@
     .name = .clackychan_jb,
     .version = "0.0.0",
     .fingerprint = 0x2daa5d84554bd0e3, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .zigmkay = .{
             .path = "../zigmkay",
@@ -10,18 +10,15 @@
         .zkeycodes = .{
             .path = "../zkeycodes",
         },
-        .zig_flash = .{
-            .url = "git+https://codeberg.org/BSF/zig-flash.git#da54a2e130e1ed4aaa8cb1fb0854e532ed497cb7",
-            .hash = "zig_flash-0.1.0-yRHpSekrAADcupveamI9vg9WqtYIaaG8Vylnvix1G0Cx",
-        },
         .microzig = .{
-            .url = "git+https://github.com/ZigEmbeddedGroup/microzig.git#bd650e87a808385d3f05d365d128c58956b91bfe",
-            .hash = "microzig-0.15.2-D20YSYdJ3gA04LTZlTUs3OdwmdTokw7tj61C_nzDt7Ub",
+            .url = "https://github.com/ZigEmbeddedGroup/microzig/releases/download/0.17.12/microzig.tar.gz",
+            .hash = "microzig-0.17.12-D20YSbDKAAA_aWCmmydsldbUrhmCUzNFqseEIAE4__5g",
         },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
-        "src",
+        "examples",
+        "my_keyboards",
     },
 }

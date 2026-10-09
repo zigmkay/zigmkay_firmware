@@ -1,0 +1,22 @@
+.{
+    .name = .zigmkay_firmware,
+    .version = "0.1.0",
+    .fingerprint = 0x8c0e2683c32a9e11, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .picotool = .{
+            .url = "git+https://github.com/allyourcodebase/picotool.git#d8df33801dbea792128baaab516291720d400a91",
+            .hash = "picotool-2.3.1-PtJrRaJNAAA3xRwGctKAdomuKCJXz5UwMOrhzQ_Z2f-e",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "README.md",
+        "keyboards",
+        "tools",
+        "zigmkay",
+        "zkeycodes",
+    },
+}

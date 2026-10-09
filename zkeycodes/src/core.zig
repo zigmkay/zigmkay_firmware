@@ -88,9 +88,9 @@ pub const LabelEntry = struct {
 /// Looks up `keycode` in `table` by matching both `tap_keycode` and `tap_modifiers`.
 /// This distinguishes e.g. `S(KC_1)` ("EXLM") from plain `KC_1` ("1").
 pub fn getLabel(table: []const LabelEntry, keycode: core.KeyCodeFire, shortest: bool) ?[]const u8 {
-    const key_mods: u8 = if (keycode.tap_modifiers) |m| m.toByte() else 0;
+    const key_mods = keycode.tap_modifiers.toByte();
     for (table) |entry| {
-        const entry_mods: u8 = if (entry.value.tap_modifiers) |m| m.toByte() else 0;
+        const entry_mods = entry.value.tap_modifiers.toByte();
         if (entry.value.tap_keycode == keycode.tap_keycode and entry_mods == key_mods) {
             return if (shortest) entry.short_label else entry.label;
         }

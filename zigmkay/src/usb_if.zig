@@ -44,7 +44,7 @@ const Keyboard = usb.drivers.hid.InterruptDriver(.{
             .usage_range = .{ 0xE0, 0xE7 },
             .count = 8,
             .Child = bool,
-            .dir = .In,
+            .dir = .in,
             .type = .dynamic,
         } },
         // Input: up to 6 pressed key codes
@@ -53,7 +53,7 @@ const Keyboard = usb.drivers.hid.InterruptDriver(.{
             .usage_range = .{ 0x00, 0xff },
             .count = 6,
             .Child = u8,
-            .dir = .In,
+            .dir = .in,
             .type = .selector,
         } },
         // Output: indicator LEDs
@@ -62,11 +62,11 @@ const Keyboard = usb.drivers.hid.InterruptDriver(.{
             .usage_range = .{ 1, 5 },
             .count = 5,
             .Child = bool,
-            .dir = .Out,
+            .dir = .out,
             .type = .dynamic,
         } },
         // Padding
-        .{ .data_static = .{ .Out, u3 } },
+        .{ .data_static = .{ .out, u3 } },
         // End
         .main_collection_end,
     },
@@ -85,15 +85,15 @@ const ConsumerControl = usb.drivers.hid.InterruptDriver(.{
     .subclass = .Unspecified,
     .protocol = .NoneRequired,
     .report_descriptor = &.{
-        .{ .global_usage_page = @enumFromInt(0x0C) }, // Consumer Page
+        .{ .global_usage_page = @fromBackingInt(@intCast(0x0C)) }, // Consumer Page
         .{ .local_usage = 0x01 }, // Consumer Control
         .{ .main_collection = .Application },
         .{ .data = .{
-            .usage = .{ .global_page = @enumFromInt(0x0C) },
+            .usage = .{ .global_page = @fromBackingInt(@intCast(0x0C)) },
             .usage_range = .{ 0x00, 0x03FF },
             .count = 1,
             .Child = u16,
-            .dir = .In,
+            .dir = .in,
             .type = .selector,
         } },
         .main_collection_end,
@@ -119,21 +119,21 @@ const Mouse = usb.drivers.hid.InterruptDriver(.{
     .protocol = .NoneRequired,
     .report_descriptor = &.{
         .{ .global_usage_page = .generic_desktop },
-        .local_usage_enum(.{ .generic_desktop = @enumFromInt(0x02) }), // Mouse
+        .local_usage_enum(.{ .generic_desktop = @fromBackingInt(@intCast(0x02)) }), // Mouse
         .{ .main_collection = .Application },
         .{ .local_usage = 0x01 }, // Pointer
         .{ .main_collection = .Physical },
         .{
             .data = .{
-                .usage = .{ .global_page = @enumFromInt(0x09) }, // Button
+                .usage = .{ .global_page = @fromBackingInt(@intCast(0x09)) }, // Button
                 .usage_range = .{ 1, 5 },
                 .count = 5,
                 .Child = bool,
-                .dir = .In,
+                .dir = .in,
                 .type = .dynamic,
             },
         },
-        .{ .data_static = .{ .In, u3 } }, // Padding
+        .{ .data_static = .{ .in, u3 } }, // Padding
         .{ .global_usage_page = .generic_desktop },
         .{
             .data = .{
@@ -142,7 +142,7 @@ const Mouse = usb.drivers.hid.InterruptDriver(.{
                 .logical_range = .{ -127, 127 },
                 .count = 2,
                 .Child = i8,
-                .dir = .In,
+                .dir = .in,
                 .type = .dynamic,
             },
         },
@@ -153,7 +153,7 @@ const Mouse = usb.drivers.hid.InterruptDriver(.{
         .{ .global_report_size = 8 },
         .{ .main_input = .{ .variable = true, .relative = true } },
         // Pan — same: Relative maps to REL_HWHEEL
-        .{ .global_usage_page = @enumFromInt(0x0C) }, // Consumer
+        .{ .global_usage_page = @fromBackingInt(@intCast(0x0C)) }, // Consumer
         .{ .local_usage = 0x0238 },
         .{ .global_logical_range = .{ -127, 127 } },
         .{ .global_report_count = 1 },
@@ -174,7 +174,7 @@ const RawHid = usb.drivers.hid.InterruptDriver(.{
     .subclass = .Unspecified,
     .protocol = .NoneRequired,
     .report_descriptor = &.{
-        .{ .global_usage_page = @enumFromInt(0xFF31) }, // Vendor Page 0xFF31
+        .{ .global_usage_page = @fromBackingInt(@intCast(0xFF31)) }, // Vendor Page 0xFF31
         .{ .local_usage = 0x0074 }, // Usage 0x0074
         .{ .main_collection = .Application },
         // Input: 32 bytes
@@ -182,7 +182,7 @@ const RawHid = usb.drivers.hid.InterruptDriver(.{
             .usage = .{ .local_raw = 0x01 },
             .count = 32,
             .Child = u8,
-            .dir = .In,
+            .dir = .in,
             .type = .dynamic,
         } },
         // Output: 32 bytes
@@ -190,7 +190,7 @@ const RawHid = usb.drivers.hid.InterruptDriver(.{
             .usage = .{ .local_raw = 0x02 },
             .count = 32,
             .Child = u8,
-            .dir = .Out,
+            .dir = .out,
             .type = .dynamic,
         } },
         .main_collection_end,
@@ -206,7 +206,10 @@ pub const ControllerType = usb.DeviceController(.{
     .device_triple = .unspecified,
     .vendor = .{ .id = 0xFAFA, .str = "OpenKeyboardCollective" },
     .product = .{ .id = 0x00F0, .str = "ZigMkay" },
-    .bcd_device = .v1_00,
+    // Keep this in sync with descriptor-set changes. Hosts cache HID report
+    // descriptors by device identity, so changing the revision forces them to
+    // enumerate newly added interfaces such as RawHID.
+    .bcd_device = .v1_10,
     .serial = "00000001",
     .max_supported_packet_size = USB_Device.max_supported_packet_size,
     .configurations = &.{.{

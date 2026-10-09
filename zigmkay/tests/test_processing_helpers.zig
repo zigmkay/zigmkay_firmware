@@ -17,6 +17,7 @@ pub fn init_with_config(comptime keymap_dimensions: core.KeymapDimensions, compt
         config.combos,
         config.custom_functions,
         config.encoder_actions,
+        config.matrix_event_trace,
     );
     return struct {
         const Self = @This();
@@ -54,6 +55,7 @@ pub fn CreateConfig(keymap_dimensions: core.KeymapDimensions) type {
         custom_functions: *const core.CustomFunctions = &no_functions,
         sides: [keymap_dimensions.key_count]core.Side = @splat(.X),
         encoder_actions: []const core.EncoderAction = &.{},
+        matrix_event_trace: ?core.MatrixEventTrace = null,
     };
 }
 
