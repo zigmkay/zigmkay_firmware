@@ -29,21 +29,21 @@ pub const keymap = [_][key_count]?core.KeyDef{
          T(dk.Q), AF_slow(dk.W), GUI(dk.R),   T(dk.P), AF_slow(dk.B),                  T(dk.K),   T(dk.L),   GUI(dk.O),   T(dk.U), T(dk.QUOT),
          T(dk.F),     ALT(dk.A), CTL(dk.S), SFT(dk.T),       T(dk.G),                  T(dk.M), SFT(dk.N),   CTL(dk.E), ALT(dk.I),    T(dk.Y),
          T(dk.Z),       T(dk.X),   T(dk.C),   T(dk.D),       T(dk.V),                  T(dk.J),   T(dk.H), T(dk.COMM), T(dk.DOT),     T(dk.Z),
-                                   C( us.SPACE, CUSTOM_HOLD_RIGHT),    C(us.ENTER, CUSTOM_HOLD_LEFT),          C( us.SPACE, CUSTOM_HOLD_RIGHT), T(dk.I)   
+                                   C(us.ENTER, CUSTOM_HOLD_LEFT),    C(us.ENTER, CUSTOM_HOLD_LEFT),          C( us.SPACE, CUSTOM_HOLD_RIGHT), C( us.SPACE, CUSTOM_HOLD_RIGHT)   
     },
     // L_ARROWS
     .{
     T(dk.EXLM),   T(dk.LABK),  GUI(dk.EQL),   T(dk.RABK), T(dk.PERC),             T(dk.SLSH),       T(us.HOME),   AF_fast(us.UP),         T(us.END),  T(us.APP),
 AF_slow(dk.AT),   ALT(dk.LCBR), CTL(dk.LPRN), SFT(dk.RPRN), T(dk.RCBR),             T(us.PGUP), AF_fast(us.LEFT), AF_fast(us.DOWN), AF_fast(us.RIGHT), T(us.PGDN),
      _______,      T(dk.HASH),   T(dk.LBRC),   T(dk.RBRC),    _______,                _______,        T(us.TAB),     CTL(dk.DQUO),         T(us.ESC),     _______,
-                                _______, C(us.SPACE, CUSTOM_HOLD_LEFT),                _______, _______
+                                C(us.SPACE, CUSTOM_HOLD_LEFT), C(us.SPACE, CUSTOM_HOLD_LEFT),                _______, _______
     },
     // L_NUM
     .{
               _______, TC(CUSTOM_TAP_ALT_TAB),       T(dk.R),   _______,           _______,            _______,   T(dk.N7),   T(dk.N8),   T(dk.N9),    _______,
      T(_Gui(us.LEFT)),                   UNDO,       _______,      REDO, T(_Gui(us.RIGHT)),            _______, SFT(dk.N4), CTL(dk.N5), ALT(dk.N6), T(dk.PLUS),
       _______,                      T(us.ESC), T(_Ctl(dk.C)), T(us.DEL),           _______,         PrintStats,   T(dk.N1),   T(dk.N2),   T(dk.N3), _______,
-                                                                                 _______,  _______,  C( us.N0, CUSTOM_HOLD_RIGHT), _______
+                                                                                 _______,  _______,  C( us.N0, CUSTOM_HOLD_RIGHT), C( us.N0, CUSTOM_HOLD_RIGHT)
     },
         // BOTH
     .{
