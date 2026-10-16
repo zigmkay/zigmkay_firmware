@@ -2,11 +2,49 @@
 ZigMkay is a keyboard firmware made in zig. You also configure your own keymaps in zig. 
 
 ## Getting started
-1. Install zig on your machine. Ensure you can run "zig version" and that it spits out 0.15.2. These is a shell.nix which will show all needed dependencies over time.
+1. Install zig on your machine. Ensure you can run "zig version" and that it spits out 0.17.0. These is a shell.nix which will show all needed dependencies over time.
 
 2. Clone this repo
 
 3. TODO: Describe how to copy an example and built it to the keyboard. 
+
+## Flashing
+
+Run these from the `keyboards/` folder. `-Dkeyboard=<name>` picks the keyboard; `zig build --help` lists the available names.
+
+```bash
+zig build flash -Dkeyboard=<name>        # host default (see below)
+zig build flash_pt -Dkeyboard=<name>     # picotool
+zig build flash_mount -Dkeyboard=<name>  # copy to the mounted RPI-RP2 drive
+```
+
+Start the command, then put the keyboard into bootloader mode (hold BOOT while plugging it in, or hold BOOT and press RESET). The command waits for the keyboard, flashes it and finishes.
+
+| Host    | `flash` uses |
+|---------|--------------|
+| Windows | mount        |
+| Linux   | mount        |
+| macOS   | picotool     |
+
+picotool is built from source by the build, so you don't need to install it.
+
+### Mount based flashing
+
+This waits for the `RPI-RP2` drive and copies the firmware onto it. On Linux it looks for `/run/media/$USER/RPI-RP2`, and mounts the drive with `udisksctl` if your desktop doesn't do it automatically. If your system mounts it somewhere else (e.g. `/media/$USER/RPI-RP2` on Ubuntu/Debian), pass the mount point or another volume label:
+
+```bash
+zig build flash_mount -Dkeyboard=<name> -Dflash-mount=/media/$USER/RPI-RP2
+```
+
+### picotool on Linux
+
+Without root, picotool can't access the bootloader until a udev rule is installed. To install picotool's official rule (asks for your sudo password):
+
+```bash
+zig build install-udev-rules
+```
+
+Unplug the keyboard and plug it back in afterwards.
 
 ## Only modify files in my_keyboards/
 

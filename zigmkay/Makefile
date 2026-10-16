@@ -1,7 +1,7 @@
 .PHONY: build test
 
 build:
-	@zig build test_compile_only
+	@zig build test
 
 test:
 	@zig build test

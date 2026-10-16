@@ -2,16 +2,23 @@
     .name = .zigmkay,
     .version = "0.1.0",
     .fingerprint = 0x96c3db5c7cca4e4,
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .microzig = .{
-            .url = "git+https://github.com/ZigEmbeddedGroup/microzig.git#bd650e87a808385d3f05d365d128c58956b91bfe",
-            .hash = "microzig-0.15.2-D20YSYdJ3gA04LTZlTUs3OdwmdTokw7tj61C_nzDt7Ub",
+            .url = "https://github.com/ZigEmbeddedGroup/microzig/releases/download/0.17.12/microzig.tar.gz",
+            .hash = "microzig-0.17.12-D20YSbDKAAA_aWCmmydsldbUrhmCUzNFqseEIAE4__5g",
+        },
+        .picotool = .{
+            .url = "git+https://github.com/allyourcodebase/picotool.git#d8df33801dbea792128baaab516291720d400a91",
+            .hash = "picotool-2.3.1-PtJrRaJNAAA3xRwGctKAdomuKCJXz5UwMOrhzQ_Z2f-e",
         },
     },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "build_utils.zig",
+        "tests",
+        "tools",
     },
 }

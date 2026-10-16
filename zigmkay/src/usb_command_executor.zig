@@ -68,16 +68,16 @@ pub const UsbCommandExecutor = struct {
                         rp2xxx.rom.reset_to_usb_boot();
                     },
                     .RawHidSignal => |sig| {
-                        var report: usb_if.RawHidReport = [_]u8{0} ** 32;
+                        var report: usb_if.RawHidReport = @splat(0);
                         report[0] = sig.signal_id;
                         @memcpy(report[1 .. 1 + sig.len], sig.data[0..sig.len]);
                         usb_if.send_raw_report(&report);
                     },
                     .ConsumerKeyPressed => |key| {
-                        var report = usb_if.ConsumerInReport{ .button = @intFromEnum(key) };
+                        var report = usb_if.ConsumerInReport{ .button = @backingInt(key) };
                         usb_if.send_consumer_report(&report);
                     },
-                    .ConsumerKeyReleased => |_| {
+                    .ConsumerKeyReleased => {
                         var empty_report = usb_if.ConsumerInReport{ .button = 0 };
                         usb_if.send_consumer_report(&empty_report);
                     },

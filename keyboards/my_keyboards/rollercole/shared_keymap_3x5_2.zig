@@ -351,7 +351,7 @@ fn on_event(event: core.ProcessorEvent, layers: *core.LayerActivations, output_q
                 output_queue.tap_key(us.SPACE) catch {};
             }
         },
-        .OnTapExitAfter => |_| {},
+        .OnTapExitAfter => {},
         else => {},
     }
 }

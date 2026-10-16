@@ -1,6 +1,10 @@
 const std = @import("std");
 
 const microzig = @import("microzig");
+comptime {
+    microzig.export_startup();
+}
+pub const std_options = microzig.std_options(.{});
 const rp2xxx = microzig.hal;
 const gpio = rp2xxx.gpio;
 const zigmkay = @import("zigmkay");

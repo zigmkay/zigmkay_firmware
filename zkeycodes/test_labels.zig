@@ -93,7 +93,7 @@ test "modifier bit logic" {
 
 test "unknown keycode returns null" {
     // 0xFB (251) is not present in the test tables
-    const unknown = core2.KeyCodeFire{ .tap_keycode = 0xFB };
+    const unknown = @import("zigmkay").core.KeyCodeFire{ .tap_keycode = 0xFB };
     try std.testing.expect(keycodes.getLabel(unknown, false) == null);
     try std.testing.expect(german_mac_iso.getLabel(unknown, false) == null);
     try std.testing.expect(us.getLabel(unknown, false) == null);

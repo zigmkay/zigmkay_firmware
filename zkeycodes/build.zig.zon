@@ -2,7 +2,7 @@
     .name = .zkeycodes,
     .version = "0.1.0",
     .fingerprint = 0xd829e8133e5db3ac,
-    .minimum_zig_version = "0.15.2",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .zigmkay = .{
             .path = "../zigmkay",
@@ -14,5 +14,9 @@
         "src",
         "keycodes",
         "root.zig",
+        "qmk_imports",
+        "test_data",
+        "test_generation.zig",
+        "test_labels.zig",
     },
 }

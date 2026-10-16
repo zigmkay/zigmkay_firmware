@@ -1,7 +1,6 @@
 const std = @import("std");
 
 const microzig = @import("microzig");
-const flash = @import("zig_flash");
 const MicroBuild = microzig.MicroBuild(.{
     .rp2xxx = true,
 });
@@ -9,10 +8,18 @@ const MicroBuild = microzig.MicroBuild(.{
 const KeyboardSample = struct {
     name: []const u8,
     root_source_file: []const u8,
+    /// Keymap source exposed to the board's main file as `@import("keymap")`,
+    /// so one main file per board can be combined with different keymaps.
+    keymap: ?[]const u8 = null,
 };
 
 const keyboard_samples = [_]KeyboardSample{
     .{ .name = "clacky_chan", .root_source_file = "my_keyboards/rollercole/clacky_chan.zig" },
+    .{ .name = "clackychan_colemak", .root_source_file = "my_keyboards/janbeelte/clackychan_main.zig", .keymap = "my_keyboards/janbeelte/clackychan_colemak_keymap.zig" },
+    .{ .name = "keycaprio_colemak_0_4", .root_source_file = "my_keyboards/janbeelte/keycaprio_main_0_4.zig", .keymap = "my_keyboards/janbeelte/clackychan_colemak_keymap.zig" },
+    .{ .name = "keycaprio_colemak_0_6", .root_source_file = "my_keyboards/janbeelte/keycaprio_main_0_6.zig", .keymap = "my_keyboards/janbeelte/keycaprio_colemak_keymap.zig" },
+    .{ .name = "keycaprio_colemak_0_7", .root_source_file = "my_keyboards/janbeelte/keycaprio_main_0_7.zig", .keymap = "my_keyboards/janbeelte/keycaprio_colemak_keymap.zig" },
+    .{ .name = "keycaprio_us_intl_0_7", .root_source_file = "my_keyboards/janbeelte/keycaprio_main_0_7.zig", .keymap = "my_keyboards/janbeelte/keycaprio_us_intl_keymap.zig" },
     .{ .name = "lk1", .root_source_file = "my_keyboards/rollercole/leonardo_keycaprio_0_1.zig" },
     .{ .name = "lk2", .root_source_file = "my_keyboards/rollercole/leonardo_keycaprio_0_2.zig" },
     .{ .name = "lk6", .root_source_file = "my_keyboards/rollercole/leonardo_keycaprio_0_6.zig" },
@@ -26,15 +33,11 @@ const keyboard_samples = [_]KeyboardSample{
 pub fn build(b: *std.Build) void {
     const selected_keyboard = b.option([]const u8, "keyboard", keyboardOptionDescription(b)) orelse keyboard_samples[0].name;
 
-    if (shouldPrintSamplesForListSteps(b)) {
-        printAvailableSamples();
-    }
-
     const mz_dep = b.dependency("microzig", .{});
     const mb = MicroBuild.init(b, mz_dep) orelse return;
 
-    const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*; //  b.standardTargetOptions(.{});
-    const optimize: std.builtin.OptimizeMode = .ReleaseSafe; //b.standardOptimizeOption(.{});
+    const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*;
+    const optimize: std.builtin.OptimizeMode = .ReleaseSafe;
 
     const zigmkay_dep = b.dependency("zigmkay", .{});
     const zigmkay_mod = zigmkay_dep.module("zigmkay");
@@ -47,21 +50,79 @@ pub fn build(b: *std.Build) void {
         std.debug.panic("Unknown keyboard sample: '{s}'", .{selected_keyboard});
     };
 
+    const firmware = addKeyboardFirmware(b, mb, &target, optimize, "zigmkay_firmware", sample, zigmkay_dep, zkeycodes_dep);
+    mb.install_firmware(firmware, .{});
+
+    const firmware_uf2 = firmware.get_emitted_bin(.{ .uf2 = .{ .family_id = .RP2040 } });
+    b.addNamedLazyPath("firmware_uf2", firmware_uf2);
+
+    const test_step = b.step("test", "Run keyboard regression tests");
+    const keymap_test_module = b.createModule(.{
+        .root_source_file = b.path("tests/test_clackychan_combos.zig"),
+        .target = b.graph.host,
+        .imports = &.{
+            .{ .name = "zigmkay", .module = zigmkay_mod },
+        },
+    });
+    const clackychan_keymap_module = b.createModule(.{
+        .root_source_file = b.path("my_keyboards/janbeelte/clackychan_colemak_keymap.zig"),
+        .target = b.graph.host,
+        .imports = &.{
+            .{ .name = "zigmkay", .module = zigmkay_mod },
+            .{ .name = "zkeycodes", .module = zkeycodes_mod },
+        },
+    });
+    keymap_test_module.addImport("clackychan_keymap", clackychan_keymap_module);
+    const keymap_tests = b.addTest(.{ .root_module = keymap_test_module });
+    test_step.dependOn(&b.addRunArtifact(keymap_tests).step);
+
+    // Compile every keyboard so a broken keymap fails the tests, not just the
+    // one selected with -Dkeyboard.
+    for (keyboard_samples) |keyboard| {
+        const keyboard_firmware = addKeyboardFirmware(b, mb, &target, optimize, keyboard.name, keyboard, zigmkay_dep, zkeycodes_dep);
+        test_step.dependOn(&keyboard_firmware.exe.step);
+    }
+
+    _ = @import("zigmkay").addFlashSteps(b, zigmkay_dep, firmware_uf2);
+}
+
+/// Each firmware gets its own zigmkay/zkeycodes module instances: add_app_import
+/// wires the firmware's microzig into them, so sharing one instance between
+/// several firmwares makes microzig appear twice in the same module graph.
+fn addKeyboardFirmware(
+    b: *std.Build,
+    mb: *MicroBuild,
+    target: *const microzig.Target,
+    optimize: std.builtin.OptimizeMode,
+    name: []const u8,
+    sample: KeyboardSample,
+    zigmkay_dep: *std.Build.Dependency,
+    zkeycodes_dep: *std.Build.Dependency,
+) *MicroBuild.Firmware {
     const firmware = mb.add_firmware(.{
-        .name = "zigmkay_firmware",
-        .target = &target,
+        .name = name,
+        .target = target,
         .optimize = optimize,
         .root_source_file = b.path(sample.root_source_file),
     });
-
+    const zigmkay_mod = b.createModule(.{ .root_source_file = zigmkay_dep.path("src/root.zig") });
+    const zkeycodes_mod = b.createModule(.{
+        .root_source_file = zkeycodes_dep.path("root.zig"),
+        .imports = &.{.{ .name = "zigmkay", .module = zigmkay_mod }},
+    });
     firmware.add_app_import("zigmkay", zigmkay_mod, .{ .depend_on_microzig = true });
     firmware.add_app_import("zkeycodes", zkeycodes_mod, .{ .depend_on_microzig = true });
-    mb.install_firmware(firmware, .{});
-
-    const flash_dep = b.dependency("zig_flash", .{});
-    const flash_exe = flash_dep.artifact("zig_flash");
-
-    _ = flash.addFlashStep(b, flash_exe, .{ .input_name = "zigmkay_firmware.uf2" });
+    if (sample.keymap) |keymap_source_file| {
+        const keymap_mod = b.createModule(.{
+            .root_source_file = b.path(keymap_source_file),
+            .imports = &.{
+                .{ .name = "zigmkay", .module = zigmkay_mod },
+                .{ .name = "zkeycodes", .module = zkeycodes_mod },
+            },
+        });
+        firmware.add_app_import("keymap", keymap_mod, .{ .depend_on_microzig = true });
+    }
+    return firmware;
 }
 
 fn keyboardOptionDescription(b: *std.Build) []const u8 {
@@ -73,7 +134,7 @@ fn keyboardOptionDescription(b: *std.Build) []const u8 {
     const joined_samples = std.mem.join(b.allocator, ", ", sample_names[0..]) catch @panic("Failed to build keyboard sample list");
     return std.fmt.allocPrint(
         b.allocator,
-        "Keyboard sample to build/flash (use: zig build -Dkeyboard=<name>, flash: zig build flash -Dkeyboard=<name>, available: {s})",
+        "Keyboard sample to build/flash (use: zig build -Dkeyboard=<name>, flash: zig build flash -Dkeyboard=<name>, picotool: zig build flash_pt, mount: zig build flash_mount [-Dflash-mount=<path|label>], available: {s})",
         .{joined_samples},
     ) catch @panic("Failed to build keyboard option description");
 }
@@ -91,18 +152,8 @@ fn printAvailableSamples() void {
         std.debug.print("  - {s}\n", .{sample.name});
     }
     std.debug.print("zig build -Dkeyboard=<name>\t\tBuild the Firmware\n", .{});
-    std.debug.print("zig build flash -Dkeyboard=<name>\tBuild & Flash the Firmware \n\n", .{});
-}
-
-fn shouldPrintSamplesForListSteps(b: *std.Build) bool {
-    const args = std.process.argsAlloc(b.allocator) catch return false;
-    defer std.process.argsFree(b.allocator, args);
-
-    for (args) |arg| {
-        if (std.mem.eql(u8, arg, "-l") or std.mem.eql(u8, arg, "--list-steps")) {
-            return true;
-        }
-    }
-
-    return false;
+    std.debug.print("zig build flash -Dkeyboard=<name>\tBuild & Flash using the host default\n", .{});
+    std.debug.print("zig build flash_pt -Dkeyboard=<name>\tBuild & Flash with picotool\n", .{});
+    std.debug.print("zig build flash_mount -Dkeyboard=<name>\tBuild & Flash through the mounted RP2 volume\n", .{});
+    std.debug.print("zig build install-udev-rules\t\tLinux: install picotool udev rules (sudo)\n\n", .{});
 }
