@@ -40,7 +40,7 @@ AF_slow(dk.AT),   ALT(dk.LCBR), CTL(dk.LPRN), SFT(dk.RPRN), T(dk.RCBR),         
     },
     // L_NUM
     .{
-              _______, TC(CUSTOM_TAP_ALT_TAB),       T(dk.R),   _______,           _______,            _______,   T(dk.N7),   T(dk.N8),   T(dk.N9),    _______,
+              _______, TC(CUSTOM_TAP_ALT_TAB),       T(alt_f4),   _______,           _______,            _______,   T(dk.N7),   T(dk.N8),   T(dk.N9),    _______,
      T(_Gui(us.LEFT)),                   UNDO,       _______,      REDO, T(_Gui(us.RIGHT)),            _______, SFT(dk.N4), CTL(dk.N5), ALT(dk.N6), T(dk.PLUS),
       _______,                      T(us.ESC), T(_Ctl(dk.C)), T(us.DEL),           _______,         PrintStats,   T(dk.N1),   T(dk.N2),   T(dk.N3), _______,
                                                                                  _______,  _______,  C( us.N0, CUSTOM_HOLD_RIGHT), C( us.N0, CUSTOM_HOLD_RIGHT)
@@ -116,6 +116,7 @@ const combo_timeout = core.TimeSpan{ .ms = 40 };
 
 const BOOT = core.KC_BOOT;
 
+const alt_f4 = core.KeyCodeFire{ .tap_keycode = us.F4.tap_keycode, .tap_modifiers = .{ .left_alt = true } };
 pub const combos = [_]core.Combo2Def{
     Combo_Tap(.{ 1, 2 }, L_BASE, dk.J),
 
@@ -125,8 +126,7 @@ pub const combos = [_]core.Combo2Def{
     Combo_Tap_HoldMod(.{ 12, 13 }, L_NUM, _Ctl(dk.V), .{ .left_ctrl = true, .left_shift = true }),
     Combo_Tap_HoldMod(.{ 11, 12 }, L_NUM, _Ctl(dk.X), .{ .left_ctrl = true, .left_shift = true }),
     Combo_Tap_HoldMod(.{ 12, 13 }, L_ARROWS, dk.AMPR, .{ .left_ctrl = true, .left_shift = true }),
-
-    Combo_Tap(.{ 13, 16 }, L_BOTH, core.KeyCodeFire{ .tap_keycode = us.F4.tap_keycode, .tap_modifiers = .{ .left_alt = true } }),
+    //Combo_Tap(.{ 13, 16 }, L_BOTH, alt_f4),
 
     Combo_Tap(.{ 24, 25 }, L_BASE, BOOT),
     Combo_Tap(.{ 0, 4 }, L_BASE, BOOT),
