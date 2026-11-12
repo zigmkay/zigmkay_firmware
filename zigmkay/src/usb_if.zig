@@ -18,6 +18,7 @@ pub const HID_KeymodifierCodes = enum(u8) {
 
 pub const KeyboardInReport = extern struct {
     modifiers: u8,
+    reserved: u8 = 0,
     keys: [6]u8,
 
     pub const empty: @This() = .{ .modifiers = 0, .keys = @splat(0) };
@@ -47,6 +48,8 @@ const Keyboard = usb.drivers.hid.InterruptDriver(.{
             .dir = .in,
             .type = .dynamic,
         } },
+        // Input: reserved byte (OEM, per USB HID Boot Keyboard protocol)
+        .{ .data_static = .{ .in, u8 } },
         // Input: up to 6 pressed key codes
         .{ .data = .{
             .usage = .{ .global_page = .keyboard },
