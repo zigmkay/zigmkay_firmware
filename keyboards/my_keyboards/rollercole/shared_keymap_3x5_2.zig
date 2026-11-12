@@ -29,7 +29,7 @@ pub const keymap = [_][key_count]?core.KeyDef{
          T(dk.Q), AF_slow(dk.W), GUI(dk.R),   T(dk.P), AF_slow(dk.B),                  T(dk.K),   T(dk.L),   GUI(dk.O),   T(dk.U), T(dk.QUOT),
          T(dk.F),     ALT(dk.A), CTL(dk.S), SFT(dk.T),       T(dk.G),                  T(dk.M), SFT(dk.N),   CTL(dk.E), ALT(dk.I),    T(dk.Y),
          T(dk.Z),       T(dk.X),   T(dk.C),   T(dk.D),       T(dk.V),                  T(dk.J),   T(dk.H), T(dk.COMM), T(dk.DOT),     T(dk.Z),
-                                   C(us.ENTER, CUSTOM_HOLD_LEFT),    C(us.ENTER, CUSTOM_HOLD_LEFT),          C( us.SPACE, CUSTOM_HOLD_RIGHT), C( us.SPACE, CUSTOM_HOLD_RIGHT)   
+                                   TC(CUSTOM_TAP_DUAL_SHIFT_TAP_KVM_SWITCH),    C(us.ENTER, CUSTOM_HOLD_LEFT),          C( us.SPACE, CUSTOM_HOLD_RIGHT), C( us.SPACE, CUSTOM_HOLD_RIGHT)   
     },
     // L_ARROWS
     .{
@@ -286,7 +286,7 @@ const CUSTOM_TAP_ALT_TAB: u8 = 4;
 
 const CUSTOM_HOLD_LEFT: u8 = 1;
 const CUSTOM_HOLD_RIGHT: u8 = 2;
-
+const CUSTOM_TAP_DUAL_SHIFT_TAP_KVM_SWITCH: u8 = 5;
 fn custom_key(custom_key_val: u8) core.KeyDef {
     return core.KeyDef{
         .tap_only = .{ .custom = custom_key_val },
@@ -334,6 +334,12 @@ fn on_event(event: core.ProcessorEvent, layers: *core.LayerActivations, output_q
                     output_queue.set_mods(mods) catch {};
                 }
                 output_queue.tap_key(us.TAB) catch {};
+            }
+            if (data.tap.custom == CUSTOM_TAP_DUAL_SHIFT_TAP_KVM_SWITCH) {
+                output_queue.set_mods(.{ .left_shift = true }) catch {};
+                output_queue.set_mods(.{ .left_shift = false }) catch {};
+                output_queue.set_mods(.{ .left_shift = true }) catch {};
+                output_queue.set_mods(.{ .left_shift = false }) catch {};
             }
         },
         .OnTapEnterBefore => |data| {
