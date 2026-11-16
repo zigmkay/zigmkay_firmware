@@ -29,7 +29,7 @@ pub const keymap = [_][key_count]?core.KeyDef{
          T(dk.Q), AF_slow(dk.W), GUI(dk.R),   T(dk.P), AF_slow(dk.B),                  T(dk.K),   T(dk.L),   GUI(dk.O),   T(dk.U), T(dk.QUOT),
          T(dk.F),     ALT(dk.A), CTL(dk.S), SFT(dk.T),       T(dk.G),                  T(dk.M), SFT(dk.N),   CTL(dk.E), ALT(dk.I),    T(dk.Y),
          T(dk.Z),       T(dk.X),   T(dk.C),   T(dk.D),       T(dk.V),                  T(dk.J),   T(dk.H), T(dk.COMM), T(dk.DOT),     T(dk.Z),
-                                   TC(CUSTOM_TAP_DUAL_SHIFT_TAP_KVM_SWITCH),    C(us.ENTER, CUSTOM_HOLD_LEFT),          C( us.SPACE, CUSTOM_HOLD_RIGHT), C( us.SPACE, CUSTOM_HOLD_RIGHT)   
+                                   T(dk.A),    C(us.ENTER, CUSTOM_HOLD_LEFT),          C( us.SPACE, CUSTOM_HOLD_RIGHT), C( us.SPACE, CUSTOM_HOLD_RIGHT)   
     },
     // L_ARROWS
     .{

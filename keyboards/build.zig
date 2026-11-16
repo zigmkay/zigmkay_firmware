@@ -24,6 +24,7 @@ const keyboard_samples = [_]KeyboardSample{
     .{ .name = "lk2", .root_source_file = "my_keyboards/rollercole/leonardo_keycaprio_0_2.zig" },
     .{ .name = "lk6", .root_source_file = "my_keyboards/rollercole/leonardo_keycaprio_0_6.zig" },
     .{ .name = "lk7", .root_source_file = "my_keyboards/rollercole/leonardo_keycaprio_0_7.zig" },
+    .{ .name = "lk8", .root_source_file = "my_keyboards/rollercole/leonardo_keycaprio_0_8.zig" },
     .{ .name = "encoder_demo", .root_source_file = "my_keyboards/rollercole/encoder_demo.zig" },
     .{ .name = "dasbob", .root_source_file = "examples/dasbob/main.zig" },
     .{ .name = "tuckytwotimes", .root_source_file = "my_keyboards/rollercole/tuckytwotimes.zig" },
