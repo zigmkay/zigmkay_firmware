@@ -12,6 +12,8 @@ const microzig = @import("microzig");
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const UartClient = @import("split_communication.zig").UartClient;
+const companion = @import("companion.zig");
+const usb_if = @import("usb_if.zig");
 
 fn CreatePrimaryConfig(comptime dimensions: *const core.KeymapDimensions) type {
     return struct {
@@ -98,9 +100,18 @@ fn run_primary_internal(
     // uart byte queue
     var uart_receiver = split_protocol.UartReceiveHelper{};
 
+    // Live link to a companion app, idle until the host connects
+    var companion_session = companion.Session.init(.{
+        .key_count = dimensions.key_count,
+        .layer_count = dimensions.layer_count,
+        .keymap_id = config.custom_functions.companion_keymap_id,
+    });
+
     // USB events
     const usb_command_executor = usb.CreateAndInitUsbCommandExecutor();
     while (true) {
+        const unprocessed_count = matrix_change_queue.Count();
+
         // Detect local changes
         const current_time = core.TimeSinceBoot{ .time_since_boot_us = time.get_time_since_boot().to_us() };
         try matrix_scanner.DetectKeyboardChanges(&matrix_change_queue, current_time); // Scan local matrix changes
@@ -111,11 +122,25 @@ fn run_primary_internal(
             try receive_from_uart_to_queue(uart, &uart_receiver, &matrix_change_queue, &encoder_change_queue, current_time);
         }
 
+        // Report new matrix changes as they happen, before tap/hold decisions delay them
+        const layer = processor.layers_activations.get_top_most_active_layer();
+        for (matrix_change_queue.peek_all()[unprocessed_count..]) |change| {
+            companion_session.key_event(change.pressed, change.key_index, layer, usb_command_queue.get_current_modifiers());
+        }
+
         // Processing: decide actions
         try processor.Process(current_time);
+        companion_session.update_state(processor.layers_activations.get_top_most_active_layer(), usb_command_queue.get_current_modifiers());
 
         // Execute actions: send usb commands to the host
         try usb_command_executor.HouseKeepAndProcessCommands(&usb_command_queue, current_time);
+
+        if (usb_if.receive_raw_report()) |report| {
+            if (companion_session.receive(&report) == .enter_bootloader) rp2xxx.rom.reset_to_usb_boot();
+        }
+        if (companion_session.next_report()) |report| {
+            if (usb_if.try_send_raw_report(&report)) companion_session.sent();
+        }
     }
 }
 
