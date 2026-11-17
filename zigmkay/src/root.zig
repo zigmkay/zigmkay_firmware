@@ -6,6 +6,7 @@ pub const usb = @import("usb_command_executor.zig");
 pub const encoder_scanning = @import("encoder_scanning.zig");
 pub const macros = @import("macros.zig");
 pub const combo = @import("combo.zig");
+pub const companion = @import("companion.zig");
 pub const loops = @import("loops.zig");
 pub const split_communication = @import("split_communication.zig");
 pub const split_protocol = @import("split_protocol.zig");

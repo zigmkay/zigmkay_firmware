@@ -267,7 +267,18 @@ pub fn send_mouse_report(report: *const MouseInReport) void {
 
 /// Pushes a custom 32-byte payload to the RAWHID interface for companion app signalling
 pub fn send_raw_report(report: *const RawHidReport) void {
-    if (usb_controller.drivers()) |drivers| {
-        _ = drivers.rawhid.send_report(report);
-    }
+    _ = try_send_raw_report(report);
+}
+
+/// Like `send_raw_report`, but returns false instead of dropping the report
+/// while the host has not read the previous one.
+pub fn try_send_raw_report(report: *const RawHidReport) bool {
+    const drivers = usb_controller.drivers() orelse return false;
+    return drivers.rawhid.send_report(report);
+}
+
+/// Returns a report the host sent to the RAWHID interface, if one arrived.
+pub fn receive_raw_report() ?RawHidReport {
+    const drivers = usb_controller.drivers() orelse return null;
+    return drivers.rawhid.receive_report();
 }
