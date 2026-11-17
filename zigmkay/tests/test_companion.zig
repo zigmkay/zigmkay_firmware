@@ -116,3 +116,38 @@ test "companion session asks for the bootloader and ignores unknown commands" {
     try std.testing.expectEqual(.none, session.receive(&unknown));
     try std.testing.expectEqual(null, session.next_report());
 }
+
+test "companion session reports companion signals from tap and hold decisions" {
+    var session = companion.Session.init(info);
+    _ = session.receive(&command(.connect));
+    _ = take(&session);
+    _ = take(&session);
+
+    const overlay_hold = core.HoldDef{ .custom = core.CUSTOM_ID_COMPANION_TOGGLE };
+    session.processor_event(.{ .OnHoldEnterAfter = .{ .hold = overlay_hold } });
+    session.processor_event(.{ .OnHoldExitBefore = .{ .hold = overlay_hold } });
+    session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .custom = core.CUSTOM_ID_COMPANION_SHUTDOWN } } });
+    session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .key_press = core.KC_COMPANION } } });
+
+    const signal = @backingInt(companion.MessageId.signal);
+    const overlay = @backingInt(companion.Signal.overlay_toggle);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 1, overlay, 1 }, take(&session).?[0..4]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 2, overlay, 0 }, take(&session).?[0..4]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 3, @backingInt(companion.Signal.shutdown), 1 }, take(&session).?[0..4]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 4, overlay, 1 }, take(&session).?[0..4]);
+    try std.testing.expectEqual(null, session.next_report());
+}
+
+test "companion session ignores ordinary keys and signals while disconnected" {
+    var session = companion.Session.init(info);
+    session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .custom = core.CUSTOM_ID_COMPANION_TOGGLE } } });
+    try std.testing.expectEqual(null, session.next_report());
+
+    _ = session.receive(&command(.connect));
+    _ = take(&session);
+    _ = take(&session);
+    session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .custom = 7 } } });
+    session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .key_press = .{ .tap_keycode = 0x04 } } } });
+    session.processor_event(.{ .OnHoldEnterAfter = .{ .hold = .{ .hold_layer = 1 } } });
+    try std.testing.expectEqual(null, session.next_report());
+}

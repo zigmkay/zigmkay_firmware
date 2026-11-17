@@ -90,22 +90,23 @@ fn run_primary_internal(
     var matrix_scanner = comptime matrix_scanning.CreateMatrixScannerType(dimensions, config.scanner_settings){};
     var encoder_scanner = comptime encoder_scanning.CreateEncoderScannerType(config.encoder_pin_configs){};
 
-    // Processing
-    var processor = processing.CreateProcessorType(dimensions, config.keymap, config.side_definition, config.combos, config.custom_functions, config.encoder_actions, config.matrix_event_trace){
-        .input_matrix_changes = &matrix_change_queue,
-        .output_usb_commands = &usb_command_queue,
-        .encoder_event_changes = &encoder_change_queue,
-    };
-
-    // uart byte queue
-    var uart_receiver = split_protocol.UartReceiveHelper{};
-
     // Live link to a companion app, idle until the host connects
     var companion_session = companion.Session.init(.{
         .key_count = dimensions.key_count,
         .layer_count = dimensions.layer_count,
         .keymap_id = config.custom_functions.companion_keymap_id,
     });
+
+    // Processing
+    var processor = processing.CreateProcessorType(dimensions, config.keymap, config.side_definition, config.combos, config.custom_functions, config.encoder_actions, config.matrix_event_trace){
+        .input_matrix_changes = &matrix_change_queue,
+        .output_usb_commands = &usb_command_queue,
+        .encoder_event_changes = &encoder_change_queue,
+        .companion_session = &companion_session,
+    };
+
+    // uart byte queue
+    var uart_receiver = split_protocol.UartReceiveHelper{};
 
     // USB events
     const usb_command_executor = usb.CreateAndInitUsbCommandExecutor();

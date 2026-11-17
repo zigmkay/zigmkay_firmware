@@ -14,6 +14,10 @@
 //!   0x21 state  [1]=seq [2]=top layer [3]=modifiers [4..6]=active layers, one bit per layer
 //!               (little endian) [6..22]=pressed keys, one bit per key index
 //!   0x22 key    [1]=seq [2]=pressed [3]=key index [4]=layer [5]=modifiers
+//!   0x23 signal [1]=seq [2]=signal (1 log toggle, 2 overlay toggle, 3 shutdown) [3]=pressed
+//!
+//! Signals come from keys bound to the reserved CUSTOM_ID_COMPANION_* ids (as tap
+//! or hold) or to KC_COMPANION / KC_SHUTDOWN_COMPANION, after tap/hold decisions.
 //!
 //! A state report is sent after connecting, whenever the layer or modifiers
 //! change, and after key events were dropped because the host stopped reading.
@@ -35,6 +39,13 @@ pub const MessageId = enum(u8) {
     hello = 0x20,
     state = 0x21,
     key = 0x22,
+    signal = 0x23,
+};
+
+pub const Signal = enum(u8) {
+    log_toggle = 1,
+    overlay_toggle = 2,
+    shutdown = 3,
 };
 
 pub const Info = struct {
@@ -45,12 +56,34 @@ pub const Info = struct {
 
 pub const Action = enum { none, enter_bootloader };
 
-const KeyEvent = struct {
-    pressed: bool,
-    key_index: core.KeyIndex,
-    layer: core.LayerIndex,
-    modifiers: u8,
+const Event = union(enum) {
+    key: struct {
+        pressed: bool,
+        key_index: core.KeyIndex,
+        layer: core.LayerIndex,
+        modifiers: u8,
+    },
+    signal: struct { signal: Signal, pressed: bool },
 };
+
+fn custom_signal(id: ?u8) ?Signal {
+    return switch (id orelse return null) {
+        core.CUSTOM_ID_COMPANION_LOG_TOGGLE => .log_toggle,
+        core.CUSTOM_ID_COMPANION_TOGGLE => .overlay_toggle,
+        core.CUSTOM_ID_COMPANION_SHUTDOWN => .shutdown,
+        else => null,
+    };
+}
+
+fn tap_signal(tap: core.TapDef) ?Signal {
+    if (custom_signal(tap.custom)) |signal| return signal;
+    const key = tap.key_press orelse return null;
+    return switch (key.tap_keycode) {
+        core.special_keycode_COMPANION => .overlay_toggle,
+        core.special_keycode_SHUTDOWN_COMPANION => .shutdown,
+        else => null,
+    };
+}
 
 pub const Session = struct {
     info: Info,
@@ -62,7 +95,7 @@ pub const Session = struct {
     active_layers: u16 = 1,
     modifiers: u8 = 0,
     pressed_keys: [16]u8 = @splat(0),
-    events: [32]KeyEvent = undefined,
+    events: [32]Event = undefined,
     event_start: usize = 0,
     event_count: usize = 0,
 
@@ -94,6 +127,27 @@ pub const Session = struct {
     pub fn key_event(self: *Session, pressed: bool, key_index: core.KeyIndex, layer: core.LayerIndex, modifiers: core.Modifiers) void {
         const bit = @as(u8, 1) << @intCast(key_index % 8);
         if (pressed) self.pressed_keys[key_index / 8] |= bit else self.pressed_keys[key_index / 8] &= ~bit;
+        self.push(.{ .key = .{
+            .pressed = pressed,
+            .key_index = key_index,
+            .layer = layer,
+            .modifiers = modifiers.toByte(),
+        } });
+    }
+
+    /// Records companion signals from the processor's tap and hold decisions.
+    pub fn processor_event(self: *Session, event: core.ProcessorEvent) void {
+        const signal: Signal, const pressed = switch (event) {
+            .OnTapEnterAfter => |e| .{ tap_signal(e.tap) orelse return, true },
+            .OnTapExitBefore => |e| .{ tap_signal(e.tap) orelse return, false },
+            .OnHoldEnterAfter => |e| .{ custom_signal(e.hold.custom) orelse return, true },
+            .OnHoldExitBefore => |e| .{ custom_signal(e.hold.custom) orelse return, false },
+            else => return,
+        };
+        self.push(.{ .signal = .{ .signal = signal, .pressed = pressed } });
+    }
+
+    fn push(self: *Session, event: Event) void {
         if (!self.connected) return;
         if (self.event_count == self.events.len) {
             // The host stopped reading. Drop the backlog and resynchronise with a state report.
@@ -101,12 +155,7 @@ pub const Session = struct {
             self.state_pending = true;
             return;
         }
-        self.events[(self.event_start + self.event_count) % self.events.len] = .{
-            .pressed = pressed,
-            .key_index = key_index,
-            .layer = layer,
-            .modifiers = modifiers.toByte(),
-        };
+        self.events[(self.event_start + self.event_count) % self.events.len] = event;
         self.event_count += 1;
     }
 
@@ -137,13 +186,21 @@ pub const Session = struct {
             report[3] = self.info.layer_count;
             report[4..20].* = self.info.keymap_id;
         } else if (self.event_count > 0) {
-            const event = self.events[self.event_start];
-            report[0] = @backingInt(MessageId.key);
             report[1] = self.sequence;
-            report[2] = @intFromBool(event.pressed);
-            report[3] = event.key_index;
-            report[4] = event.layer;
-            report[5] = event.modifiers;
+            switch (self.events[self.event_start]) {
+                .key => |key| {
+                    report[0] = @backingInt(MessageId.key);
+                    report[2] = @intFromBool(key.pressed);
+                    report[3] = key.key_index;
+                    report[4] = key.layer;
+                    report[5] = key.modifiers;
+                },
+                .signal => |signal| {
+                    report[0] = @backingInt(MessageId.signal);
+                    report[2] = @backingInt(signal.signal);
+                    report[3] = @intFromBool(signal.pressed);
+                },
+            }
         } else if (self.state_pending) {
             report[0] = @backingInt(MessageId.state);
             report[1] = self.sequence;
