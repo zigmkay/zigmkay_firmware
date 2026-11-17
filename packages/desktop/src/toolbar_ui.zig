@@ -34,8 +34,8 @@ pub fn draw(view: *View, model: *const desktop.model.Model, frame: Frame) !?desk
     const doc = model.document();
     var result: ?desktop.editor_dispatch.Request = null;
     ui.label(theme, "Zigmkay", .{ .x = 20, .y = 21, .w = 140, .h = 30 }, 23);
-    ui.label(theme, "Keyboard", .{ .x = 140, .y = 7, .w = 85, .h = 18 }, 11);
-    ui.label(theme, frame.board_name, .{ .x = 140, .y = 25, .w = 80, .h = 30 }, 13);
+    if (ui.button(theme, "Keyboards", "keyboard.collection", .{ .x = 130, .y = 1, .w = 95, .h = 30 }) and result == null) result = try desktop.editor_dispatch.Request.capture(model, .{ .open = .keyboards });
+    ui.label(theme, frame.board_name, .{ .x = 135, .y = 33, .w = 90, .h = 18 }, 11);
     ui.label(theme, frame.connection, .{ .x = 230, .y = 25, .w = 165, .h = 25 }, 12);
     if (frame.profiles.len != 0) {
         const names = try dvui.currentWindow().arena().alloc([]const u8, frame.profiles.len);

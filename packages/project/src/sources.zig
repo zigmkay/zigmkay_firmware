@@ -41,6 +41,7 @@ fn imports(gpa: std.mem.Allocator, path: []const u8, bytes: []const u8) ![][]u8 
         if (token.tag == .eof) break;
         if (token.tag != .builtin) continue;
         const builtin_name = text[token.loc.start..token.loc.end];
+        if (std.mem.eql(u8, builtin_name, "@cImport")) return error.CImportUnsupported;
         const embed = std.mem.eql(u8, builtin_name, "@embedFile");
         if (!embed and !std.mem.eql(u8, builtin_name, "@import")) continue;
         if (tokenizer.next().tag != .l_paren) return error.InvalidImport;
@@ -98,7 +99,26 @@ pub fn capture(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, entry: []con
         };
         if (seen) continue;
         if (sources.items.len >= p.Limits.source_files) return error.SourceLimit;
-        const bytes = try dir.readFileAlloc(io, path, a, .limited(p.Limits.source_bytes - total));
+        // Walk literal components without following directory or file links.
+        // A source closure must remain inside its explicitly selected root.
+        var parent = dir;
+        var owns_parent = false;
+        defer if (owns_parent) parent.close(io);
+        var parts = std.mem.splitScalar(u8, path, '/');
+        var name = parts.next().?;
+        while (parts.next()) |next| {
+            const child = try parent.openDir(io, name, .{ .follow_symlinks = false });
+            if (owns_parent) parent.close(io);
+            parent = child;
+            owns_parent = true;
+            name = next;
+        }
+        const input = try parent.openFile(io, name, .{ .follow_symlinks = false, .allow_directory = false });
+        defer input.close(io);
+        if ((try input.stat(io)).kind != .file) return error.UnsupportedSourceKind;
+        var buffer: [4096]u8 = undefined;
+        var reader = input.reader(io, &buffer);
+        const bytes = try reader.interface.allocRemaining(a, .limited(p.Limits.source_bytes - total));
         total += bytes.len;
         try sources.append(a, .{ .callback_index = 0, .path = path, .bytes = bytes });
         const dependencies = try imports(a, path, bytes);

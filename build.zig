@@ -7,6 +7,13 @@ pub fn build(b: *std.Build) void {
         @panic("zigmkay_companion requires exactly Zig 0.17.0");
     // Register command-line options before lazy dependencies can suspend setup.
     const application_bundle = b.option(bool, "application-bundle", "Include the compiler, firmware closure and prebuilt flash tools") orelse false;
+    const native_only = b.option(bool, "native-only", "Skip embedded preparation for native tools") orelse false;
+    const selected_export = b.option([]const u8, "project-export", "Absolute frozen project export directory");
+    const selected_board = b.option([]const u8, "project-board", "Authoritative selected firmware board selector");
+    const prepare_firmware = b.option(bool, "firmware-check", "Prepare downstream embedded build dependencies") orelse false;
+    const prepare_imports = b.option(bool, "import-check", "Compile the pinned import firmware matrix") orelse false;
+    const prepare_catalog = b.option(bool, "catalog-check", "Prepare all-board synthetic project firmware matrix explicitly") orelse false;
+    const actual_defaults = b.option(bool, "catalog-defaults", "Compile actual selected defaults instead of synthetic catalog fixtures") orelse false;
 
     const check = b.step("check", "Compile downstream processor contract without device access");
     b.default_step = check;
@@ -181,6 +188,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("packages/layout-model/src/root.zig"),
         .imports = &.{.{ .name = "zigmkay", .module = firmware.module("zigmkay") }},
     });
+    @import("packages/importer/build.zig").add(b, firmware.module("zigmkay"), keycode_module, model);
     const processor_tests = b.addTest(.{ .root_module = b.createModule(.{
         .root_source_file = b.path("tests/processor_contract.zig"),
         .target = b.graph.host,
@@ -213,6 +221,7 @@ pub fn build(b: *std.Build) void {
     const project_build = b.step("build-project", "Build an explicit verified export into UF2 and native runner without device access");
     const hardware_client = b.step("prepare-hardware-client", "Compile/install explicit native HID acceptance client without device access");
     var project_module: ?*std.Build.Module = null;
+    var import_fixtures: []const @import("packages/importer/fixtures.zig").Fixture = &.{};
     if (@hasDecl(api, "device_protocol_version")) {
         const protocol = b.addModule("device-protocol", .{
             .root_source_file = b.path("packages/firmware-adapter/src/protocol.zig"),
@@ -489,11 +498,33 @@ pub fn build(b: *std.Build) void {
                 .imports = &.{ .{ .name = "catalog", .module = catalog }, .{ .name = "project", .module = project }, .{ .name = "layout-model", .module = model } },
             });
             const adapter_tests = b.addTest(.{ .root_module = catalog_project });
+            const importer = b.addModule("keymap-importer", .{ .root_source_file = b.path("packages/importer/src/root.zig"), .target = b.graph.host, .imports = &.{ .{ .name = "project", .module = project }, .{ .name = "catalog-project", .module = catalog_project }, .{ .name = "catalog", .module = catalog }, .{ .name = "layout-model", .module = model }, .{ .name = "companion-jobs", .module = jobs } } });
+            desktop_core.addImport("keymap-importer", importer);
+            const onboarding_tests = b.addTest(.{ .root_module = b.createModule(.{ .root_source_file = b.path("tests/onboarding.zig"), .target = b.graph.host, .imports = &.{ .{ .name = "desktop-core", .module = desktop_core }, .{ .name = "project", .module = project } } }) });
+            const onboarding_step = b.step("test-onboarding", "Validate all-board project creation, portable collections and cancellation offline");
+            onboarding_step.dependOn(&b.addRunArtifact(onboarding_tests).step);
+            check.dependOn(&onboarding_tests.step);
+            tests.dependOn(onboarding_step);
+            const importer_tests = b.addTest(.{ .root_module = importer });
+            const importer_options = b.addOptions();
+            importer_options.addOption([]const u8, "repository", b.root.toString(b.allocator) catch @panic("OOM"));
+            importer_options.addOption([]const u8, "compiler", b.graph.zig_exe);
+            importer_options.addOptionPathUntracked("packages", b.path("zig-pkg"));
+            importer_options.addOptionPathUntracked("compiler_cache", .{ .relative = .{ .base = .global_cache } });
+            importer.addOptions("test-options", importer_options);
+            const import_tests = b.step("test-import", "Validate one-way import, archive bounds and destination ownership offline");
+            import_tests.dependOn(&b.addRunArtifact(importer_tests).step);
+            tests.dependOn(import_tests);
+            check.dependOn(&importer_tests.step);
             const bundle_check = b.addExecutable(.{ .name = "check-application-bundle", .root_module = b.createModule(.{
                 .root_source_file = b.path("tools/check_application_bundle.zig"),
                 .target = b.graph.host,
                 .imports = &.{ .{ .name = "desktop-core", .module = desktop_core }, .{ .name = "project", .module = project }, .{ .name = "catalog-project", .module = catalog_project }, .{ .name = "companion-jobs", .module = jobs }, .{ .name = "catalog-inventory", .module = catalog } },
             }) });
+            for ([_][]const u8{ "us", "de" }) |name| {
+                bundle_check.root_module.addAnonymousImport(b.fmt("import-{s}", .{name}), .{ .root_source_file = b.path(b.fmt("tests/fixtures/import/{s}/src/keymap.zig", .{name})) });
+                bundle_check.root_module.addAnonymousImport(b.fmt("import-{s}-manifest", .{name}), .{ .root_source_file = b.path(b.fmt("tests/fixtures/import/{s}/build.zig.zon", .{name})) });
+            }
             const install_check = b.addInstallArtifact(bundle_check, .{});
             b.step("build-bundle-check", "Build the offline application acceptance utility").dependOn(&install_check.step);
             const flash_session_tests = b.addTest(.{ .root_module = b.createModule(.{
@@ -519,6 +550,9 @@ pub fn build(b: *std.Build) void {
             check.dependOn(&bootloader_gate_tests.step);
             check.dependOn(&flash_dispatch_tests.step);
             if (desktop_graph) |graph| {
+                const onboarding_ui = b.createModule(.{ .root_source_file = b.path("packages/desktop/src/onboarding_ui.zig"), .target = b.graph.host, .imports = &.{ .{ .name = "desktop-core", .module = desktop_core }, .{ .name = "project", .module = project }, .{ .name = "dvui", .module = graph.dvui }, .{ .name = "editor-ui", .module = graph.ui } } });
+                const onboarding_state_tests = b.addTest(.{ .root_module = onboarding_ui });
+                b.step("test-onboarding-state", "Reject stale wizard settings and project ownership without filesystem publication").dependOn(&b.addRunArtifact(onboarding_state_tests).step);
                 const installed_paths = b.createModule(.{ .root_source_file = b.path("packages/platform/src/app_paths.zig"), .target = b.graph.host });
                 const app = b.addExecutable(.{ .name = "zigmkay-companion", .root_module = b.createModule(.{
                     .root_source_file = b.path("apps/desktop/main.zig"),
@@ -601,6 +635,7 @@ pub fn build(b: *std.Build) void {
                 app.root_module.addImport("companion-window", companion_window);
                 const overlay_tests = b.addTest(.{ .root_module = companion_window });
                 b.step("test-companion-placement", "Validate optional overlay bounds without creating a window").dependOn(&b.addRunArtifact(overlay_tests).step);
+                app.root_module.addImport("onboarding-ui", onboarding_ui);
                 desktop_app = app;
                 app.root_module.addImport("practice-ui", b.modules.get("practice-ui").?);
                 app.root_module.addImport("editor-ui", graph.ui);
@@ -623,6 +658,13 @@ pub fn build(b: *std.Build) void {
                 launch_fixture.setEnvironmentVariable("SDL_VIDEODRIVER", "dummy");
                 launch_fixture.setEnvironmentVariable("SDL_RENDER_DRIVER", "software");
                 b.step("test-desktop-launch", "Launch bounded dummy/software frames without native source or device access").dependOn(&launch_fixture.step);
+                for ([_]struct { flag: []const u8, frames: []const u8, step: []const u8 }{ .{ .flag = "--offline-onboarding-frames", .frames = "24", .step = "test-desktop-onboarding" }, .{ .flag = "--offline-catalog-frames", .frames = "56", .step = "test-desktop-catalog" } }) |fixture| {
+                    const run = b.addRunArtifact(app);
+                    run.addArgs(&.{ fixture.flag, fixture.frames });
+                    run.setEnvironmentVariable("SDL_VIDEODRIVER", "dummy");
+                    run.setEnvironmentVariable("SDL_RENDER_DRIVER", "software");
+                    b.step(fixture.step, "Validate keyboard onboarding/catalog native UI without devices").dependOn(&run.step);
+                }
                 const status_fixture = b.addRunArtifact(app);
                 status_fixture.addArgs(&.{ "--offline-status-frames", "24" });
                 status_fixture.setEnvironmentVariable("SDL_VIDEODRIVER", "dummy");
@@ -711,6 +753,13 @@ pub fn build(b: *std.Build) void {
             .imports = &.{ .{ .name = "zigmkay", .module = firmware.module("zigmkay") }, .{ .name = "owned-zon", .module = owned_zon } },
         });
         const processor_fixture = @import("packages/runner/build.zig").tests(b, runner_tests, check, firmware.module("zigmkay"), project, default_profile, jobs, runner_protocol, owned_zon);
+        const native_step = b.step("build-runner", "Build a native tutor runner without preparing embedded firmware");
+        if (b.modules.get("keymap-importer")) |importer| import_fixtures = @import("packages/importer/fixtures.zig").add(b, importer, project, firmware.module("zigmkay"), keycodes, model, runner_protocol);
+        if (native_only and selected_export != null) {
+            const selected = @import("packages/project/src/build_input.zig").load(b, selected_export.?, firmware.module("zigmkay"), keycodes, model) catch |err| @panic(@errorName(err));
+            const native_runner = @import("packages/runner/build.zig").runner(b, "project-runner", firmware.module("zigmkay"), selected.module, runner_protocol, selected.snapshot_id);
+            native_step.dependOn(&b.addInstallArtifact(native_runner, .{}).step);
+        } else native_step.dependOn(&b.addFail("build-runner requires native-only=true and an absolute project-export").step);
         if (desktop_app) |app| {
             const manifest_fixture = b.addExecutable(.{ .name = "runner-manifest-fixture", .root_module = b.createModule(.{
                 .root_source_file = b.path("packages/runner/src/manifest_fixture.zig"),
@@ -823,15 +872,29 @@ pub fn build(b: *std.Build) void {
     }
     const firmware_check = b.step("firmware-check", "Compile generated LK7, split and encoder keymaps (explicit preparation)");
     const catalog_firmware = b.step("catalog-firmware-check", "Compile all selected boards with schema-1 synthetic indexed exports offline");
+    const imported_firmware = b.step("import-firmware-check", "Compile both pinned imports for Keycaprio 0.6 and 0.7 without devices");
     const candidate = b.step("prepare-usb-candidate", "Prepare offline LK7 telemetry UF2 and identity/hash inventory");
-    if (b.option(bool, "firmware-check", "Prepare downstream embedded build dependencies") orelse false) {
+    if (prepare_firmware) {
         if (@hasDecl(api, "addKeyboardFirmware")) {
             const mz = b.lazyImport(@This(), "microzig") orelse return;
             const mz_dep = b.lazyDependency("microzig", .{}) orelse return;
             const MicroBuild = mz.MicroBuild(.{ .rp2xxx = true });
             const mb = MicroBuild.init(b, mz_dep) orelse return;
             const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*;
-            if (b.option(bool, "catalog-check", "Prepare all-board synthetic project firmware matrix explicitly") orelse false) {
+            if (prepare_imports) {
+                for (import_fixtures) |fixture| {
+                    const board = api.boards.find(fixture.selector).?;
+                    const item = api.addKeyboardFirmware(b, mb, &target, .ReleaseSafe, "imported", board, .{ .keyboards = firmware.path("keyboards"), .processor = firmware.path("zigmkay/src/root.zig"), .keycodes = firmware.path("zkeycodes/root.zig"), .companion_enabled = true }, null);
+                    const processor = item.exe.root_module.import_table.get("zigmkay").?;
+                    const keycodes = item.exe.root_module.import_table.get("zkeycodes").?;
+                    const embedded_model = b.createModule(.{ .root_source_file = b.path("packages/layout-model/src/root.zig"), .imports = &.{.{ .name = "zigmkay", .module = processor }} });
+                    const selected = @import("packages/importer/fixtures.zig").module(b, fixture.export_root, processor, keycodes, embedded_model);
+                    selected.addImport("microzig", item.core_mod);
+                    item.add_app_import("keymap", selected, .{});
+                    imported_firmware.dependOn(&item.exe.step);
+                }
+            }
+            if (prepare_catalog) {
                 const catalog_project = b.modules.get("catalog-project") orelse @panic("Catalog firmware check requires the board inventory");
                 const exporter = b.addExecutable(.{ .name = "catalog-firmware-export", .root_module = b.createModule(.{
                     .root_source_file = b.path("tools/catalog_export.zig"),
@@ -839,7 +902,6 @@ pub fn build(b: *std.Build) void {
                     .imports = &.{ .{ .name = "catalog-project", .module = catalog_project }, .{ .name = "project", .module = project_module.? } },
                 }) });
                 const matrix = b.addWriteFiles();
-                const actual_defaults = b.option(bool, "catalog-defaults", "Compile actual selected defaults instead of synthetic catalog fixtures") orelse false;
                 for (api.boards.entries) |board| {
                     const generate = b.addRunArtifact(exporter);
                     generate.addArg(board.name);
@@ -863,8 +925,8 @@ pub fn build(b: *std.Build) void {
                 catalog_firmware.dependOn(&matrix.step);
             } else catalog_firmware.dependOn(&b.addFail("Pass catalog-check=true and firmware-check=true to prepare the all-board matrix").step);
             if (b.option(bool, "project-build", "Compile an explicitly verified project export") orelse false) {
-                const export_path = b.option([]const u8, "project-export", "Absolute frozen project export directory") orelse @panic("project-build requires project-export");
-                const board_name = b.option([]const u8, "project-board", "Authoritative selected firmware board selector") orelse @panic("project-build requires project-board");
+                const export_path = selected_export orelse @panic("project-build requires project-export");
+                const board_name = selected_board orelse @panic("project-build requires project-board");
                 const board = api.boards.find(board_name) orelse @panic("Unknown firmware board selector");
                 const selector = @import("packages/project/src/build_input.zig");
                 const keycodes = b.createModule(.{ .root_source_file = firmware.path("zkeycodes/root.zig"), .imports = &.{.{ .name = "zigmkay", .module = firmware.module("zigmkay") }} });

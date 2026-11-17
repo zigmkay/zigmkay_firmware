@@ -28,3 +28,9 @@ jobs:
       - name: Test portable contracts (no device access)
         timeout-minutes: 15
         run: zig build test -j2 --test-timeout 180s
+      - name: Compare pinned imported processor traces and native runners (local fixtures only)
+        run: zig build test-import-processors -j2 --test-timeout 180s --summary all
+      - name: Compile synthetic, default and imported firmware matrices without devices
+        run: |
+          zig build catalog-firmware-check import-firmware-check -Dfirmware-check=true -Dcatalog-check=true -Dimport-check=true -j2 --summary all
+          zig build catalog-firmware-check -Dfirmware-check=true -Dcatalog-check=true -Dcatalog-defaults=true -j2 --summary all

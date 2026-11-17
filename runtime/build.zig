@@ -8,6 +8,20 @@ pub fn build(b: *std.Build) void {
     const board_option = b.option([]const u8, "project-board", "Board selector");
     const api = b.lazyImport(@This(), "zigmkay_firmware") orelse return;
     const fw = b.lazyDependency("zigmkay_firmware", .{}) orelse return;
+    const native_keycodes = b.createModule(.{ .root_source_file = fw.path("zkeycodes/root.zig"), .imports = &.{.{ .name = "zigmkay", .module = fw.module("zigmkay") }} });
+    const native_model = b.createModule(.{ .root_source_file = b.path("packages/layout-model/src/root.zig"), .imports = &.{.{ .name = "zigmkay", .module = fw.module("zigmkay") }} });
+    @import("packages/importer/build.zig").add(b, fw.module("zigmkay"), native_keycodes, native_model);
+    const runner_step = b.step("build-runner", "Build only the native tutor processor");
+    if (export_option) |path| {
+        const native = @import("packages/project/src/build_input.zig").load(b, path, fw.module("zigmkay"), native_keycodes, native_model) catch |err| @panic(@errorName(err));
+        const owned_zon = b.createModule(.{ .root_source_file = b.path("packages/project/src/owned_zon.zig") });
+        const protocol = b.createModule(.{ .root_source_file = b.path("packages/runner/src/protocol.zig"), .imports = &.{ .{ .name = "zigmkay", .module = fw.module("zigmkay") }, .{ .name = "owned-zon", .module = owned_zon } } });
+        const runner = @import("packages/runner/build.zig").runner(b, "project-runner", fw.module("zigmkay"), native.module, protocol, native.snapshot_id);
+        const install = b.addInstallArtifact(runner, .{});
+        runner_step.dependOn(&install.step);
+        step.dependOn(&install.step);
+    } else runner_step.dependOn(&b.addFail("build-runner requires an absolute project-export").step);
+    if (b.option(bool, "native-only", "Skip the embedded dependency graph") orelse false) return;
     const mz = b.lazyImport(@This(), "microzig") orelse return;
     const mz_dep = b.lazyDependency("microzig", .{}) orelse return;
     const MicroBuild = mz.MicroBuild(.{ .rp2xxx = true });
@@ -30,11 +44,4 @@ pub fn build(b: *std.Build) void {
     selected.module.addImport("microzig", item.core_mod);
     item.add_app_import("keymap", selected.module, .{});
     step.dependOn(&b.addInstallFile(item.get_emitted_bin(.{ .uf2 = .{ .family_id = .RP2040 } }), "firmware/project.uf2").step);
-    const native_keycodes = b.createModule(.{ .root_source_file = fw.path("zkeycodes/root.zig"), .imports = &.{.{ .name = "zigmkay", .module = fw.module("zigmkay") }} });
-    const native_model = b.createModule(.{ .root_source_file = b.path("packages/layout-model/src/root.zig"), .imports = &.{.{ .name = "zigmkay", .module = fw.module("zigmkay") }} });
-    const native = selector.load(b, path, fw.module("zigmkay"), native_keycodes, native_model) catch |err| @panic(@errorName(err));
-    const owned_zon = b.createModule(.{ .root_source_file = b.path("packages/project/src/owned_zon.zig") });
-    const protocol = b.createModule(.{ .root_source_file = b.path("packages/runner/src/protocol.zig"), .imports = &.{ .{ .name = "zigmkay", .module = fw.module("zigmkay") }, .{ .name = "owned-zon", .module = owned_zon } } });
-    const runner = @import("packages/runner/build.zig").runner(b, "project-runner", fw.module("zigmkay"), native.module, protocol, native.snapshot_id);
-    step.dependOn(&b.addInstallArtifact(runner, .{}).step);
 }

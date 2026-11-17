@@ -168,6 +168,11 @@ pub fn createSynthetic(gpa: std.mem.Allocator, owned_board: OwnedBoard) !OwnedPr
 /// registered bindings. No callback is executed while constructing the project.
 pub fn createDefault(gpa: std.mem.Allocator, owned_board: OwnedBoard) !OwnedProject {
     const data = catalog.defaultData(owned_board.entry.selector) orelse return error.UnknownSelector;
+    return createData(gpa, owned_board, data);
+}
+
+/// Shared lossless typed conversion for catalog templates and captured imports.
+pub fn createData(gpa: std.mem.Allocator, owned_board: OwnedBoard, data: catalog.DefaultData) !OwnedProject {
     var arena: std.heap.ArenaAllocator = .init(gpa);
     errdefer arena.deinit();
     const a = arena.allocator();

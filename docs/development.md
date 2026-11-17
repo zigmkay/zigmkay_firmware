@@ -74,6 +74,10 @@ in caches, and preserve personal projects and attached source bundles.
 
 - [Typing practice user guide](typing-practice.md): controls, metrics, data and evidence.
 - [Tutor package design](design/typing-practice-packages.md): boundaries and contracts.
+- [Keyboard onboarding and import design](design/keyboard-projects-and-import.md):
+  multi-keyboard collections, device-specific companion routing and source migration research.
+- [Keyboard projects user guide](keyboard-projects.md): creation, collections,
+  one-way import, native tutor preparation and hardware-free acceptance commands.
 - [Practice implementation](implementation/typing-practice.md): input and scoring.
 - [Practice data](implementation/practice-data.md), [rundown](implementation/practice-rundown.md),
   [progress](implementation/practice-progress.md), [timing diagnostics](implementation/practice-diagnostics.md),

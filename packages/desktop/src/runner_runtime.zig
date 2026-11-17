@@ -60,8 +60,15 @@ pub const Runtime = struct {
         const manifest = try self.selected(artifact, model, operation);
         var arena: std.heap.ArenaAllocator = .init(self.gpa);
         errdefer arena.deinit();
-        const codes = try host.lk7(model.document());
-        const binding = try p.owned_zon.clone(arena.allocator(), host.Binding{ .board_id = model.document().board_id, .key_ids = model.document().key_ids, .scancodes = &codes });
+        var legacy: [34]u32 = undefined;
+        const codes: []const u32 = if (host.lk7(model.document())) |value| blk: {
+            legacy = value;
+            break :blk &legacy;
+        } else |err| switch (err) {
+            error.HostMappingUnavailable => try @import("keymap-importer").hostScancodes(arena.allocator(), model.document()),
+            else => return err,
+        };
+        const binding = try p.owned_zon.clone(arena.allocator(), host.Binding{ .board_id = model.document().board_id, .key_ids = model.document().key_ids, .scancodes = codes });
         try self.router.installMapping(binding, model.document(), operation.snapshot);
         errdefer self.router.mapping = null;
         const owner = try runner.Owner.createVerified(self.gpa, self.io, manifest, manifest.record.inputs, .{ .generation = operation.generation, .snapshot = operation.snapshot }, model.document().key_ids.len, model.document().encoders.len, 5000);

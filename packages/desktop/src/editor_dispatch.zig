@@ -7,7 +7,7 @@ const inspector_action = @import("inspector_action.zig");
 const keys = @import("key_selection.zig");
 const layers = @import("layer_editor.zig");
 const chords = @import("chord_action.zig");
-pub const Open = enum { paths, combo, callback, editor, practice, encoders };
+pub const Open = enum { paths, combo, callback, editor, practice, encoders, keyboards };
 pub const Intent = union(enum) {
     select: struct { index: usize, extend: bool },
     layer: struct { kind: layers.Kind, target: p.LayerId, name: [129]u8 },

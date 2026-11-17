@@ -20,4 +20,4 @@ jobs:
       - name: Compile and link the native editor, DVUI, SDL3 and tray
         run: zig build build-desktop check-desktop-dependencies -Ddesktop-dependencies=true -Ddesktop-vectors=true -j2
       - name: Run offline GUI contracts without keyboard access
-        run: zig build test-editor-frame test-desktop-launch test-desktop-status test-desktop-practice test-desktop-rundown test-desktop-companion test-companion-placement -Ddesktop-dependencies=true -Ddesktop-vectors=true -j2 --test-timeout 180s
+        run: zig build test-editor-frame test-onboarding-state test-desktop-launch test-desktop-onboarding test-desktop-catalog test-desktop-status test-desktop-practice test-desktop-rundown test-desktop-companion test-companion-placement -Ddesktop-dependencies=true -Ddesktop-vectors=true -j2 --test-timeout 180s

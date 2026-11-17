@@ -1,6 +1,6 @@
 //! UI-thread correlation around the process-lifetime native chooser slot.
 const std = @import("std");
-pub const Target = enum { project, export_directory, callback_source };
+pub const Target = enum { project, export_directory, callback_source, onboarding_source, onboarding_location, onboarding_open };
 pub const Ticket = struct { generation: u64, owner: u64, snapshot: [32]u8, target: Target };
 pub const State = struct {
     generation: u64 = 0,

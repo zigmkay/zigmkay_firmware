@@ -60,3 +60,4 @@ pub const practice_curriculum = @import("practice_curriculum.zig");
 pub const practice_help = @import("practice_help.zig");
 pub const practice_retention = @import("practice_retention.zig");
 pub const owned_worker = @import("owned_worker.zig");
+pub const onboarding = @import("onboarding.zig");

@@ -6,8 +6,10 @@ const boards = defaults.boards;
 pub const version: u16 = 1;
 pub const Capability = enum { available, unverified, unavailable };
 pub const Fidelity = enum { indexed_schematic, curated_schematic };
+pub const presentation = @import("presentation.zig");
 pub const Entry = struct {
     selector: []const u8,
+    display: presentation.Metadata,
     firmware_source: []const u8,
     default_profile_source: []const u8,
     default_dimensions: model.KeymapDimensions,
@@ -40,7 +42,7 @@ pub const entries = blk: {
             .key_count = @typeInfo(@typeInfo(@TypeOf(Profile.keymap)).array.child).array.len,
             .layer_count = @typeInfo(@TypeOf(Profile.keymap)).array.len,
         };
-        const geometry = if (std.mem.eql(u8, board.name, "lk7")) &@import("lk7-physical").keys else &schematic(dimensions.key_count);
+        const geometry = if (std.mem.eql(u8, board.name, "lk7")) &@import("lk7-physical").keys else &presentation.geometry(dimensions.key_count);
         if (dimensions.key_count != processing.key_count) @compileError("Default profile dimensions differ from board processing descriptor");
         if (@hasDecl(Profile, "sides")) {
             if (!std.mem.eql(model.Side, &Profile.sides, processing.sides)) @compileError("Default profile sides differ from board processing descriptor");
@@ -49,6 +51,7 @@ pub const entries = blk: {
             @compileError("Default profile encoder slots differ from board processing descriptor");
         result[i] = .{
             .selector = board.name,
+            .display = presentation.metadata(board.name),
             .firmware_source = board.root_source_file,
             .default_profile_source = board.default_keymap,
             .default_dimensions = dimensions,
@@ -58,7 +61,7 @@ pub const entries = blk: {
             .encoder_action_slots = processing.encoder_actions,
             .processing_digest = processingDigest(board.name, processing.sides, processing.encoder_actions),
             .geometry = geometry,
-            .fidelity = if (std.mem.eql(u8, board.name, "lk7")) .curated_schematic else .indexed_schematic,
+            .fidelity = .curated_schematic,
             .index_digest = indexDigest(board.name, geometry),
         };
     }
@@ -217,7 +220,7 @@ test "processing digest detects indexed side and encoder slot changes" {
 test "schematic fallback preserves indexes and geometry edits do not change index digest" {
     const lk7 = find("lk7").?;
     try std.testing.expectEqual(Fidelity.curated_schematic, lk7.fidelity);
-    try std.testing.expectEqual(Fidelity.indexed_schematic, find("dasbob").?.fidelity);
+    try std.testing.expectEqual(Fidelity.curated_schematic, find("dasbob").?.fidelity);
     var keys = @import("lk7-physical").keys;
     keys[0].x += 3;
     try std.testing.expectEqual(lk7.index_digest, indexDigest(lk7.selector, &keys));

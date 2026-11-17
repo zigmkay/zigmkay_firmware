@@ -1,4 +1,5 @@
 const std = @import("std");
+pub const collection = @import("collection.zig");
 const model = @import("layout-model");
 const protocol = @import("device-protocol");
 pub const snapshot = @import("snapshot.zig");
@@ -289,6 +290,7 @@ pub fn canDeleteLayer(doc: Document, id: LayerId) ValidationError!void {
 }
 
 test {
+    _ = collection;
     _ = @import("tests.zig");
     _ = profiles;
     _ = sources;

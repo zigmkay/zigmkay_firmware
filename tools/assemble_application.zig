@@ -110,7 +110,7 @@ pub fn main(init: std.process.Init) !void {
     try assembly.copy(compiler, "toolchain/zig" ++ if (@import("builtin").os.tag == .windows) ".exe" else "");
     try assembly.copy(try std.fs.path.join(a, &.{ distribution, "lib" }), "toolchain/lib");
     try assembly.copy(try std.fs.path.join(a, &.{ distribution, "LICENSE" }), "licenses/Zig.txt");
-    for ([_][]const u8{ "project", "layout-model", "runner" }) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, "packages", name }), try std.fs.path.join(a, &.{ "build/packages", name }));
+    for ([_][]const u8{ "project", "layout-model", "runner", "importer" }) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, "packages", name }), try std.fs.path.join(a, &.{ "build/packages", name }));
     try assembly.copy(try std.fs.path.join(a, &.{ repository, "runtime/build.zig" }), "build/build.zig");
     try assembly.copy(args[6], "tools/picotool_flash" ++ if (@import("builtin").os.tag == .windows) ".exe" else "");
     try assembly.copy(args[7], "tools/picotool" ++ if (@import("builtin").os.tag == .windows) ".exe" else "");

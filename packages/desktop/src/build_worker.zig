@@ -117,6 +117,15 @@ pub const Request = struct {
             defer file.close(io);
             try file.writeStreamingAll(io, log[1]);
         }
+        if (request.native_only) {
+            var runner = try job.finishNativeRunner(result, job.captured.inputs);
+            defer runner.deinit();
+            var runner_cache = try output.createDirPathOpen(io, "runners", .{});
+            defer runner_cache.close(io);
+            var frozen = try jobs.runner_artifact.freeze(gpa, io, runner_cache, runner, job.captured.inputs);
+            errdefer frozen.deinit();
+            return .{ .ticket = .{ .generation = self.generation, .snapshot = self.captured }, .manifest = null, .runner = frozen, .receipt = job.captured.receipt, .expected_export_tree = request.expected_export_tree };
+        }
         var candidate = try job.finish(result, job.captured.inputs);
         errdefer candidate.deinit();
         var runner = try job.finishRunner(job.captured.inputs);
