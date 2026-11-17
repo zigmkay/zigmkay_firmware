@@ -11,7 +11,8 @@
 //!
 //! Keyboard to host (byte 1 is a sequence number that wraps at 255):
 //!   0x20 hello  [1]=protocol version [2]=key count [3]=layer count [4..20]=keymap id
-//!   0x21 state  [1]=seq [2]=layer [3]=modifiers [4..20]=pressed keys, one bit per key index
+//!   0x21 state  [1]=seq [2]=top layer [3]=modifiers [4..6]=active layers, one bit per layer
+//!               (little endian) [6..22]=pressed keys, one bit per key index
 //!   0x22 key    [1]=seq [2]=pressed [3]=key index [4]=layer [5]=modifiers
 //!
 //! A state report is sent after connecting, whenever the layer or modifiers
@@ -58,6 +59,7 @@ pub const Session = struct {
     state_pending: bool = false,
     sequence: u8 = 0,
     layer: core.LayerIndex = 0,
+    active_layers: u16 = 1,
     modifiers: u8 = 0,
     pressed_keys: [16]u8 = @splat(0),
     events: [32]KeyEvent = undefined,
@@ -110,9 +112,15 @@ pub const Session = struct {
 
     /// Records the layer and modifiers after processing, so changes that are not
     /// caused by a key event (for example a hold that resolves later) are reported.
-    pub fn update_state(self: *Session, layer: core.LayerIndex, modifiers: core.Modifiers) void {
-        if (layer == self.layer and modifiers.toByte() == self.modifiers) return;
+    pub fn update_state(self: *Session, layers: *const core.LayerActivations, modifiers: core.Modifiers) void {
+        var active_layers: u16 = 1;
+        for (layers.layers[1..16], 1..) |active, index| {
+            if (active) active_layers |= @as(u16, 1) << @intCast(index);
+        }
+        const layer = layers.get_top_most_active_layer();
+        if (layer == self.layer and active_layers == self.active_layers and modifiers.toByte() == self.modifiers) return;
         self.layer = layer;
+        self.active_layers = active_layers;
         self.modifiers = modifiers.toByte();
         if (self.connected) self.state_pending = true;
     }
@@ -141,7 +149,8 @@ pub const Session = struct {
             report[1] = self.sequence;
             report[2] = self.layer;
             report[3] = self.modifiers;
-            report[4..20].* = self.pressed_keys;
+            std.mem.writeInt(u16, report[4..6], self.active_layers, .little);
+            report[6..22].* = self.pressed_keys;
         } else return null;
         return report;
     }

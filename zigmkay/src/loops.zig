@@ -130,7 +130,7 @@ fn run_primary_internal(
 
         // Processing: decide actions
         try processor.Process(current_time);
-        companion_session.update_state(processor.layers_activations.get_top_most_active_layer(), usb_command_queue.get_current_modifiers());
+        companion_session.update_state(&processor.layers_activations, usb_command_queue.get_current_modifiers());
 
         // Execute actions: send usb commands to the host
         try usb_command_executor.HouseKeepAndProcessCommands(&usb_command_queue, current_time);

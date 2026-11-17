@@ -11,6 +11,12 @@ fn command(id: companion.Command) companion.Report {
     return report;
 }
 
+fn layers_with(comptime active: []const core.LayerIndex) core.LayerActivations {
+    var layers = core.LayerActivations{};
+    for (active) |layer| layers.activate(layer);
+    return layers;
+}
+
 fn take(session: *companion.Session) ?companion.Report {
     const report = session.next_report() orelse return null;
     session.sent();
@@ -20,14 +26,14 @@ fn take(session: *companion.Session) ?companion.Report {
 test "companion session stays silent until the host connects" {
     var session = companion.Session.init(info);
     session.key_event(true, 3, 0, .{});
-    session.update_state(1, .{});
+    session.update_state(&layers_with(&.{1}), .{});
     try std.testing.expectEqual(null, session.next_report());
 }
 
 test "companion session answers connect with hello and current state" {
     var session = companion.Session.init(info);
     session.key_event(true, 9, 0, .{});
-    session.update_state(2, .{ .left_shift = true });
+    session.update_state(&layers_with(&.{ 1, 2 }), .{ .left_shift = true });
 
     try std.testing.expectEqual(.none, session.receive(&command(.connect)));
 
@@ -43,7 +49,8 @@ test "companion session answers connect with hello and current state" {
     try std.testing.expectEqual(0, state[1]);
     try std.testing.expectEqual(2, state[2]);
     try std.testing.expectEqual((core.Modifiers{ .left_shift = true }).toByte(), state[3]);
-    try std.testing.expectEqual(0b10, state[4 + 1]); // key 9 is bit 1 of byte 1
+    try std.testing.expectEqual(0b0111, std.mem.readInt(u16, state[4..6], .little)); // base, 1 and 2
+    try std.testing.expectEqual(0b10, state[6 + 1]); // key 9 is bit 1 of byte 1
 
     try std.testing.expectEqual(null, session.next_report());
 }
@@ -81,7 +88,7 @@ test "companion session resynchronises with a state report after dropping events
 
     const state = take(&session).?;
     try std.testing.expectEqual(@backingInt(companion.MessageId.state), state[0]);
-    try std.testing.expectEqual(0b1000_0000, state[4]); // key 7 is still pressed
+    try std.testing.expectEqual(0b1000_0000, state[6]); // key 7 is still pressed
     try std.testing.expectEqual(null, session.next_report());
 }
 
@@ -91,8 +98,10 @@ test "companion session reports layer changes and stops on disconnect" {
     _ = take(&session);
     _ = take(&session);
 
-    session.update_state(3, .{});
-    try std.testing.expectEqual(3, take(&session).?[2]);
+    session.update_state(&layers_with(&.{3}), .{});
+    const state = take(&session).?;
+    try std.testing.expectEqual(3, state[2]);
+    try std.testing.expectEqual(0b1001, std.mem.readInt(u16, state[4..6], .little));
 
     _ = session.receive(&command(.disconnect));
     session.key_event(true, 1, 0, .{});
