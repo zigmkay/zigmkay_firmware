@@ -5,6 +5,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   practice:
     strategy:
@@ -19,8 +23,9 @@ jobs:
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
-      - name: Verify compiler and run native generation, metrics and storage contracts
+      # Also the subprocess, flash-job and release tooling tests on every host.
+      - name: Verify compiler and run practice, storage, subprocess and release contracts
         shell: bash
         run: |
           test "$(zig version)" = 0.17.0
-          zig build test-practice-data test-app-paths -Dpractice-data-only=true -j4 --test-timeout 45s
+          zig build test-practice test-jobs -Donly=practice -j4 --test-timeout 45s

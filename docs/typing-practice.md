@@ -400,6 +400,13 @@ Use the app's export action rather than copying the live SQLite file alone:
 active databases can have accompanying WAL files. SQLite 3.54.0 is pinned and
 built from its verified source package; application storage logic remains in Zig.
 
+The current schema remains 3. Upgrading schemas 1 or 2 creates a validated,
+standalone online backup in persistent `typing-practice/backups` before any
+migration. Backups are retained. If backup creation fails, the upgrade stops and
+keeps the original database. See [history rollback instructions](preview-releases.md#history-upgrades-and-rollback)
+before restoring an older snapshot; all instances must be closed, and the complete
+current history directory must first be archived, including WAL/SHM files.
+
 Tests and native screenshots use owned caches. Saving a result never rewrites
 a project. **Clear history** asks for confirmation and removes validated database
 runs only, preserving projects/preferences and unknown
@@ -420,7 +427,7 @@ human typing trials remain separate. Cross-compilation is not native acceptance.
 Use exactly Zig 0.17.0:
 
 ```sh
-zig build test-desktop-core test-app-paths
+zig build test-practice -Donly=practice
 zig build check test -j4 --test-timeout 45s
 ```
 

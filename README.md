@@ -5,7 +5,7 @@
 **Make your keyboard yours. Learn it as you go.**
 
 A native visual editor, an on-demand keyboard companion, and a typing tutor
-for programmable keyboards running [Zigmkay firmware](https://github.com/EuroZig/zigmkay_firmware).
+for programmable keyboards running [Zigmkay firmware](https://github.com/zigmkay/zigmkay_firmware).
 Written in Zig.
 
 [Get started](#get-started-with-mise) · [Companion](#your-layout-one-hotkey-away) · [Editor](#program-your-keyboard-visually) · [Tutor](#learn-your-layout-with-the-typing-tutor) · [Development](#development)
@@ -24,10 +24,11 @@ is shown offline; tutor exercises and history use deterministic sample data.
 
 ## Get started with mise
 
-The current way to install and run Zigmkay is from source with
-[mise](https://mise.jdx.dev/getting-started). Downloadable executables are planned
-for the future. Native macOS captures are available here; Windows and Linux
-desktop acceptance is still in progress. See [compatibility status](compatibility/README.md).
+Run Zigmkay from source with [mise](https://mise.jdx.dev/getting-started), or use
+an unsigned executable preview once published. The [preview release workflow](docs/preview-releases.md)
+packages macOS DMGs, a portable Windows EXE and a Linux AppImage with Zig and the
+offline runtime included. Native Windows and Linux release acceptance runs in CI;
+device acceptance remains separate. See [compatibility status](docs/compatibility.md).
 
 Install [mise](https://mise.jdx.dev/installing-mise.html) and Git, then:
 
@@ -215,7 +216,7 @@ mise run test
 The [development guide](docs/development.md) covers the package map, native GUI
 builds, explicit offline startup, test tasks, application assembly and further
 design/implementation docs. Builds, tests and explicit offline startup do not
-access keyboards. See [compatibility status](compatibility/README.md) for the
+access keyboards. See [compatibility status](docs/compatibility.md) for the
 remaining platform and hardware acceptance work.
 
 ## License

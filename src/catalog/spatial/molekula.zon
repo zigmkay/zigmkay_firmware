@@ -1,0 +1,53 @@
+// Molekula2 switch positions from the PCB pick-and-place export
+// keyboards/Molekula2/production/positions.csv in
+// https://github.com/opendata-nuernberg/molekula at
+// 78ca099e9eb3d10618639eec493a3c0454c9b470 (MIT). Values are copied
+// unchanged: millimetres, y up, rotation in degrees counterclockwise.
+// Key indexes follow the firmware `pin_mappings` of
+// my_keyboards/molekula/main.zig; each designator was matched through the
+// PCB nets (switch column, diode row). SW37 (reset) and SW38 (encoder) are
+// not keys.
+.{
+    .board = "Molekula2",
+    .pitch = .{ 19.0, 16.0 },
+    .keys = .{
+        .{ .key_index = 0, .designator = "SW1", .x = -109.5, .y = -18.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 1, .designator = "SW2", .x = -90.5, .y = -12.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 2, .designator = "SW3", .x = -71.5, .y = -8.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 3, .designator = "SW4", .x = -52.5, .y = -14.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 4, .designator = "SW5", .x = -33.5, .y = -16.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 5, .designator = "SW19", .x = 33.5, .y = -16.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 6, .designator = "SW20", .x = 52.5, .y = -14.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 7, .designator = "SW21", .x = 71.5, .y = -8.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 8, .designator = "SW22", .x = 90.5, .y = -12.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 9, .designator = "SW23", .x = 109.5, .y = -18.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 10, .designator = "SW39", .x = -128.5, .y = -34.0, .rotation = 0.0, .hand = .left, .group = .finger, .home_row = true },
+        .{ .key_index = 11, .designator = "SW6", .x = -109.5, .y = -34.0, .rotation = 0.0, .hand = .left, .group = .finger, .home_row = true },
+        .{ .key_index = 12, .designator = "SW7", .x = -90.5, .y = -28.0, .rotation = 0.0, .hand = .left, .group = .finger, .home_row = true },
+        .{ .key_index = 13, .designator = "SW8", .x = -71.5, .y = -24.0, .rotation = 0.0, .hand = .left, .group = .finger, .home_row = true },
+        .{ .key_index = 14, .designator = "SW9", .x = -52.5, .y = -30.0, .rotation = 0.0, .hand = .left, .group = .finger, .home_row = true },
+        .{ .key_index = 15, .designator = "SW10", .x = -33.5, .y = -32.0, .rotation = 0.0, .hand = .left, .group = .finger, .home_row = true },
+        .{ .key_index = 16, .designator = "SW24", .x = 33.5, .y = -32.0, .rotation = 0.0, .hand = .right, .group = .finger, .home_row = true },
+        .{ .key_index = 17, .designator = "SW25", .x = 52.5, .y = -30.0, .rotation = 0.0, .hand = .right, .group = .finger, .home_row = true },
+        .{ .key_index = 18, .designator = "SW26", .x = 71.5, .y = -24.0, .rotation = 0.0, .hand = .right, .group = .finger, .home_row = true },
+        .{ .key_index = 19, .designator = "SW27", .x = 90.5, .y = -28.0, .rotation = 0.0, .hand = .right, .group = .finger, .home_row = true },
+        .{ .key_index = 20, .designator = "SW28", .x = 109.5, .y = -34.0, .rotation = 0.0, .hand = .right, .group = .finger, .home_row = true },
+        .{ .key_index = 21, .designator = "SW40", .x = 128.5, .y = -34.0, .rotation = 0.0, .hand = .right, .group = .finger, .home_row = true },
+        .{ .key_index = 22, .designator = "SW11", .x = -109.5, .y = -50.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 23, .designator = "SW12", .x = -90.5, .y = -44.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 24, .designator = "SW13", .x = -71.5, .y = -40.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 25, .designator = "SW14", .x = -52.5, .y = -46.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 26, .designator = "SW15", .x = -33.5, .y = -48.0, .rotation = 0.0, .hand = .left, .group = .finger },
+        .{ .key_index = 27, .designator = "SW29", .x = 33.5, .y = -48.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 28, .designator = "SW30", .x = 52.5, .y = -46.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 29, .designator = "SW31", .x = 71.5, .y = -40.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 30, .designator = "SW32", .x = 90.5, .y = -44.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 31, .designator = "SW33", .x = 109.5, .y = -50.0, .rotation = 0.0, .hand = .right, .group = .finger },
+        .{ .key_index = 32, .designator = "SW16", .x = -56.5, .y = -70.0, .rotation = 0.0, .hand = .left, .group = .thumb },
+        .{ .key_index = 33, .designator = "SW17", .x = -36.3, .y = -71.8, .rotation = -10.0, .hand = .left, .group = .thumb },
+        .{ .key_index = 34, .designator = "SW18", .x = -16.7, .y = -77.0, .rotation = -20.0, .hand = .left, .group = .thumb },
+        .{ .key_index = 35, .designator = "SW34", .x = 16.7, .y = -77.0, .rotation = 20.0, .hand = .right, .group = .thumb },
+        .{ .key_index = 36, .designator = "SW35", .x = 36.3, .y = -71.8, .rotation = 10.0, .hand = .right, .group = .thumb },
+        .{ .key_index = 37, .designator = "SW36", .x = 56.5, .y = -70.0, .rotation = 0.0, .hand = .right, .group = .thumb },
+    },
+}

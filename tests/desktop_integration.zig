@@ -1,5 +1,6 @@
 //! Real combined module graph: document edits, cache/practice and explicit flash.
 const std = @import("std");
+
 test "edits and reverting during a build are scheduled after Flash has finished" {
     const t = std.testing;
     var scheduler: desktop.auto_build.Scheduler = .{};
@@ -13,11 +14,15 @@ test "edits and reverting during a build are scheduled after Flash has finished"
     try t.expect(scheduler.take(2100, desktop.flash_presenter.blocksAutoBuild(.stale)));
     try t.expect(!scheduler.take(3000, desktop.flash_presenter.blocksAutoBuild(.stale)));
 }
+
+/// A hang guard only. It outlasts the build worker's own timeout, so a slow
+/// shared CI runner reports the worker's diagnostic rather than this deadline.
 fn awaitWorker(worker: anytype) !@TypeOf(worker.*).Event {
     const started = std.Io.Clock.awake.now(std.testing.io);
     while (true) {
         if (worker.poll()) |event| return event;
-        if (started.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds() > 5000) return error.WorkerDeadline;
+        if (started.durationTo(std.Io.Clock.awake.now(std.testing.io)).toMilliseconds() > 30_000)
+            return error.WorkerDeadline;
         try std.Io.sleep(std.testing.io, .fromMilliseconds(1), .awake);
     }
 }
@@ -36,7 +41,10 @@ test "source workers own attach requests and preserve externally edited checkout
     var inner = try desktop.callback_editor.Request.capture(&model, .attach, 0, "custom.zig", &.{1}, &.{});
     var inner_owned = true;
     defer if (inner_owned) inner.deinit();
-    try t.expectError(error.InvalidSourcePath, desktop.source_worker.Request.prepareCallback(&inner, "relative"));
+    try t.expectError(
+        error.InvalidSourcePath,
+        desktop.source_worker.Request.prepareCallback(&inner, "relative"),
+    );
     var request = try desktop.source_worker.Request.prepareCallback(&inner, root);
     inner_owned = false;
     var request_owned = true;
@@ -70,29 +78,6 @@ test "source workers own attach requests and preserve externally edited checkout
     try t.expectError(error.StaleCallbackAction, mirrored_again.promote(&model));
 }
 
-test "profile worker returns an owned candidate without borrowing the editor" {
-    const t = std.testing;
-    var template = try project.profiles.create(t.allocator, .qwerty);
-    defer template.deinit();
-    var model = try desktop.model.Model.init(t.allocator, project.profiles.board, template.snapshot);
-    defer model.deinit();
-    var tmp = t.tmpDir(.{});
-    defer tmp.cleanup();
-    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
-    defer t.allocator.free(root);
-    var request = try desktop.profile_switch.Request.capture(&model, "eurkey\x00\x00".*, root);
-    var retained = true;
-    defer if (retained) request.deinit();
-    const worker = try desktop.profile_switch.Worker.create(t.allocator, t.io, &request, 1);
-    retained = false;
-    defer worker.destroy();
-    try model.rename("Edit after navigation started");
-    var prepared = try (try awaitWorker(worker)).result;
-    defer prepared.deinit();
-    try t.expectError(error.StaleProfileAction, prepared.promote(&model));
-    try t.expectEqualStrings("Edit after navigation started", model.document().layers[0].name);
-}
-
 test "owned file worker freezes save and joins canceled or consumed jobs" {
     const t = std.testing;
     var template = try project.profiles.create(t.allocator, .qwerty);
@@ -106,23 +91,18 @@ test "owned file worker freezes save and joins canceled or consumed jobs" {
     var request = try desktop.project_files.Request.capture(&model, .save, path);
     var retained = true;
     defer if (retained) request.deinit();
-    try t.expectError(error.InvalidProjectGeneration, desktop.project_worker.Owner.create(t.allocator, t.io, &request, 0));
+    try t.expectError(
+        error.InvalidProjectGeneration,
+        desktop.project_worker.Owner.create(t.allocator, t.io, &request, 0),
+    );
     const captured = request.captured;
     const worker = try desktop.project_worker.Owner.create(t.allocator, t.io, &request, 1);
     retained = false;
     defer worker.destroy();
     try model.rename("Later UI layer edit");
-    var event: ?desktop.project_worker.Event = null;
-    const started = std.Io.Clock.awake.now(t.io);
-    while (event == null) {
-        event = worker.poll();
-        if (event == null) {
-            if (started.durationTo(std.Io.Clock.awake.now(t.io)).toMilliseconds() > 5000) return error.WorkerDeadline;
-            try std.Io.sleep(t.io, .fromMilliseconds(1), .awake);
-        }
-    }
-    try t.expectEqual(captured, event.?.ticket.snapshot);
-    var result = try event.?.result;
+    const event = try awaitWorker(worker);
+    try t.expectEqual(captured, event.ticket.snapshot);
+    var result = try event.result;
     defer result.deinit();
     try t.expectError(error.StaleProjectAction, result.promote(&model));
     try t.expect(worker.poll() == null);
@@ -210,58 +190,6 @@ test "two independent project writers cannot publish over the same baseline" {
     try t.expectEqualStrings(if (a_saved) "Writer A" else "Writer B", disk.snapshot.document.layers[0].name);
 }
 
-test "profile switching prepares read-only templates and preserves existing or invalid projects" {
-    const t = std.testing;
-    var base = try project.profiles.create(t.allocator, .qwerty);
-    defer base.deinit();
-    var model = try desktop.model.Model.init(t.allocator, project.profiles.board, base.snapshot);
-    defer model.deinit();
-    var tmp = t.tmpDir(.{});
-    defer tmp.cleanup();
-    const root = try tmp.dir.realPathFileAlloc(t.io, ".", t.allocator);
-    defer t.allocator.free(root);
-    const path = try std.fs.path.join(t.allocator, &.{ root, "eurkey" });
-    defer t.allocator.free(path);
-    var request = try desktop.profile_switch.Request.capture(&model, "eurkey\x00\x00".*, path);
-    defer request.deinit();
-    var prepared = try request.prepare(t.allocator, t.io);
-    defer prepared.deinit();
-    try t.expect(!prepared.existing);
-    try t.expectError(error.FileNotFound, tmp.dir.openDir(t.io, "eurkey", .{}));
-    try model.rename("New unsaved work");
-    try t.expectError(error.StaleProfileAction, prepared.promote(&model));
-    try t.expectError(error.UnsavedProject, desktop.profile_switch.Request.capture(&model, "eurkey\x00\x00".*, path));
-    try model.undo();
-    try prepared.promote(&model);
-    try t.expectEqual("eurkey\x00\x00".*, model.document().profile_id);
-    try t.expectEqual(@as(usize, 0), model.undo_stack.items.len);
-    try t.expectError(error.StaleProfileAction, prepared.promote(&model));
-    var directory = try tmp.dir.createDirPathOpen(t.io, "eurkey", .{});
-    defer directory.close(t.io);
-    try model.rename("Personal saved profile");
-    try model.save(t.io, directory);
-    var existing_request = try desktop.profile_switch.Request.capture(&model, "eurkey\x00\x00".*, path);
-    defer existing_request.deinit();
-    var existing = try existing_request.prepare(t.allocator, t.io);
-    defer existing.deinit();
-    try t.expect(existing.existing);
-    try existing.promote(&model);
-    try t.expectEqualStrings("Personal saved profile", model.document().layers[0].name);
-    const broken = "opaque future project bytes\n";
-    try directory.writeFile(t.io, .{ .sub_path = "project.zon", .data = broken });
-    if (existing_request.prepare(t.allocator, t.io)) |result| {
-        var unexpected = result;
-        unexpected.deinit();
-        return error.ExpectedInvalidProject;
-    } else |_| {}
-    const preserved = try directory.readFileAlloc(t.io, "project.zon", t.allocator, .limited(4096));
-    defer t.allocator.free(preserved);
-    try t.expectEqualStrings(broken, preserved);
-    try project.snapshot.save(t.allocator, t.io, directory, base.snapshot, project.profiles.board);
-    try t.expectError(error.ProfileIdentityMismatch, existing_request.prepare(t.allocator, t.io));
-    try t.expectError(error.UnknownProfile, desktop.profile_switch.Request.capture(&model, "unknown1".*, path));
-}
-
 test "encoder slot drafts preserve compound actions and bind staged and document revisions" {
     const t = std.testing;
     var loaded = try project.profiles.create(t.allocator, .qwerty);
@@ -275,7 +203,12 @@ test "encoder slot drafts preserve compound actions and bind staged and document
     defer model.deinit();
     var session = try desktop.encoder_editor.Session.init(&model);
     session.index = 3;
-    const compound = project.Tap{ .key_press = .{ .tap_keycode = 8, .dead = true, .tap_modifiers = .{ .right_alt = true } }, .one_shot = .{ .layer_id = model.document().layers[1].id }, .media_key = .VolumeUp, .mouse_action = .WheelDown };
+    const compound = project.Tap{
+        .key_press = .{ .tap_keycode = 8, .dead = true, .tap_modifiers = .{ .right_alt = true } },
+        .one_shot = .{ .layer_id = model.document().layers[1].id },
+        .media_key = .VolumeUp,
+        .mouse_action = .WheelDown,
+    };
     session.drafts[3] = compound;
     const stale_stage = session.action(.apply);
     session.drafts[2] = .{ .key_press = .{ .tap_keycode = 9 } };
@@ -376,7 +309,12 @@ test "frozen project IO refuses stale promotion and external overwrite" {
     var refused = try files.Request.capture(&model, .save, path);
     defer refused.deinit();
     try t.expectError(error.UnsupportedVersion, refused.prepare(t.allocator, t.io));
-    const bytes = try tmp.dir.readFileAlloc(t.io, "project.zon", t.allocator, .limited(project.Limits.document_bytes));
+    const bytes = try tmp.dir.readFileAlloc(
+        t.io,
+        "project.zon",
+        t.allocator,
+        .limited(project.Limits.document_bytes),
+    );
     defer t.allocator.free(bytes);
     try t.expectEqualStrings(future, bytes);
     try t.expectError(error.InvalidProjectPath, files.Request.capture(&model, .save, "relative"));
@@ -411,8 +349,14 @@ test "editor dispatch resolves owned staged drafts before captured navigation" {
     const key = try desktop.key_selection.Action.capture(&model, 3, false);
     try t.expect((try owner.request(&model, dispatch.Request.fromKey(key))) == .pending);
     try t.expectEqual(@as(usize, 0), model.primary);
-    try t.expectError(error.PendingEditorRequest, owner.request(&model, try dispatch.Request.capture(&model, .undo)));
-    _ = try owner.inspect(&model, try desktop.inspector_action.Action.capture(&owner.inspector, &model, .keep_editing));
+    try t.expectError(
+        error.PendingEditorRequest,
+        owner.request(&model, try dispatch.Request.capture(&model, .undo)),
+    );
+    _ = try owner.inspect(
+        &model,
+        try desktop.inspector_action.Action.capture(&owner.inspector, &model, .keep_editing),
+    );
     try t.expect(owner.pending == null and owner.inspector.dirty());
     _ = try owner.request(&model, dispatch.Request.fromKey(key));
     const old = try desktop.inspector_action.Action.capture(&owner.inspector, &model, .resolve_apply);
@@ -426,14 +370,19 @@ test "editor dispatch resolves owned staged drafts before captured navigation" {
     try t.expect(owner.pending == null);
     try owner.sync(&model);
     owner.inspector.mutate(.{ .tap_usage = 7 });
-    try t.expect((try owner.request(&model, try dispatch.Request.capture(&model, .{ .open = .combo }))) == .pending);
+    try t.expect(
+        (try owner.request(&model, try dispatch.Request.capture(&model, .{ .open = .combo }))) == .pending,
+    );
     const discard = try desktop.inspector_action.Action.capture(&owner.inspector, &model, .resolve_discard);
     try t.expectEqual(dispatch.Open.combo, (try owner.inspect(&model, discard)).open);
     try t.expectEqual(@as(usize, 1), model.undo_stack.items.len);
     try t.expect(!owner.inspector.dirty());
     // Dirty document close is separate from inspector draft resolution.
     try t.expect((try owner.request(&model, try dispatch.Request.capture(&model, .close))) == .confirm_close);
-    _ = try owner.inspect(&model, try desktop.inspector_action.Action.capture(&owner.inspector, &model, .keep_close));
+    _ = try owner.inspect(
+        &model,
+        try desktop.inspector_action.Action.capture(&owner.inspector, &model, .keep_close),
+    );
     try t.expect(owner.close_requested == null and !owner.closed);
     _ = try owner.request(&model, try dispatch.Request.capture(&model, .close));
     const save = (try owner.inspect(&model, try desktop.inspector_action.Action.capture(&owner.inspector, &model, .save_close))).save_close;
@@ -455,7 +404,16 @@ test "stale pending editor completion preserves drafts and request for recovery"
     var owner = try dispatch.State.init(&model);
     defer owner.deinit();
     owner.inspector.mutate(.{ .tap_usage = 5 });
-    try t.expectError(error.InvalidKey, owner.request(&model, try dispatch.Request.capture(&model, .{ .select = .{ .index = model.selected.len, .extend = false } })));
+    try t.expectError(
+        error.InvalidKey,
+        owner.request(
+            &model,
+            try dispatch.Request.capture(&model, .{ .select = .{
+                .index = model.selected.len,
+                .extend = false,
+            } }),
+        ),
+    );
     const action = try desktop.inspector_action.Action.capture(&owner.inspector, &model, .resolve_apply);
     _ = try owner.request(&model, try dispatch.Request.capture(&model, .undo));
     try model.rename("external change");
@@ -505,7 +463,10 @@ test "host palette owns Unicode previews and chord actions refuse stale drops" {
     const t = std.testing;
     const Translator = struct {
         pub fn keyToText(_: *@This(), chord: desktop.assignment.Chord) struct { data: [4]u8, len: usize } {
-            return if (chord.tap_keycode == 4) .{ .data = if (chord.tap_modifiers.left_alt) .{ 0xce, 0xbb, 0, 0 } else if (chord.tap_modifiers.left_shift) .{ 'A', 0, 0, 0 } else .{ 'a', 0, 0, 0 }, .len = if (chord.tap_modifiers.left_alt) 2 else 1 } else .{ .data = @splat(0), .len = 0 };
+            return if (chord.tap_keycode == 4) .{
+                .data = if (chord.tap_modifiers.left_alt) .{ 0xce, 0xbb, 0, 0 } else if (chord.tap_modifiers.left_shift) .{ 'A', 0, 0, 0 } else .{ 'a', 0, 0, 0 },
+                .len = if (chord.tap_modifiers.left_alt) 2 else 1,
+            } else .{ .data = @splat(0), .len = 0 };
         }
     };
     var translator: Translator = .{};
@@ -518,20 +479,27 @@ test "host palette owns Unicode previews and chord actions refuse stale drops" {
     try t.expectEqualStrings("A", cache.caption(4, true, false));
     try t.expectEqualStrings("λ", cache.caption(4, false, true));
     try t.expectEqualStrings("λ", cache.caption(4, true, true));
-    try t.expectEqualStrings("␣", cache.caption(44, true, true));
-    try t.expectEqualStrings("Super", cache.caption(227, false, false));
+    const symbols = desktop.labels.keycap_symbols;
+    try t.expectEqualStrings(symbols.Symbol.space.text(), cache.caption(44, true, true));
+    try t.expectEqualStrings(symbols.Symbol.windows.text(), cache.caption(227, false, false));
     const BadTranslator = struct {
         pub fn keyToText(_: *@This(), _: desktop.assignment.Chord) struct { data: [1]u8, len: usize } {
             return .{ .data = .{0xff}, .len = 1 };
         }
     };
     var bad: BadTranslator = .{};
-    try t.expectError(error.InvalidPaletteTranslation, desktop.host_palette.Cache.init(t.allocator, .linux, "bad", 0, &bad));
+    try t.expectError(
+        error.InvalidPaletteTranslation,
+        desktop.host_palette.Cache.init(t.allocator, .linux, "bad", 0, &bad),
+    );
     var template = try project.profiles.create(t.allocator, .qwerty);
     defer template.deinit();
     var model = try desktop.model.Model.init(t.allocator, project.profiles.board, template.snapshot);
     defer model.deinit();
-    const action = try desktop.chord_action.Action.capture(&model, .{ .tap_keycode = 5, .tap_modifiers = .{ .left_alt = true } });
+    const action = try desktop.chord_action.Action.capture(&model, .{
+        .tap_keycode = 5,
+        .tap_modifiers = .{ .left_alt = true },
+    });
     model.select(1, false);
     try t.expectError(error.StaleChordAction, action.drop(&model, 2, false));
     model.select(0, false);
@@ -651,10 +619,12 @@ test "callback preparation owns frozen input and refuses stale promotion" {
     try t.expectEqualStrings("// initial\n", model.current.snapshot.sources[0].bytes);
     try t.expectError(error.InvalidCallback, callbacks.Request.capture(&model, .refresh, 1, "", &.{}, &.{}));
 }
+
 const desktop = @import("desktop-core");
 const project = @import("project");
 const jobs = @import("companion-jobs");
 const options = @import("options");
+
 test "combo editor commits stable IDs once and refuses invalid or stale rendered edits" {
     const t = std.testing;
     var loaded = try project.profiles.create(t.allocator, .eurmac);
@@ -685,6 +655,7 @@ test "combo editor commits stable IDs once and refuses invalid or stale rendered
     try model.undo();
     try t.expectError(error.StaleComboAction, editor.dispatch(&model, editor.action(.save)));
 }
+
 test "rendered mixed inspector intent rejects later staged fields and selection" {
     const t = std.testing;
     var loaded = try project.profiles.create(t.allocator, .eurmac);
@@ -707,6 +678,7 @@ test "rendered mixed inspector intent rejects later staged fields and selection"
     model.select(11, false);
     try t.expectError(error.StaleInspectorAction, after_apply.validate(&session, &model));
 }
+
 test "typed drawer applies one explicit batch and rejects changed document or selection" {
     const t = std.testing;
     var loaded = try project.profiles.create(t.allocator, .eurmac);
@@ -743,6 +715,7 @@ test "typed drawer applies one explicit batch and rejects changed document or se
     try t.expectEqual(desktop.action_form.Session.Status.stale_document, try new_form.status(&model));
     try t.expectError(error.StaleSession, new_form.apply(&model));
 }
+
 test "explicit desktop flash reaps an offline wrapper and retains diagnostics" {
     const t = std.testing;
     const fixture = try std.Io.Dir.cwd().realPathFileAlloc(t.io, options.fixture, t.allocator);
@@ -757,27 +730,85 @@ test "explicit desktop flash reaps an offline wrapper and retains diagnostics" {
     defer t.allocator.free(artifact);
     try tmp.dir.writeFile(t.io, .{ .sub_path = "tool", .data = "offline tool bytes" });
     const lock = jobs.target_lock.fixture();
-    var tools = try jobs.flash_inputs.Tools.capture(t.allocator, t.io, lock.firmware_revision, lock.firmware_source_digest, lock.source_kind, fixture, tool);
+    var tools = try jobs.flash_inputs.Tools.capture(
+        t.allocator,
+        t.io,
+        lock.firmware_revision,
+        lock.firmware_source_digest,
+        lock.source_kind,
+        fixture,
+        tool,
+    );
     defer tools.deinit();
-    const current: jobs.firmware.Inputs = .{ .project_digest = @splat(1), .source_digest = @splat(2), .build_inputs_digest = @splat(3), .profile_id = "profile1".*, .identity_digest = @splat(5), .lock = lock };
+    const current: jobs.firmware.Inputs = .{
+        .project_digest = @splat(1),
+        .source_digest = @splat(2),
+        .build_inputs_digest = @splat(3),
+        .profile_id = "profile1".*,
+        .identity_digest = @splat(5),
+        .lock = lock,
+    };
     var block: [512]u8 = @splat(0);
-    for ([_]struct { usize, u32 }{ .{ 0, 0x0a324655 }, .{ 4, 0x9e5d5157 }, .{ 8, 0x2000 }, .{ 12, 0x10000000 }, .{ 16, 256 }, .{ 24, 1 }, .{ 28, 0xe48bff56 }, .{ 508, 0x0ab16f30 } }) |word| std.mem.writeInt(u32, block[word[0]..][0..4], word[1], .little);
+    for ([_]struct { usize, u32 }{
+        .{ 0, 0x0a324655 },
+        .{ 4, 0x9e5d5157 },
+        .{ 8, 0x2000 },
+        .{ 12, 0x10000000 },
+        .{ 16, 256 },
+        .{ 24, 1 },
+        .{ 28, 0xe48bff56 },
+        .{ 508, 0x0ab16f30 },
+    }) |word| std.mem.writeInt(u32, block[word[0]..][0..4], word[1], .little);
     try tmp.dir.writeFile(t.io, .{ .sub_path = "build.uf2", .data = &block });
-    var manifest = try jobs.firmware.Manifest.complete(t.allocator, .succeeded, jobs.firmware.key(current), current, current, artifact, &block);
+    var manifest = try jobs.firmware.Manifest.complete(
+        t.allocator,
+        .succeeded,
+        jobs.firmware.key(current),
+        current,
+        current,
+        artifact,
+        &block,
+    );
     defer manifest.deinit();
     const request: jobs.flash_inputs.Request = .{ .captured = @splat(1), .current = @splat(1) };
-    var frozen = try jobs.flash_inputs.freeze(t.allocator, t.io, tmp.dir, base, manifest, current, tools, request);
+    var frozen = try jobs.flash_inputs.freeze(
+        t.allocator,
+        t.io,
+        tmp.dir,
+        base,
+        manifest,
+        current,
+        tools,
+        request,
+    );
     defer frozen.deinit();
     for ([_][]const u8{ "ok", "wait", "flood", "unique_bootsel" }) |serial| {
-        var owner = desktop.flash_controller.Controller.init(t.allocator, .{ .snapshot = request.current, .build_key = jobs.firmware.key(current) });
+        var owner = desktop.flash_controller.Controller.init(t.allocator, .{
+            .snapshot = request.current,
+            .build_key = jobs.firmware.key(current),
+        });
         defer owner.deinit();
         _ = try owner.dispatch(.prepare);
         _ = try owner.receive(.{ .prepared = owner.operation_id }, 0);
         _ = try owner.dispatch(.build);
-        _ = try owner.receive(.{ .built = .{ .operation_id = owner.operation_id, .build_key = owner.current.build_key } }, 0);
+        _ = try owner.receive(.{ .built = .{
+            .operation_id = owner.operation_id,
+            .build_key = owner.current.build_key,
+        } }, 0);
         _ = try owner.dispatch(.freeze);
-        _ = try owner.receive(.{ .frozen = .{ .operation_id = owner.operation_id, .artifact = .{ .context = owner.current, .path = frozen.path, .uf2_hash = frozen.uf2_hash, .expected_identity = .{ .board_id = "board_v1".*, .profile_id = current.profile_id, .digest = current.identity_digest } } } }, 0);
-        _ = try owner.dispatch(.{ .select = if (std.mem.eql(u8, serial, "unique_bootsel")) .unique_bootsel else .{ .serial = serial } });
+        _ = try owner.receive(.{ .frozen = .{ .operation_id = owner.operation_id, .artifact = .{
+            .context = owner.current,
+            .path = frozen.path,
+            .uf2_hash = frozen.uf2_hash,
+            .expected_identity = .{
+                .board_id = "board_v1".*,
+                .profile_id = current.profile_id,
+                .digest = current.identity_digest,
+            },
+        } } }, 0);
+        _ = try owner.dispatch(.{
+            .select = if (std.mem.eql(u8, serial, "unique_bootsel")) .unique_bootsel else .{ .serial = serial },
+        });
         const rendered = desktop.flash_presenter.view(&owner, null);
         try t.expect(rendered.can_confirm);
         const start = (try owner.dispatch(try rendered.intent(.confirm, null))).start_managed;
@@ -811,14 +842,19 @@ test "explicit desktop flash reaps an offline wrapper and retains diagnostics" {
         }
     }
 }
+
 test "managed desktop runtime has an idle lifecycle without spawning" {
     var runtime = desktop.flash_runtime.Runtime.init(std.testing.allocator, std.testing.io);
     defer runtime.deinit();
     _ = &desktop.flash_runtime.Runtime.start;
-    var controller = desktop.flash_controller.Controller.init(std.testing.allocator, .{ .snapshot = @splat(1), .build_key = @splat(2) });
+    var controller = desktop.flash_controller.Controller.init(std.testing.allocator, .{
+        .snapshot = @splat(1),
+        .build_key = @splat(2),
+    });
     defer controller.deinit();
     try std.testing.expect(try runtime.poll(&controller, 0) == null);
 }
+
 test "owned document edits invalidate desktop build intent without dispatching flash" {
     const gpa = std.testing.allocator;
     var template = try project.profiles.create(gpa, .qwerty);
@@ -826,7 +862,10 @@ test "owned document edits invalidate desktop build intent without dispatching f
     var model = try desktop.model.Model.init(gpa, project.profiles.board, template.snapshot);
     defer model.deinit();
     const initial = try model.id();
-    var controller = desktop.flash_controller.Controller.init(gpa, .{ .snapshot = initial, .build_key = @splat(1) });
+    var controller = desktop.flash_controller.Controller.init(gpa, .{
+        .snapshot = initial,
+        .build_key = @splat(1),
+    });
     defer controller.deinit();
     const effect = try controller.dispatch(.prepare);
     try std.testing.expect(effect == .prepare_tools);
@@ -844,7 +883,7 @@ test "owned document edits invalidate desktop build intent without dispatching f
     try project.validate(parsed, model.board);
     // Shared owned-ZON helpers are analyzed in both owning modules in one graph.
     const record: jobs.flash_inputs.Record = .{
-        .version = 2,
+        .version = 999,
         .firmware_revision = "01a6368ca5f49a47ce770cd603cc98b90b8298de",
         .firmware_source_digest = @splat(0),
         .source_kind = .development,
@@ -856,7 +895,10 @@ test "owned document edits invalidate desktop build intent without dispatching f
     var writer: std.Io.Writer.Allocating = .init(gpa);
     defer writer.deinit();
     try std.zon.stringify.serialize(record, .{}, &writer.writer);
-    try std.testing.expectError(error.UnsupportedToolsVersion, jobs.flash_inputs.Tools.parse(gpa, writer.written()));
+    try std.testing.expectError(
+        error.UnsupportedToolsVersion,
+        jobs.flash_inputs.Tools.parse(gpa, writer.written()),
+    );
 }
 
 test "build worker owns verified exports and accepts only the current editor preparation ticket" {
@@ -889,7 +931,13 @@ test "build worker owns verified exports and accepts only the current editor pre
     try tmp.dir.writeFile(t.io, .{ .sub_path = "application.zon", .data = descriptor_text.written() });
     var application = try jobs.application_bundle.Bundle.open(t.allocator, t.io, root);
     defer application.deinit();
-    const generated = try desktop.application_bundle.plan(t.allocator, application, root, "lk7", model.board.id);
+    const generated = try desktop.application_bundle.plan(
+        t.allocator,
+        application,
+        root,
+        "lk7",
+        model.board.id,
+    );
     defer p.owned_zon.free(t.allocator, generated);
     var config = generated.config;
     config.request.selection.compiler_path = helper;
@@ -897,7 +945,7 @@ test "build worker owns verified exports and accepts only the current editor pre
     config.request.selection.build_root = root;
     config.request.export_directory = exported;
     config.request.install_directory = install;
-    config.request.timeout_ms = 5000;
+    config.request.timeout_ms = 15_000;
     var environment: std.process.Environ.Map = .init(t.allocator);
     defer environment.deinit();
     try environment.put("ZIGMKAY_BUILD_FIXTURE", "success");
@@ -911,7 +959,10 @@ test "build worker owns verified exports and accepts only the current editor pre
     defer worker.destroy();
     const completed = (try awaitWorker(worker)).result;
     var candidate = completed catch |err| {
-        std.debug.print("build worker failed: {s}; install directory: {s}; export directory: {s}\n", .{ @errorName(err), install, exported });
+        std.debug.print(
+            "build worker failed: {s}; install directory: {s}; export directory: {s}\n",
+            .{ @errorName(err), install, exported },
+        );
         if (std.Io.Dir.cwd().openDir(t.io, install, .{ .iterate = true })) |directory| {
             var output = directory;
             defer output.close(t.io);
@@ -922,7 +973,12 @@ test "build worker owns verified exports and accepts only the current editor pre
                 var child = output.openDir(t.io, entry.name, .{}) catch continue;
                 defer child.close(t.io);
                 for ([_][]const u8{ "build.stdout.log", "build.stderr.log" }) |name| {
-                    const bytes = child.readFileAlloc(t.io, name, t.allocator, .limited(64 * 1024)) catch continue;
+                    const bytes = child.readFileAlloc(
+                        t.io,
+                        name,
+                        t.allocator,
+                        .limited(64 * 1024),
+                    ) catch continue;
                     defer t.allocator.free(bytes);
                     std.debug.print("{s}/{s}: {s}\n", .{ entry.name, name, bytes });
                 }
@@ -950,14 +1006,31 @@ test "build worker owns verified exports and accepts only the current editor pre
     // Snapshot revalidation is independent of package files and installation paths.
     var audit_request = try desktop.build_worker.Request.capture(&model, config, &environment, 44);
     defer audit_request.deinit();
-    var fast_inputs = try audit_request.captureCurrentInputs(t.allocator, t.io, candidate.expected_export_tree);
+    var fast_inputs = try audit_request.captureCurrentInputs(
+        t.allocator,
+        t.io,
+        candidate.expected_export_tree,
+    );
     defer fast_inputs.deinit();
-    try t.expectEqualDeep(manifest.inputs.build_inputs_digest, fast_inputs.captured.inputs.build_inputs_digest);
-    try tmp.dir.writeFile(t.io, .{ .sub_path = "build.zig.zon", .data = ".{ .dependencies = .{}, .name = .changed }" });
-    var still_prepared = try audit_request.captureCurrentInputs(t.allocator, t.io, candidate.expected_export_tree);
+    try t.expectEqualDeep(
+        manifest.inputs.build_inputs_digest,
+        fast_inputs.captured.inputs.build_inputs_digest,
+    );
+    try tmp.dir.writeFile(t.io, .{
+        .sub_path = "build.zig.zon",
+        .data = ".{ .dependencies = .{}, .name = .changed }",
+    });
+    var still_prepared = try audit_request.captureCurrentInputs(
+        t.allocator,
+        t.io,
+        candidate.expected_export_tree,
+    );
     defer still_prepared.deinit();
     try t.expectEqualDeep(fast_inputs.captured.receipt.digest(), still_prepared.captured.receipt.digest());
-    try environment.put("ZIGMKAY_BUILD_FIXTURE", if (@import("builtin").os.tag == .windows) "hang" else "spawn-hang");
+    try environment.put(
+        "ZIGMKAY_BUILD_FIXTURE",
+        if (@import("builtin").os.tag == .windows) "hang" else "spawn-hang",
+    );
     const cancel_install = try std.fs.path.join(t.allocator, &.{ root, ".zig-cache/cancelled-build" });
     defer t.allocator.free(cancel_install);
     var cancel_config = config;

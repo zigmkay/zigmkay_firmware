@@ -3,8 +3,26 @@ const firmware = @import("zigmkay");
 const core = firmware.core;
 const original = @import("original-profile");
 const profile = @import("generated-profile");
-const Reference = firmware.processing.CreateProcessorType(&original.dimensions, &original.keymap, &original.sides, &original.combos, &original.custom_functions, &profile.encoder_actions, null);
-const Candidate = firmware.processing.CreateProcessorType(&profile.dimensions, &profile.keymap, &profile.sides, &profile.combos, &profile.custom_functions, &profile.encoder_actions, null);
+
+const Reference = firmware.processing.CreateProcessorType(
+    &original.dimensions,
+    &original.keymap,
+    &original.sides,
+    &original.combos,
+    &original.custom_functions,
+    &profile.encoder_actions,
+    null,
+);
+
+const Candidate = firmware.processing.CreateProcessorType(
+    &profile.dimensions,
+    &profile.keymap,
+    &profile.sides,
+    &profile.combos,
+    &profile.custom_functions,
+    &profile.encoder_actions,
+    null,
+);
 
 const Trace = struct {
     inputs: [2]core.MatrixStateChangeQueue = .{ .Create(), .Create() },
@@ -14,28 +32,47 @@ const Trace = struct {
     candidate: Candidate = undefined,
     now: u64 = 0,
     output_count: usize = 0,
+
     fn init(self: *Trace) void {
-        self.reference = .{ .input_matrix_changes = &self.inputs[0], .encoder_event_changes = &self.encoders[0], .output_usb_commands = &self.outputs[0] };
-        self.candidate = .{ .input_matrix_changes = &self.inputs[1], .encoder_event_changes = &self.encoders[1], .output_usb_commands = &self.outputs[1] };
+        self.reference = .{
+            .input_matrix_changes = &self.inputs[0],
+            .encoder_event_changes = &self.encoders[0],
+            .output_usb_commands = &self.outputs[0],
+        };
+        self.candidate = .{
+            .input_matrix_changes = &self.inputs[1],
+            .encoder_event_changes = &self.encoders[1],
+            .output_usb_commands = &self.outputs[1],
+        };
     }
+
     fn tick(self: *Trace, delta: u64) !void {
         self.now += delta;
         const time: core.TimeSinceBoot = .from_absolute_us(self.now);
         try self.reference.Process(time);
         try self.candidate.Process(time);
         while (self.outputs[0].dequeue()) |expected| {
-            try std.testing.expectEqualDeep(expected, self.outputs[1].dequeue() orelse return error.MissingOutput);
+            try std.testing.expectEqualDeep(
+                expected,
+                self.outputs[1].dequeue() orelse return error.MissingOutput,
+            );
             self.output_count += 1;
         }
         try std.testing.expect(self.outputs[1].dequeue() == null);
         try std.testing.expectEqualDeep(self.reference.layers_activations, self.candidate.layers_activations);
         try std.testing.expectEqualDeep(self.outputs[0].current_mods, self.outputs[1].current_mods);
     }
+
     fn key(self: *Trace, index: usize, down: bool) !void {
-        const event: core.MatrixStateChange = .{ .key_index = @intCast(index), .pressed = down, .time = .from_absolute_us(self.now + 1000) };
+        const event: core.MatrixStateChange = .{
+            .key_index = @intCast(index),
+            .pressed = down,
+            .time = .from_absolute_us(self.now + 1000),
+        };
         for (&self.inputs) |*input| try input.enqueue(event);
         try self.tick(1000);
     }
+
     fn layer(self: *Trace, index: usize) void {
         for (1..profile.dimensions.layer_count) |i| {
             self.reference.layers_activations.set_layer_state(@intCast(i), index == i);
@@ -43,6 +80,7 @@ const Trace = struct {
         }
     }
 };
+
 test "friend import retains typed actions and real processor behavior including callback combinations" {
     try std.testing.expectEqualDeep(original.keymap, profile.keymap);
     try std.testing.expectEqualDeep(original.combos, profile.combos);

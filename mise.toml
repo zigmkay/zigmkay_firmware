@@ -2,52 +2,38 @@
 zig = "0.17.0"
 
 [tasks.test]
-description = "Run offline companion checks"
+description = "Run all offline companion tests"
 run = "zig build test"
 
 [tasks.check]
-description = "Check the bootstrap and compiler pin without device access"
+description = "Compile every source, tool and test without device access"
 run = "zig build check"
 
-[tasks.check-compatibility]
-description = "Require accepted compatibility gates (currently reports pending gates)"
-run = "zig build check-compatibility"
-
 [tasks."desktop:check"]
-description = "Resolve and compile pinned GUI dependencies without launching or accessing devices"
+description = "Compile the native editor, GUI dependencies and smoke probes without launching or accessing devices"
 dir = "{{config_root}}"
-run = "zig build check-desktop-dependencies -Ddesktop-dependencies=true -Ddesktop-vectors=true -j4"
+run = "zig build check -Ddesktop -j4"
 
 [tasks.editor]
 dir = "{{config_root}}"
 description = "Launch the editor and automatically connect to the keyboard"
-run = "zig build run-desktop -Dapplication-bundle=true -Ddesktop-dependencies=true -Ddesktop-vectors=true -j4"
+run = "zig build run -Dbundle -j4"
 
 [tasks."editor:build"]
 dir = "{{config_root}}"
 description = "Assemble the complete offline editor and companion without launching"
-run = "zig build bundle-application -Dapplication-bundle=true -Ddesktop-dependencies=true -Ddesktop-vectors=true -j4"
+run = "zig build bundle -Dbundle -j4"
 
-
-[tasks."companion"]
-dir = "{{config_root}}"
-description = "Start the resident companion and automatically connect to the keyboard"
-run = "zig build run-companion -Dapplication-bundle=true -Ddesktop-dependencies=true -Ddesktop-vectors=true -j4"
-
-[tasks."companion:build"]
-dir = "{{config_root}}"
-description = "Assemble the complete offline editor and companion without launching"
-run = "zig build bundle-application -Dapplication-bundle=true -Ddesktop-dependencies=true -Ddesktop-vectors=true -j4"
-
-[tasks."companion:test"]
-dir = "{{config_root}}"
-description = "Test companion visibility and placement without hardware"
-run = "zig build test-desktop-companion test-companion-placement -Ddesktop-dependencies=true -Ddesktop-vectors=true -j4"
 [tasks."editor:test"]
 dir = "{{config_root}}"
-description = "Run offline GUI launch, practice and companion fixtures"
-run = "zig build test-desktop-launch test-desktop-practice test-desktop-rundown test-desktop-source-refresh test-desktop-companion test-companion-placement -Ddesktop-dependencies=true -Ddesktop-vectors=true -j4"
+description = "Run offline GUI launch, onboarding, tutor, draft, source-refresh and companion fixtures"
+run = "zig build test-desktop -Ddesktop -j4"
+
+[tasks.companion]
+dir = "{{config_root}}"
+description = "Start the resident companion and automatically connect to the keyboard"
+run = "zig build run -Dbundle -j4 -- --background"
 
 [tasks."typing-practice:test"]
 description = "Check practice generation, metrics, native storage and path policy without devices"
-run = "zig build test-practice-data test-app-paths -Dpractice-data-only=true -j4 --test-timeout 45s"
+run = "zig build test-practice -Donly=practice -j4 --test-timeout 45s"

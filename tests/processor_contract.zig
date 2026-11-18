@@ -16,11 +16,23 @@ test "downstream tap emits press and release through the official processor" {
     const keymap: [1][1]?core.KeyDef = .{.{.{ .tap_only = .{ .key_press = .{ .tap_keycode = 4 } } }}};
     const sides: [1]core.Side = .{.X};
     const callbacks: core.CustomFunctions = .{ .on_event = onEvent };
-    const Processor = firmware.processing.CreateProcessorType(&dimensions, &keymap, &sides, &.{}, &callbacks, &.{}, null);
+    const Processor = firmware.processing.CreateProcessorType(
+        &dimensions,
+        &keymap,
+        &sides,
+        &.{},
+        &callbacks,
+        &.{},
+        null,
+    );
     var input = core.MatrixStateChangeQueue.Create();
     var encoders = core.EncoderEventQueue.Create();
     var output = core.OutputCommandQueue.Create();
-    var processor: Processor = .{ .input_matrix_changes = &input, .encoder_event_changes = &encoders, .output_usb_commands = &output };
+    var processor: Processor = .{
+        .input_matrix_changes = &input,
+        .encoder_event_changes = &encoders,
+        .output_usb_commands = &output,
+    };
     const time = core.TimeSinceBoot.from_absolute_us(1000);
     try input.enqueue(.{ .time = time, .pressed = true, .key_index = 0 });
     try processor.Process(time);

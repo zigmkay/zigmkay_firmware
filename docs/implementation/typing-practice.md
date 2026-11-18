@@ -33,7 +33,7 @@ incoherent random topic claims and corrected acronym article agreement.
 The [selected planning mockup](typing-practice-design-reference.png) is a generated
 design reference, not a screenshot of the application. The user guide's images
 are real native app output with deterministic offline exercise/result fixtures.
-`apps/desktop/practice_fixture.zig` adds explicit US symbol actions to the generic
+`src/app/practice_fixture.zig` adds explicit US symbol actions to the generic
 QWERTY fixture only; the ordinary template lacks some symbol routes. No saved
 project or firmware is altered by capture. Scripted counts do not represent a
 human typing trial, hardware validation or learning efficacy.

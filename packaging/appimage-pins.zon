@@ -1,0 +1,16 @@
+.{
+    // Asset IDs of tagged releases. Continuous releases replace their assets,
+    // which removes the old IDs.
+    .tool_url = "https://api.github.com/repos/AppImage/appimagetool/releases/assets/324406736",
+    .tool_sha256 = "ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0",
+    .tool_revision = "8c8c91f762b412a19f4e8d2c4b35afb98f2d7c81",
+    .runtime_url = "https://api.github.com/repos/AppImage/type2-runtime/releases/assets/326011592",
+    .runtime_sha256 = "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d",
+    .runtime_revision = "dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
+    .runtime_source_url = "https://codeload.github.com/AppImage/type2-runtime/tar.gz/dd6cebedcbddde9c82f89b011e8e1d40b6e43868",
+    .runtime_source_sha256 = "f5fec23be76e50e2445ed2d018bac49b367490fc483c62c4637e99ec705d27ba",
+    .fuse_source_url = "https://github.com/libfuse/libfuse/releases/download/fuse-3.15.0/fuse-3.15.0.tar.xz",
+    .fuse_source_sha256 = "70589cfd5e1cff7ccd6ac91c86c01be340b227285c5e200baa284e401eea2ca0",
+    .squashfuse_source_url = "https://github.com/vasi/squashfuse/archive/0.5.2.tar.gz",
+    .squashfuse_source_sha256 = "db0238c5981dabbd80ee09ae15387f390091668ca060a7bc38047912491443d3",
+}

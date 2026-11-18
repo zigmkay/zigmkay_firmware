@@ -2,6 +2,10 @@
 const std = @import("std");
 const jobs = @import("companion-jobs");
 const pins = @import("bundle-pins");
+const builtin = @import("builtin");
+// The runtime closure comes from `build/runtime.zig` through `bundle-pins`.
+const runtime_source_root = pins.runtime_source_root;
+const runtime_closure = pins.runtime_closure;
 const Assembler = struct {
     a: std.mem.Allocator,
     io: std.Io,
@@ -88,8 +92,10 @@ const Assembler = struct {
         var manifest = try jobs.package_manifest.parse(self.a, bytes);
         defer manifest.deinit();
         for (manifest.dependencies) |dep| {
-            if (dep.lazy and !std.mem.eql(u8, dep.name, "sdl3") and !std.mem.eql(u8, dep.name, "freetype") and !std.mem.eql(u8, dep.name, "svg2tvg")) continue;
-            if (dep.package_hash) |dependency| try self.legalPackage(dependency);
+            if (dep.package_hash) |dependency| {
+                if (dep.lazy) std.Io.Dir.cwd().access(self.io, try std.fs.path.join(self.a, &.{ self.packages, dependency }), .{}) catch continue;
+                try self.legalPackage(dependency);
+            }
         }
     }
 };
@@ -99,32 +105,84 @@ fn less(_: void, a: []const u8, b: []const u8) bool {
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
     const args = try init.minimal.args.toSlice(a);
-    if (args.len != 8) return error.InvalidAssemblyArguments;
+    if (args.len != 10) return error.InvalidAssemblyArguments;
     const repository = args[1];
     const compiler = try std.Io.Dir.realPathFileAbsoluteAlloc(init.io, args[2], a);
     const distribution = std.fs.path.dirname(compiler).?;
-    const resources = try std.fs.path.join(a, &.{ args[4], "Contents/Resources" });
+    const layout = switch (builtin.os.tag) {
+        .macos => "Contents/Resources",
+        .windows => "resources",
+        .linux => "usr/share/zigmkay",
+        else => return error.UnsupportedBundlePlatform,
+    };
+    // The build reuses its output directories; start empty so files from an
+    // earlier layout never ship.
+    for ([_][]const u8{ args[4], args[9] }) |output| {
+        try std.Io.Dir.cwd().deleteTree(init.io, output);
+        try std.Io.Dir.cwd().createDirPath(init.io, output);
+    }
+    const resources = try std.fs.path.join(a, &.{ args[4], layout });
     var assembly: Assembler = .{ .a = a, .io = init.io, .output = resources, .packages = args[3], .seen = .init(a), .legal_seen = .init(a) };
     for ([_][]const u8{ "LICENSE", "NOTICE" }) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, name }), try std.fs.path.join(a, &.{ "licenses/application", name }));
     for (pins.license_hashes) |hash| try assembly.legalPackage(hash);
     try assembly.copy(compiler, "toolchain/zig" ++ if (@import("builtin").os.tag == .windows) ".exe" else "");
     try assembly.copy(try std.fs.path.join(a, &.{ distribution, "lib" }), "toolchain/lib");
     try assembly.copy(try std.fs.path.join(a, &.{ distribution, "LICENSE" }), "licenses/Zig.txt");
-    for ([_][]const u8{ "project", "layout-model", "runner", "importer" }) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, "packages", name }), try std.fs.path.join(a, &.{ "build/packages", name }));
+    for (runtime_closure) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, runtime_source_root, name }), try std.fs.path.join(a, &.{ "build/" ++ runtime_source_root, name }));
     try assembly.copy(try std.fs.path.join(a, &.{ repository, "runtime/build.zig" }), "build/build.zig");
-    try assembly.copy(args[6], "tools/picotool_flash" ++ if (@import("builtin").os.tag == .windows) ".exe" else "");
-    try assembly.copy(args[7], "tools/picotool" ++ if (@import("builtin").os.tag == .windows) ".exe" else "");
+    if (builtin.os.tag == .windows) {
+        try assembly.copy(args[6], "tools/bootsel-transfer.exe");
+    } else {
+        try assembly.copy(args[6], "tools/picotool_flash");
+        try assembly.copy(args[7], "tools/picotool");
+    }
     try assembly.package(pins.firmware_hash);
     try assembly.package(pins.microzig_hash);
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "build/build.zig.zon" }), .data = pins.manifest });
     assembly.hash.update(pins.manifest);
-    const manifest: jobs.application_bundle.Manifest = .{ .id = assembly.hash.finalResult(), .firmware_revision = pins.firmware_revision, .wrapper_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[6], a, .limited(128 * 1024 * 1024))), .picotool_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[7], a, .limited(128 * 1024 * 1024))) };
+    const manifest: jobs.application_bundle.Manifest = .{ .version = 2, .backend = if (builtin.os.tag == .windows) .windows_bootsel else .picotool, .id = assembly.hash.finalResult(), .firmware_revision = pins.firmware_revision, .wrapper_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[6], a, .limited(128 * 1024 * 1024))), .picotool_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[7], a, .limited(128 * 1024 * 1024))) };
     var text: std.Io.Writer.Allocating = .init(a);
     try std.zon.stringify.serialize(manifest, .{}, &text.writer);
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "application.zon" }), .data = text.written() });
-    // Native executable and resources are adjacent in the macOS bundle layout.
-    try std.Io.Dir.cwd().copyFile(args[5], .cwd(), try std.fs.path.join(a, &.{ args[4], "Contents/MacOS/zigmkay-companion" }), init.io, .{ .make_path = true });
-    const plist = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>zigmkay-companion</string><key>CFBundleIdentifier</key><string>org.zigmkay.companion</string><key>CFBundleName</key><string>Zigmkay</string><key>CFBundlePackageType</key><string>APPL</string></dict></plist>";
-    try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ args[4], "Contents/Info.plist" }), .data = plist });
-    if (@import("builtin").os.tag == .windows) try jobs.bundle_payload.pack(a, init.io, args[5], resources, try std.fs.path.join(a, &.{ args[4], "Zigmkay.exe" }));
+    const metadata = try std.fmt.allocPrint(a, "version={s}\nrevision={s}\narchitecture={s}\nminimum_os={s}\nunsigned_preview=true\n", .{ pins.application_version, pins.source_revision, @tagName(builtin.cpu.arch), switch (builtin.os.tag) {
+        .macos => "macOS 15",
+        .windows => "Windows 11",
+        .linux => "glibc 2.35; Linux 5.15",
+        else => unreachable,
+    } });
+    try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "release.txt" }), .data = metadata });
+    switch (builtin.os.tag) {
+        .macos => {
+            try std.Io.Dir.cwd().copyFile(args[5], .cwd(), try std.fs.path.join(a, &.{ args[4], "Contents/MacOS/zigmkay-companion" }), init.io, .{ .make_path = true });
+            const numeric_version = pins.application_version[0 .. std.mem.indexOfScalar(u8, pins.application_version, '-') orelse pins.application_version.len];
+            const plist = try std.fmt.allocPrint(a, "<?xml version=\"1.0\" encoding=\"UTF-8\"?><plist version=\"1.0\"><dict><key>CFBundleExecutable</key><string>zigmkay-companion</string><key>CFBundleIdentifier</key><string>org.zigmkay.companion</string><key>CFBundleName</key><string>Zigmkay</string><key>CFBundleIconFile</key><string>Zigmkay.icns</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>{s}</string><key>CFBundleVersion</key><string>{s}</string><key>ZigmkayVersion</key><string>{s}</string><key>LSMinimumSystemVersion</key><string>15.0</string><key>ZigmkayRevision</key><string>{s}</string><key>ZigmkayArchitecture</key><string>{s}</string></dict></plist>", .{ numeric_version, numeric_version, pins.application_version, pins.source_revision, @tagName(builtin.cpu.arch) });
+            try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ args[4], "Contents/Info.plist" }), .data = plist });
+            try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "Zigmkay.icns" }), .data = @embedFile("application-icns") });
+        },
+        .windows => try jobs.bundle_payload.pack(a, init.io, args[5], resources, try std.fs.path.join(a, &.{ args[4], "Zigmkay.exe" })),
+        .linux => {
+            try std.Io.Dir.cwd().copyFile(args[5], .cwd(), try std.fs.path.join(a, &.{ args[4], "usr/bin/zigmkay-companion" }), init.io, .{ .make_path = true });
+            try std.Io.Dir.cwd().copyFile(args[8], .cwd(), try std.fs.path.join(a, &.{ args[4], "AppRun" }), init.io, .{});
+            try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ args[4], "zigmkay.desktop" }), .data = "[Desktop Entry]\nType=Application\nName=Zigmkay (unsigned preview)\nExec=zigmkay-companion\nIcon=zigmkay\nCategories=Utility;Development;\nTerminal=false\n" });
+            const app_dir = try std.Io.Dir.cwd().openDir(init.io, args[4], .{});
+            defer app_dir.close(init.io);
+            const png = @embedFile("application-png");
+            try app_dir.writeFile(init.io, .{ .sub_path = "zigmkay.png", .data = png });
+            try app_dir.writeFile(init.io, .{ .sub_path = ".DirIcon", .data = png });
+            const theme = "usr/share/icons/hicolor/";
+            try app_dir.createDirPath(init.io, theme ++ "scalable/apps");
+            try app_dir.createDirPath(init.io, theme ++ "256x256/apps");
+            try app_dir.writeFile(init.io, .{ .sub_path = theme ++ "scalable/apps/zigmkay.svg", .data = @embedFile("application-svg") });
+            try app_dir.writeFile(init.io, .{ .sub_path = theme ++ "256x256/apps/zigmkay.png", .data = png });
+            try assembly.copy(try std.fs.path.join(a, &.{ repository, "packaging/linux/70-zigmkay.rules" }), "70-zigmkay.rules");
+        },
+        else => unreachable,
+    }
+    // Keep corresponding sources outside the download's runtime resources.
+    // Only selected package hashes are copied; never archive a developer cache.
+    var sources: Assembler = .{ .a = a, .io = init.io, .output = args[9], .packages = args[3], .seen = .init(a), .legal_seen = .init(a) };
+    var firmware_sources = assembly.seen.keyIterator();
+    while (firmware_sources.next()) |hash| try sources.package(hash.*);
+    var desktop_sources = assembly.legal_seen.keyIterator();
+    while (desktop_sources.next()) |hash| try sources.package(hash.*);
 }

@@ -12,7 +12,7 @@ At the original research checkpoint, there was no database engine. Completed exe
 
 The implementation serializes bounded records, synchronizes the temporary file, and publishes it atomically with exclusive linking. Repeated writes of the same ID/content are idempotent. Different application instances publish different files. A background worker performs writes and queries. Queries scan files, filter exact cohorts, rebuild weighted aggregates and return ten-run pages. Corrupt and unknown-version records are retained and reported. The current maximum serialized record size is 512 KiB.
 
-See [history implementation](../../packages/desktop/src/practice_history.zig), [background persistence](../../packages/desktop/src/practice_history_runtime.zig), and [record schema](../../packages/desktop/src/practice_results.zig). Package A subsequently delivered the user-directory SQLite database and event capture. This baseline explains the original storage decision.
+See [history implementation](../../src/desktop/practice_history.zig), [background persistence](../../src/desktop/practice_history_runtime.zig), and [record schema](../../src/desktop/practice_results.zig). Package A subsequently delivered the user-directory SQLite database and event capture. This baseline explains the original storage decision.
 
 The original count-only records retain timestamps, active duration, attempts, correct attempts, corrections, per-character opportunities/misses/retries, substitutions, possible routes and comparison context. They cannot reconstruct individual timing samples. New records also retain Package A's event payloads.
 

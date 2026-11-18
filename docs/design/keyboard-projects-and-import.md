@@ -28,33 +28,35 @@ collections, import tooling and discovery of multiple device identities.
 
 ## What exists today
 
-- [Startup](../../apps/desktop/main.zig) creates the curated LK7 QWERTY template
+- [Startup](../../src/app/main.zig) creates the curated LK7 QWERTY template
   before trying the remembered project. Its default project directory is
   `qwerty`. The toolbar displays a keyboard name; it does not offer a board
   picker. Only the curated LK7 identity gets the four built-in profile choices.
-- [The catalog](../../packages/catalog/src/root.zig) already consumes all 14
-  selected firmware entries. [The adapter](../../packages/firmware-adapter/src/catalog_project.zig)
+- [The catalog](../../src/catalog/root.zig) already consumes all 14
+  selected firmware entries. [The adapter](../../src/firmware/catalog_project.zig)
   creates actual default projects, preserves callback sources and resolves
   saved documents to their board contracts. Other-board opening already has
-  support in [project file operations](../../packages/desktop/src/project_files.zig).
-- [Schema 1](../../packages/project/src/root.zig) has one `board_id`,
+  support in [project file operations](../../src/desktop/project_files.zig).
+- [Schema 1](../../src/project/root.zig) has one `board_id`,
   `profile_id`, key index order, layer list, combo list and encoder action list
-  per document. [The model](../../packages/desktop/src/model.zig) owns arbitrary
+  per document. [The model](../../src/desktop/model.zig) owns arbitrary
   validated board contracts. Changing keyboard types does not require
   generalizing the action model.
-- Only LK7 has curated schematic geometry. The other 13 catalog entries use a
-  ten-column index grid with neutral hand metadata. Editing is possible, but
-  the grid is a poor keyboard reference and tutor diagram.
-- [Profile associations](../../packages/desktop/src/profile_projects.zig) are
+- LK7 has curated schematic geometry and Molekula a measured spatial layout
+  (see [Spatial layouts](../keyboard-projects.md#spatial-layouts)). The other
+  12 catalog entries use a ten-column index grid with hands from their
+  processing sides. Editing is possible, but the grid is a poor keyboard
+  reference and tutor diagram.
+- [Profile associations](../../src/desktop/profile_projects.zig) are
   keyed by board/profile and retain absolute local project paths. They are
   preferences, not a portable collection or a history of built layouts.
 - Startup freezes one `running_model`, one identity, one label cache and one
   live driver. Editor changes deliberately do not alter that running layout.
-- [Discovery](../../packages/session/src/live_adapter.zig) and
-  [native HID](../../packages/platform/src/native_hid.zig) reject multiple
+- [Discovery](../../src/session/live_adapter.zig) and
+  [native HID](../../src/platform/native_hid.zig) reject multiple
   matching devices unless an exact path is selected. The application currently
   supplies no path. A project selector alone cannot solve two connected boards.
-- [The session reducer](../../packages/session/src/root.zig) normally needs an
+- [The session reducer](../../src/session/root.zig) normally needs an
   expected complete identity before the handshake. The bootloader-only
   discovery exception must remain separate from companion verification.
 - Tutor labels and geometry already come from a selected project or the single
@@ -309,7 +311,7 @@ before that hardware step.
    fetching can follow later, recording an immutable commit and content hashes.
 2. **Inspect without running upstream build scripts.** Read the manifest and
    capture the literal source-import closure with
-   [sources.zig](../../packages/project/src/sources.zig). Display source paths,
+   [sources.zig](../../src/project/sources.zig). Display source paths,
    firmware version and unsupported imports. Keep the original repository intact.
 3. **Evaluate a supported module contract.** Use an application-owned Zig 0.17.0
    helper that imports only the captured keymap module and known modules such as
@@ -319,7 +321,7 @@ before that hardware step.
    meaning. This compilation is an explicit import action, distinct from passive
    folder inspection, and should be bounded in time, resources and input/output.
 4. **Lift typed values.** Reuse
-   [adapter.zig](../../packages/project/src/adapter.zig), convert layer indices
+   [adapter.zig](../../src/project/adapter.zig), convert layer indices
    to stable layer IDs, preserve transparent `null` versus explicit `.none`,
    combo ordering, timings, modifier nullability, post-tap behavior and encoder
    slots. Validate key counts, index order and sides against the chosen board;
