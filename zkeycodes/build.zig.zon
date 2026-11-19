@@ -3,11 +3,12 @@
     .version = "0.1.0",
     .fingerprint = 0xd829e8133e5db3ac,
     .minimum_zig_version = "0.17.0",
-    .dependencies = .{
-        .zigmkay = .{
-            .path = "../zigmkay",
-        },
-    },
+    // zigmkay is not a package dependency: zkeycodes lives inside the
+    // zigmkay_firmware package, which depends on it, so a dependency back on
+    // that package would be circular. Its standalone build uses the zigmkay
+    // source next to it (../src), and the parent package injects its own
+    // zigmkay module when building firmware.
+    .dependencies = .{},
     .paths = .{
         "build.zig",
         "build.zig.zon",

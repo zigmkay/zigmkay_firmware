@@ -10,7 +10,7 @@ ZigMkay is a keyboard firmware made in zig. You also configure your own keymaps 
 
 ## Flashing
 
-Run these from the `keyboards/` folder. `-Dkeyboard=<name>` picks the keyboard; `zig build --help` lists the available names.
+Run these from the repository root. `-Dkeyboard=<name>` picks the keyboard; `zig build --help` lists the available names.
 
 ```bash
 zig build flash -Dkeyboard=<name>        # host default (see below)

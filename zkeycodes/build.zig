@@ -8,8 +8,11 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("root.zig"),
         .target = target,
     });
-    const zigmkay_dep = b.dependency("zigmkay", .{});
-    const zigmkay_mod = zigmkay_dep.module("zigmkay");
+    // zkeycodes lives inside the zigmkay_firmware package, so use the zigmkay
+    // source next to it instead of a package dependency (which would be
+    // circular). Firmware builds create their own zkeycodes module from
+    // root.zig and inject their zigmkay module into it.
+    const zigmkay_mod = b.createModule(.{ .root_source_file = b.path("../src/root.zig") });
 
     mod.addImport("zigmkay", zigmkay_mod);
 
