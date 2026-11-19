@@ -407,6 +407,9 @@ pub const CustomFunctions = struct {
     /// command queue so that custom actions can enqueue USB output.
     /// Set to null (the default) when no custom logic is needed.
     on_event: ?*const fn (event: ProcessorEvent, layers: *LayerActivations, output_queue: *OutputCommandQueue) void = null,
+    /// Identifies this keymap to a connected companion app. Tools that generate
+    /// keymaps set it; all zeros means unknown.
+    companion_keymap_id: [16]u8 = @splat(0),
 };
 pub const ProcessorEvent = union(enum) {
     Tick,

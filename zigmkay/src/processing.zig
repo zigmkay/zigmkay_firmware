@@ -1,6 +1,7 @@
 const std = @import("std");
 const core = @import("core.zig");
 const stats_collector = @import("stats_collector.zig");
+const companion = @import("companion.zig");
 
 pub fn CreateProcessorType(
     comptime keymap_dimensions: *const core.KeymapDimensions,
@@ -17,6 +18,7 @@ pub fn CreateProcessorType(
         input_matrix_changes: *core.MatrixStateChangeQueue,
         encoder_event_changes: *core.EncoderEventQueue,
         output_usb_commands: *core.OutputCommandQueue,
+        companion_session: ?*companion.Session = null,
 
         layers_activations: core.LayerActivations = .{},
         stats: stats_collector.StatsCollector = .{},
@@ -382,6 +384,7 @@ pub fn CreateProcessorType(
 
         // AUTOFIRE END
         fn on_event(self: *Self, event: core.ProcessorEvent) void {
+            if (self.companion_session) |session| session.processor_event(event);
             if (custom.on_event) |ev| {
                 ev(event, &self.layers_activations, self.output_usb_commands);
             }
