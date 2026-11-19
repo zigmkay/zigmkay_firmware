@@ -172,13 +172,12 @@ pub const Text = struct {
         session: *@import("practice.zig").Session,
         now: u64,
     ) !void {
-        if (session.recorder) |recorder| recorder.clock = .frame;
         for (commands) |command| {
             if (command == .KeyCodePress) {
                 const code = command.KeyCodePress;
                 const shortcut = self.mods.left_ctrl or self.mods.right_ctrl or self.mods.left_gui or self.mods.right_gui;
                 if (!shortcut and code == 42) {
-                    session.backspaceAt(now);
+                    session.backspace();
                     continue;
                 }
                 if (!shortcut and code == 43) {

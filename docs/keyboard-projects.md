@@ -9,12 +9,16 @@ leaves it untouched. No keyboard build or Flash target is exposed before
 selection.
 
 **+ Keyboard** shows the catalog grouped by hardware, with PCB revision chips;
-confirm the actual revision, because key count cannot identify a PCB. **New
-layout** then starts from a template, a copy of any layout, a blank Base layer
-or a Git import, and previews the result on this keyboard before anything is
-written. Templates are the firmware default of each selector of the hardware;
-the LK7 offers its built-in Rollercole, QWERTY, EurKEY draft and EurKEY Next
-Mac layouts, which keep the curated LK7 board identity of earlier projects.
+confirm the actual revision, because key count cannot identify a PCB and
+builds use the wiring of that revision. Firmware selectors that share a PCB
+revision are one keyboard: the Leonardo Keycaprio 0.7, for example, is
+`lk7`, `keycaprio_colemak_0_7` and `keycaprio_us_intl_0_7`. **New layout**
+then starts from a template, a copy of any layout, a blank Base layer or a Git
+import, and previews the result on this keyboard before anything is written.
+Templates are the firmware default of each selector of the revision, the
+builder's own first; in place of its firmware default the LK7 offers its
+built-in Rollercole, QWERTY, EurKEY draft and EurKEY Next Mac layouts, which
+keep the curated LK7 board identity of earlier projects.
 Each created layout gets an independent profile ID and a readable directory.
 
 A copy from other hardware, such as a Keycaprio 0.7 layout on a 0.4, is moved
@@ -27,31 +31,41 @@ companion and tutor share catalog key placement. Display hands and thumbs
 are independent of processing-side metadata; Dasbob, for example, retains its
 firmware's neutral processing sides.
 
-## Spatial layouts
+## Key placement
 
-A board is drawn as built only when it has a spatial layout: a ZON file in
-[`src/catalog/spatial/`](../src/catalog/spatial/) registered in
-[`spatial.zig`](../src/catalog/spatial.zig). Without one, its keys are drawn
-linearly, ten per row in firmware key-index order, so nothing suggests a shape
-that was not measured. LK7 keeps its hand-drawn grid.
+Keys are drawn on a schematic layout made from the board's PCB, so they read
+easily and are simple to pick: every key has the same size, finger keys stand
+upright one key apart and keep the column stagger of the PCB in quarter
+keys. One thumb key per hand stands upright as a reference where the PCB puts
+it; the others fan out from it, each turned at most 10 degrees further than
+its neighbour, and labels turn with their key. The layouts are ZON
+files in [`src/catalog/schematic/`](../src/catalog/schematic/), registered by
+selector in [`schematic.zig`](../src/catalog/schematic.zig). A board without
+one is drawn linearly, ten keys per row in firmware key-index order.
 
-A spatial layout lists every key once with its firmware key index, the PCB
-designator and the switch centre exactly as a KiCad position export (CPL)
-writes it: millimetres, y up, rotation in degrees counterclockwise. `pitch`
-gives the horizontal and vertical switch spacing; one key unit is the
-horizontal pitch. Hands, thumbs and the home row are explicit fields. To add a
-board:
+| Layout | Selectors | Drawn from |
+| --- | --- | --- |
+| Leonardo Keycaprio, 34 keys | `lk6`, `lk7`, `lk8`, `keycaprio_colemak_0_6`, `keycaprio_colemak_0_7`, `keycaprio_us_intl_0_7` | [Leonardo-KeycapRio](https://github.com/StephanMoeller/Leonardo-KeycapRio) PCB 0.6 at `473f41f` |
+| Leonardo Keycaprio, 30 keys | `lk1`, `lk2`, `keycaprio_colemak_0_4` | Leonardo-KeycapRio PCB 0.4 at `473f41f` |
+| Clacky Chan | `clacky_chan`, `clackychan_colemak` | [clacky-chan](https://github.com/StephanMoeller/clacky-chan) at `328530c`; thumbs after its photos |
+| Tucky Two Times | `tuckytwotimes` | [Tucky-Two-Times](https://github.com/StephanMoeller/Tucky-Two-Times) at `29dedf9` |
+| Molekula | `molekula` | [molekula](https://github.com/opendata-nuernberg/molekula) Molekula2 PCB at `78ca099` |
+| Dasbob | `dasbob` | [DASBOB](https://github.com/GroooveBob/DASBOB) at `3f49dda` |
 
-1. Export the positions from its PCB, or take `production/positions.csv`.
-2. Match each switch to a firmware key index through the matrix: the switch
-   column net and its diode row net against the board's `pin_mappings`.
-3. Copy the values unchanged and name the source revision in the file header.
+Revisions that differ by a few millimetres share one layout; what matters is
+their key count. Split boards ship one PCB per half, so the other half is its
+mirror. A layout lists every key once with its firmware key index, top-left
+corner in key units (y down), clockwise rotation, hand, thumb group and home
+row. Key indexes follow each board's keymap, which lists rows from left to
+right and then the thumbs; Molekula's were matched through its PCB nets. To
+add a board, take its switch positions from the PCB (KiCad or
+`production/positions.csv`), straighten each hand onto the grid, and name the
+source revision in the file header.
 
-Molekula uses the Molekula2 PCB of
-[opendata-nuernberg/molekula](https://github.com/opendata-nuernberg/molekula)
-at `78ca099`; its inner thumb keys are turned by 10 and 20 degrees.
-Key IDs stay equal to the key index, so adding or correcting a spatial layout
-leaves existing projects and their index digest unchanged.
+Key IDs do not depend on placement: they stay equal to the key index, and the
+LK7 keeps the curated IDs in [`lk7_key_ids.zig`](../src/catalog/lk7_key_ids.zig).
+Changing a layout therefore leaves existing projects and their index digest
+unchanged.
 
 ## Collections
 

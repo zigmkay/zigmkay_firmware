@@ -431,13 +431,37 @@ pub fn draw(state: *State, context: Context) !Action {
     const theme = ui.Theme.get(context.light);
     const scroll = dvui.scrollArea(@src(), .{}, .{ .expand = .both, .padding = .{}, .border = .{}, .background = false });
     defer scroll.deinit();
-    const canvas = dvui.box(@src(), .{}, .{
-        .expand = .horizontal,
+    const page = dvui.box(@src(), .{}, .{
+        .expand = .both,
         .min_size_content = .{ .w = keyboards_ui.canvas_width, .h = keyboards_ui.canvas_height },
         .padding = .{},
         .margin = .{},
         .background = true,
         .color_fill = .{ .color = theme.bg },
+    });
+    defer page.deinit();
+    // Pages are drawn on the design canvas, centered in wider windows. The
+    // top bar's strip spans the whole window.
+    const width = @max(keyboards_ui.canvas_width, page.data().contentRect().w);
+    const strip = dvui.box(@src(), .{}, .{
+        .rect = .{ .x = 0, .y = 0, .w = width, .h = 64 },
+        .background = true,
+        .color_fill = .{ .color = theme.panel },
+        .color_border = .{ .color = theme.border },
+        .border = .{ .h = 1 },
+        .padding = .{},
+        .margin = .{},
+    });
+    strip.deinit();
+    const canvas = dvui.box(@src(), .{}, .{
+        .rect = .{
+            .x = @round((width - keyboards_ui.canvas_width) / 2),
+            .y = 0,
+            .w = keyboards_ui.canvas_width,
+            .h = @max(keyboards_ui.canvas_height, page.data().contentRect().h),
+        },
+        .padding = .{},
+        .margin = .{},
     });
     defer canvas.deinit();
     var action: Action = .none;
@@ -477,14 +501,14 @@ pub fn draw(state: *State, context: Context) !Action {
     if (busy) drawBusy(state, theme, &action);
     if (context.dirty and !context.autosaves) {
         const warning = "The editor has unsaved changes.";
-        banner(theme, warning, ui.color(0xF59E0B), 0);
+        banner(theme, warning, theme.warning, 0);
         var opts = ui.options(theme, .{ .x = 560, .y = 1012, .w = 560, .h = 22 }, 13);
         opts.padding = .{};
         _ = dvui.checkbox(@src(), &state.discard, "Discard them when opening another project", opts);
         if (!state.discard and (action == .open or action == .create or action == .add_existing)) action = .none;
     }
     const diagnostic = std.mem.sliceTo(&state.diagnostic, 0);
-    if (diagnostic.len != 0) banner(theme, diagnostic, ui.color(0xF06B73), 1);
+    if (diagnostic.len != 0) banner(theme, diagnostic, theme.danger, 1);
     return action;
 }
 

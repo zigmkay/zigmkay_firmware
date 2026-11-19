@@ -31,29 +31,43 @@ fn cancelDrag(view: *View) void {
     if (dvui.dragName("key_chord")) dvui.dragEnd();
 }
 
-pub fn draw(view: *View, model: *const desktop.model.Model, cache: *const desktop.host_palette.Cache, theme: ui.Theme) !?Chord {
+/// Draws the OS keyboard. While the tap editor is open (`tap_editor`), a hint
+/// says that a click sets the tap.
+pub fn draw(view: *View, model: *const desktop.model.Model, cache: *const desktop.host_palette.Cache, theme: ui.Theme, tap_editor: bool) !?Chord {
+    const panel_rect = ui.panelRect(.os);
     const box = ui.panel(theme, .os);
     defer box.deinit();
     ui.label(theme, "OS keyboard", .{ .x = 20, .y = 20, .w = 140, .h = 26 }, 19);
     var muted = theme;
     muted.text = theme.muted;
-    ui.label(muted, cache.source_id, .{ .x = 152, .y = 26, .w = 460, .h = 18 }, 12);
+    const source_w = @min(@as(f32, 420), ui.editorFont(cache.source_id, 12).textSize(cache.source_id).w + 4);
+    ui.label(muted, cache.source_id, .{ .x = 152, .y = 26, .w = source_w, .h = 18 }, 12);
+    if (tap_editor) hint(theme, .{ .x = 152 + source_w + 14, .y = 18, .w = 250, .h = 28 });
     const symbols = desktop.labels.keycap_symbols.Symbol;
-    if (toggle(theme, view.shift, symbols.literal(.shift) ++ " Shift", "os.shift", .{ .x = 628, .y = 14, .w = 72, .h = 30 })) view.shift = !view.shift;
+    if (toggle(theme, view.shift, symbols.literal(.shift) ++ " Shift", "os.shift", .{ .x = panel_rect.w - 172, .y = 14, .w = 72, .h = 30 })) view.shift = !view.shift;
     const option = if (cache.host == .macos) symbols.literal(.option) ++ " Option" else "Alt";
-    if (toggle(theme, view.option, option, "os.option", .{ .x = 708, .y = 14, .w = 72, .h = 30 })) view.option = !view.option;
+    if (toggle(theme, view.option, option, "os.option", .{ .x = panel_rect.w - 92, .y = 14, .w = 72, .h = 30 })) view.option = !view.option;
     // A drag started from an older input source preview no longer matches its captions.
     if (view.source_revision != null and view.source_revision.? != cache.revision) cancelDrag(view);
     view.source_revision = cache.revision;
     if (view.drag) |drag| drag.validate(model) catch cancelDrag(view);
     var result: ?Chord = null;
+    // Rows are centered; one unit is a regular key and its gap.
+    var widest: f32 = 0;
+    for (desktop.host_palette.rows) |row| {
+        var units: f32 = 0;
+        for (row) |key| units += key.units;
+        widest = @max(widest, units);
+    }
+    const unit = @min(@as(f32, 64), (panel_rect.w - 40) / widest);
+    const left = (panel_rect.w - widest * unit) / 2;
     for (desktop.host_palette.rows, 0..) |row, ri| {
-        var x: f32 = 25;
+        var x: f32 = left;
         for (row, 0..) |key, ki| {
             const caption = cache.caption(key.code, view.shift, view.option);
             const length = std.unicode.utf8CountCodepoints(caption) catch caption.len;
             const size: f32 = if (length > 3) 13 else 19;
-            const bounds: dvui.Rect = .{ .x = x, .y = 60 + @as(f32, @floatFromInt(ri)) * 50, .w = 50 * key.units - 4, .h = 44 };
+            const bounds: dvui.Rect = .{ .x = x, .y = 58 + @as(f32, @floatFromInt(ri)) * 44, .w = unit * key.units - 5, .h = 39 };
             var opts = ui.options(theme, bounds, size);
             opts.padding = .all(2);
             opts.id_extra = ri * 100 + ki;
@@ -67,7 +81,7 @@ pub fn draw(view: *View, model: *const desktop.model.Model, cache: *const deskto
             if (try dragSource(view, model, key.code, caption, size, opts)) |action| {
                 if (result == null) result = action;
             }
-            x += 50 * key.units;
+            x += unit * key.units;
         }
     }
     return result;
@@ -116,4 +130,27 @@ fn dragSource(view: *View, model: *const desktop.model.Model, code: u8, caption:
     });
     key.drawFocus();
     return result;
+}
+
+/// The accent pill that tells a click on the OS keyboard sets the tap.
+fn hint(theme: ui.Theme, bounds: dvui.Rect) void {
+    const pill = dvui.box(@src(), .{}, .{
+        .rect = bounds,
+        .background = true,
+        .color_fill = .{ .color = ui.mix(theme.panel, theme.accent, 0.14) },
+        .color_border = .{ .color = theme.accent },
+        .border = .all(1),
+        .corners = .all(14),
+        .padding = .{},
+        .margin = .{},
+        .tag = "os.hint",
+    });
+    pill.deinit();
+    dvui.icon(@src(), "hint", ui.control_icons.keyboard, .{}, .{
+        .rect = .{ .x = bounds.x + 10, .y = bounds.y + 7, .w = 14, .h = 14 },
+        .color_text = .{ .color = theme.accent },
+        .padding = .{},
+        .margin = .{},
+    });
+    ui.label(theme, "Click a key to set the tap", .{ .x = bounds.x + 30, .y = bounds.y + 5, .w = bounds.w - 36, .h = 18 }, 12);
 }

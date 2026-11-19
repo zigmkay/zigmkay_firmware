@@ -7,7 +7,7 @@ const toolbar = @import("toolbar-ui");
 const layers = @import("layer-ui");
 const keyboard = @import("keyboard-ui");
 const host = @import("host-palette-ui");
-const inspector = @import("inspector-ui");
+const key_editor = @import("key-editor-ui");
 const combos = @import("combo-ui");
 const callbacks = @import("callback-ui");
 const paths = @import("paths-ui");
@@ -38,7 +38,7 @@ pub const View = struct {
     layers: layers.View = .{},
     keyboard: keyboard.View = .{},
     host: host.View = .{},
-    inspector: inspector.View = .{},
+    key_editor: key_editor.View = .{},
     modal: enum { none, combo, callback, paths, encoders } = .none,
     combo: ?desktop.combo_editor.Session = null,
     encoders: ?desktop.encoder_editor.Session = null,
@@ -72,6 +72,8 @@ const Requests = struct {
     request: ?dispatch.Request = null,
     inspector: ?desktop.inspector_action.Action = null,
     recovery: ?dispatch.Recovery = null,
+    /// The key half clicked this frame; its editor opens once the click is dispatched.
+    opened: ?keyboard.Part = null,
 
     fn offer(self: *Requests, request: dispatch.Request) void {
         if (self.request == null) self.request = request;
@@ -118,7 +120,10 @@ pub fn draw(view: *View, owner: *dispatch.State, model: *desktop.model.Model, fr
     const requests = try drawPanels(view, owner, model, frame, theme, diagnostic, stale);
     const modal: ?Modal = switch (view.modal) {
         .none => null,
-        .combo => if (try combos.draw(&view.combo.?, model, theme, diagnostic)) |result| .{ .combo = result } else null,
+        .combo => if (try combos.draw(&view.combo.?, model, theme, diagnostic, .{
+            .labels = frame.keyboard.labels,
+            .geometry = frame.keyboard.geometry,
+        })) |result| .{ .combo = result } else null,
         .callback => if (try callbacks.draw(&view.callback, model, theme, diagnostic)) |action| .{ .callback = action } else null,
         .paths => if (try paths.draw(&view.paths, model, frame.paths, theme, diagnostic)) |action| .{ .paths = action } else null,
         .encoders => if (try encoders.draw(&view.encoders.?, model, theme, diagnostic)) |result| .{ .encoders = result } else null,
@@ -138,6 +143,7 @@ pub fn draw(view: *View, owner: *dispatch.State, model: *desktop.model.Model, fr
         try owner.request(model, captured)
     else
         dispatch.Effect.none;
+    if (requests.opened) |part| key_editor.open(&view.key_editor, part, model.layer);
     if (effect == .open and try openModal(view, model, effect.open)) return none;
     return .{ .effect = effect };
 }
@@ -158,8 +164,12 @@ fn drawPanels(
     if (try layers.draw(&view.layers, model, theme)) |action| requests.offer(dispatch.Request.fromLayer(action, model));
     dropStaleHostDrag(view, model, frame.host);
     view.keyboard.drag = view.host.drag;
+    view.keyboard.open = if (view.modal == .none) view.key_editor.open else null;
     if (try keyboard.draw(&view.keyboard, model, frame.keyboard, theme)) |action| switch (action) {
-        .select => |selected| requests.offer(dispatch.Request.fromKey(selected)),
+        .select => |selected| if (requests.request == null) {
+            requests.request = dispatch.Request.fromKey(selected);
+            requests.opened = view.keyboard.clicked;
+        },
         .chord => |chord| {
             view.host.drag = null;
             requests.offer(dispatch.Request.fromChord(chord));
@@ -170,16 +180,18 @@ fn drawPanels(
             requests.request = opened;
         },
     };
+    if (try host.draw(&view.host, model, frame.host, theme, view.key_editor.open == .tap)) |action| requests.offer(dispatch.Request.fromChord(action));
     if (stale) {
         requests.recovery = try drawStaleRecovery(owner, model, theme);
     } else {
-        view.inspector.pending = owner.pending != null;
-        view.inspector.close_requested = owner.close_requested != null;
-        view.inspector.drag_chord = if (view.host.drag) |drag| drag.chord else null;
-        requests.inspector = try inspector.draw(&owner.inspector, model, &view.inspector, theme, view.toolbar.light);
-        if (view.host.drag != null and view.inspector.drag_chord == null) view.host.drag = null;
+        view.key_editor.pending = owner.pending != null;
+        view.key_editor.close_requested = owner.close_requested != null;
+        if (view.modal != .none) key_editor.close(&view.key_editor);
+        requests.inspector = try key_editor.draw(&owner.inspector, model, &view.key_editor, theme, .{
+            .anchor = view.keyboard.anchor,
+            .host = frame.host,
+        });
     }
-    if (try host.draw(&view.host, model, frame.host, theme)) |action| requests.offer(dispatch.Request.fromChord(action));
     const practice_open = launcher(theme, .testing, .{
         .title = "Try it out",
         .subtitle = "Practice typing this layout",
@@ -215,16 +227,20 @@ fn cancelHostDrag(view: *View) void {
 /// apply when the user discards the staged edits.
 fn drawStaleRecovery(owner: *dispatch.State, model: *desktop.model.Model, theme: ui.Theme) !?dispatch.Recovery {
     const rendered = try owner.recovery(model);
-    const box = ui.panel(theme, .inspector);
-    defer box.deinit();
-    dvui.label(@src(), "Project changed · staged edits are preserved", .{}, .{});
-    for (owner.inspector.selected, 0..) |selected, index| if (selected) {
-        var summary: [1024]u8 = undefined;
-        const action = desktop.labels.action(owner.inspector.drafts[index], &summary);
-        const line = try std.fmt.allocPrint(dvui.currentWindow().arena(), "{s}: {s}", .{ owner.inspector.key_storage[index], action });
-        ui.richLabel(line, theme.captionStyle(14, index), .{ .expand = .horizontal });
-    };
-    if (dvui.button(@src(), "Discard stale staged edits", .{}, .{})) return rendered;
+    const sheet = ui.sheet(@src(), theme, 560, 360, "key.recovery");
+    defer sheet.deinit();
+    _ = ui.sheetHeader(theme, 560, "The layout changed", "Unapplied key edits are kept until you discard them.", "key.recovery.dismiss");
+    {
+        const list = dvui.scrollArea(@src(), .{}, .{ .rect = .{ .x = 28, .y = 116, .w = 504, .h = 156 }, .background = false });
+        defer list.deinit();
+        for (owner.inspector.selected, 0..) |selected, index| if (selected) {
+            var summary: [1024]u8 = undefined;
+            const action = desktop.labels.action(owner.inspector.drafts[index], &summary);
+            const line = try std.fmt.allocPrint(dvui.currentWindow().arena(), "{s}: {s}", .{ owner.inspector.key_storage[index], action });
+            ui.richLabel(line, theme.captionStyle(14, index), .{ .expand = .horizontal });
+        };
+    }
+    if (ui.iconButton(theme, null, "Discard staged edits", "key.recovery.discard", .{ .x = 560 - 28 - 200, .y = 296, .w = 200, .h = 40 }, true)) return rendered;
     return null;
 }
 

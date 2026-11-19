@@ -150,12 +150,8 @@ pub const Fixtures = struct {
 
 pub const ImportedExport = struct { selector: []const u8, export_root: std.Build.LazyPath };
 
-const practice_files = [_][]const u8{
-    "practice_generator.zig",  "practice_results.zig",  "practice_history.zig",   "practice_history_runtime.zig",
-    "practice_timing.zig",     "practice_database.zig", "practice_progress.zig",  "practice_analysis.zig",
-    "practice_curriculum.zig", "practice_help.zig",     "practice_retention.zig",
-};
-const desktop_files = [_][]const u8{ "practice.zig", "practice_view.zig", "practice_controller.zig", "try_state.zig", "flash_controller.zig", "auto_build.zig", "geometry.zig", "encoder_state.zig" };
+const practice_files = [_][]const u8{ "practice.zig", "practice_view.zig", "practice_generator.zig", "practice_controller.zig" };
+const desktop_files = [_][]const u8{ "try_state.zig", "flash_controller.zig", "auto_build.zig", "geometry.zig", "encoder_state.zig" };
 const jobs_files = [_][]const u8{ "target_lock.zig", "firmware.zig", "source_digest.zig", "sidecar.zig", "flash_inputs.zig", "application_bundle.zig", "bundle_payload.zig", "runner_artifact.zig", "bootsel_transfer.zig" };
 const project_desktop_files = [_][]const u8{ "startup_project.zig", "host_input.zig", "draft_input.zig", "action_form.zig", "profile_projects.zig", "model.zig" };
 const label_files = [_][]const u8{ "keycap_symbols.zig", "labels.zig", "label_cache.zig", "physical_view.zig" };
@@ -163,16 +159,12 @@ const session_files = [_][]const u8{ "root.zig", "test_session.zig", "live_adapt
 const import_fixtures = [_][]const u8{ "us", "de" };
 const import_selectors = [_][]const u8{ "keycaprio_colemak_0_6", "keycaprio_colemak_0_7" };
 
-/// Tests without the firmware package: practice data, paths, jobs and release.
+/// Tests without the firmware package: typing tests, paths, jobs and release.
 pub fn addCore(s: *Suite) Fixtures {
     const b = s.b;
     const steps = s.steps;
     const core = s.mods.core;
-    for (practice_files) |name| {
-        const persistent = std.mem.indexOf(u8, name, "history") != null or std.mem.eql(u8, name, "practice_database.zig");
-        const imports: []const Import = if (persistent) core.zqlite_only else &.{};
-        _ = s.unit(steps.test_practice, .core, b.fmt("src/desktop/{s}", .{name}), imports);
-    }
+    for (practice_files) |name| _ = s.unit(steps.test_practice, .core, b.fmt("src/desktop/{s}", .{name}), &.{});
     _ = s.unit(steps.test_practice, .core, "src/platform/app_paths.zig", &.{});
 
     const release = b.createModule(.{ .root_source_file = b.path("tools/release.zig"), .target = s.cfg.target, .optimize = s.cfg.optimize, .imports = core.jobs_only });

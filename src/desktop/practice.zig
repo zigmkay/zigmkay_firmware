@@ -2,6 +2,8 @@
 const std = @import("std");
 pub const State = enum { ready, running, paused, complete };
 pub const Source = enum { os, draft };
+/// The arrival time the platform layer recorded for the DVUI event `number`.
+pub const EventTime = struct { number: u16, now_us: u64 };
 pub const route_modifiers = [_]u8{ 0, 2, 4, 6, 64, 66 };
 
 pub const lessons = [_][]const u8{
@@ -69,34 +71,20 @@ pub const lesson_names = [_][]const u8{
     "Errors and optionals",
 };
 
-pub const lesson_ids = [_][]const u8{ "functions-v1", "arrays-v1", "errors-v1" };
-pub const corpus_version = 1;
-
 pub const Session = struct {
-    recorder: ?*@import("practice_timing.zig").Recorder = null,
-    input_repeat: bool = false,
     reference: [8192]u21 = undefined,
     reference_len: usize = 0,
     typed: [8192]u21 = undefined,
     len: usize = 0,
-    observed: usize = 0,
     state: State = .ready,
     source: Source = .os,
     attempts: usize = 0,
     correct_attempts: usize = 0,
     corrected: usize = 0,
-    errors: [8192]u32 = @splat(0),
-    missed: [8192]bool = @splat(false),
-    position_errors: [8192]u32 = @splat(0),
-    outside_errors: usize = 0,
-    substitutions: [256]struct { expected: u21 = 0, typed: u21 = 0, count: u64 = 0 } = @splat(.{}),
-    substitution_count: u16 = 0,
-    substitutions_truncated: bool = false,
     scored: bool = true,
     started: ?u64 = null,
     segment: u64 = 0,
     active_us: u64 = 0,
-    ended: u64 = 0,
     previous_cr: bool = false,
 
     pub fn load(self: *Session, bytes: []const u8, source: Source) !void {
@@ -122,44 +110,20 @@ pub const Session = struct {
 
     pub fn restart(self: *Session) void {
         self.len = 0;
-        self.observed = 0;
         self.state = .ready;
         self.attempts = 0;
         self.correct_attempts = 0;
         self.corrected = 0;
-        self.errors = @splat(0);
         self.scored = true;
-        self.missed = @splat(false);
-        self.position_errors = @splat(0);
-        self.outside_errors = 0;
-        self.substitution_count = 0;
-        self.substitutions = @splat(.{});
-        self.substitutions_truncated = false;
         self.started = null;
         self.active_us = 0;
-        self.ended = 0;
         self.previous_cr = false;
-        self.input_repeat = false;
-        if (self.recorder) |recorder| recorder.reset(self.reference[0..self.reference_len]);
     }
 
     pub fn insert(self: *Session, bytes: []const u8, now: u64, paste: bool) !void {
         if (self.state == .paused or self.state == .complete) return;
         const view = try std.unicode.Utf8View.init(bytes);
         if (paste) self.scored = false;
-        const scalars = countScalars(view, self.previous_cr);
-        const input: @import("practice_timing.zig").Input = if (paste)
-            .paste
-        else if (scalars > 1)
-            .batch
-        else if (self.input_repeat)
-            .repeat
-        else
-            .ordinary;
-        self.input_repeat = false;
-        if (scalars != 0) {
-            if (self.recorder) |recorder| _ = recorder.nextBatch();
-        }
         var it = view.iterator();
         while (it.nextCodepoint()) |raw| {
             // A CR LF pair is one newline, also across separate inserts.
@@ -176,76 +140,22 @@ pub const Session = struct {
                 self.segment = now;
             }
             self.attempts += 1;
-            if (self.recorder) |recorder| {
-                recorder.record(
-                    .attempt,
-                    now,
-                    self.duration(now),
-                    self.len,
-                    cp,
-                    input,
-                );
-            }
-            if (self.len < self.reference_len) {
-                if (self.reference[self.len] == cp) self.correct_attempts += 1 else self.recordMiss(cp);
-            } else self.outside_errors += 1;
+            if (self.len < self.reference_len and self.reference[self.len] == cp) self.correct_attempts += 1;
             self.typed[self.len] = cp;
             self.len += 1;
-            self.observed = @max(self.observed, @min(self.len, self.reference_len));
             if (self.len == self.reference_len and
                 std.mem.eql(u21, self.typed[0..self.len], self.reference[0..self.reference_len]))
             {
                 self.active_us += now -| self.segment;
-                self.ended = now;
                 self.state = .complete;
-                if (self.recorder) |recorder| {
-                    recorder.record(.complete, now, self.active_us, self.len, null, .ordinary);
-                }
                 break;
             }
         }
     }
 
-    /// Records typing `cp` where the reference expects a different character.
-    fn recordMiss(self: *Session, cp: u21) void {
-        const expected = self.reference[self.len];
-        const first = std.mem.indexOfScalar(u21, self.reference[0..self.reference_len], expected).?;
-        self.errors[first] +|= 1;
-        self.missed[self.len] = true;
-        self.position_errors[self.len] +|= 1;
-        var index: usize = 0;
-        while (index < self.substitution_count) : (index += 1) {
-            const known = self.substitutions[index];
-            if (known.expected == expected and known.typed == cp) break;
-        }
-        if (index >= 256) {
-            self.substitutions_truncated = true;
-            return;
-        }
-        if (index == self.substitution_count) {
-            self.substitutions[index] = .{ .expected = expected, .typed = cp };
-            self.substitution_count += 1;
-        }
-        self.substitutions[index].count +|= 1;
-    }
-
     pub fn backspace(self: *Session) void {
-        self.backspaceAt(if (self.recorder) |recorder| recorder.last_now else 0);
-    }
-
-    pub fn backspaceAt(self: *Session, now: u64) void {
         if (self.len == 0 or self.state == .paused or self.state == .complete) return;
         self.len -= 1;
-        if (self.recorder) |recorder| {
-            recorder.record(
-                .backspace,
-                now,
-                self.duration(now),
-                self.len,
-                null,
-                .ordinary,
-            );
-        }
         self.previous_cr = false;
         if (self.len >= self.reference_len or self.typed[self.len] != self.reference[self.len]) self.corrected += 1;
     }
@@ -254,23 +164,12 @@ pub const Session = struct {
         if (self.state == .complete or self.state == .paused) return;
         if (self.state == .running) self.active_us += now -| self.segment;
         self.state = .paused;
-        if (self.recorder) |recorder| recorder.record(.pause, now, self.active_us, self.len, null, .ordinary);
     }
 
     pub fn resumeRun(self: *Session, now: u64) void {
         if (self.state != .paused) return;
         self.state = if (self.started == null) .ready else .running;
         self.segment = now;
-        if (self.recorder) |recorder| {
-            recorder.record(
-                .resume_run,
-                now,
-                self.active_us,
-                self.len,
-                null,
-                .ordinary,
-            );
-        }
     }
 
     pub fn duration(self: *const Session, now: u64) u64 {
@@ -305,16 +204,6 @@ pub fn accuracyPercent(correct: u64, attempts: u64) f64 {
     return 100 * @as(f64, @floatFromInt(correct)) / @as(f64, @floatFromInt(attempts));
 }
 
-pub fn english(buffer: []u8, seed: u64, length: usize) ![]const u8 {
-    const level: u8 = switch (length) {
-        2 => 0,
-        5 => 1,
-        10 => 2,
-        else => return error.InvalidExerciseLevel,
-    };
-    return @import("practice_generator.zig").generate(buffer, .{ .seed = seed, .length = level }, &.{});
-}
-
 test "Unicode corrections, pauses and literal scoring" {
     var s: Session = .{};
     try s.load("é a\n", .os);
@@ -337,40 +226,6 @@ test "Unicode corrections, pauses and literal scoring" {
     try std.testing.expect(!s.scored);
 }
 
-test "session captures normalized raw timing and correction events without changing scoring" {
-    const t = std.testing;
-    var recorder = @import("practice_timing.zig").Recorder.init(t.allocator);
-    defer recorder.deinit();
-    var session = Session{ .recorder = &recorder };
-    try session.load("aé\n", .os);
-    recorder.begin(100, 0);
-    try session.insert("a", 200, false);
-    try session.insert("x", 500, false);
-    session.backspaceAt(600);
-    session.pause(700);
-    session.resumeRun(1700);
-    try session.insert("é", 1800, false);
-    try session.insert("\r\n", 2000, false);
-    try recorder.payload().validate();
-    try t.expectEqual(State.complete, session.state);
-    try t.expectEqual(@as(u64, 800), session.active_us);
-    try t.expectEqual(@as(?u21, 'x'), recorder.events.items[1].typed);
-    try t.expectEqual(@as(?u21, '\n'), recorder.events.items[6].typed);
-    try t.expectEqual(
-        @import("practice_timing.zig").Eligibility.boundary,
-        recorder.events.items[5].eligibility,
-    );
-}
-
-test "English seed reproducibility and length" {
-    var a: [4096]u8 = undefined;
-    var b: [4096]u8 = undefined;
-    const first = try english(&a, 42, 5);
-    try std.testing.expectEqualStrings(first, try english(&b, 42, 5));
-    try std.testing.expect(!std.mem.eql(u8, first, try english(&b, 43, 5)));
-    try std.testing.expectEqual(@as(usize, 5), std.mem.count(u8, first, "."));
-}
-
 test "ready pauses, UTF-8 validation and split CRLF preserve character attempts" {
     var s: Session = .{};
     try s.load("a\nb", .os);
@@ -386,14 +241,14 @@ test "ready pauses, UTF-8 validation and split CRLF preserve character attempts"
     try std.testing.expectEqual(@as(usize, 3), s.attempts);
 }
 
-test "errors aggregate by expected character and full wrong text requires correction" {
+test "wrong text lowers accuracy and must be corrected before completion" {
     var s: Session = .{};
     try s.load("aa", .os);
     try s.insert("xx", 10, false);
     try std.testing.expectEqual(State.running, s.state);
-    try std.testing.expectEqual(@as(u32, 2), s.errors[0]);
     s.backspace();
     s.backspace();
+    try std.testing.expectEqual(@as(usize, 2), s.corrected);
     try s.insert("aa", 20, false);
     try std.testing.expectEqual(State.complete, s.state);
     try std.testing.expectEqual(@as(f64, 50), s.accuracy());
@@ -667,39 +522,19 @@ test "opposite home row outranks dedicated Shift without assuming letter placeme
     try std.testing.expect(std.mem.indexOfScalar(bool, &holds, true) == null);
 }
 
-test "wrong reentry and split CRLF keep occurrence evidence while outside text stays separate" {
+test "split CRLF completes the text and later input is ignored" {
     var session: Session = .{};
     try session.load("éa\n", .os);
     try session.insert("é", 10, false);
     session.backspace();
-    try session.insert("x", 20, false);
-    session.backspace();
     try session.insert("éXxx", 30, false);
-    try std.testing.expectEqual(@as(usize, 1), session.outside_errors);
     session.backspace();
     session.backspace();
     session.backspace();
     try session.insert("a\r", 40, false);
     try session.insert("\n", 50, false);
     try std.testing.expectEqual(State.complete, session.state);
-    try std.testing.expect(session.missed[0] and session.missed[1]);
     const attempts = session.attempts;
     try session.insert("ignored after completion", 60, false);
     try std.testing.expectEqual(attempts, session.attempts);
-}
-
-/// Counts the code points `insert` will type, treating CR LF as one.
-fn countScalars(view: std.unicode.Utf8View, previous_cr: bool) usize {
-    var it = view.iterator();
-    var scalars: usize = 0;
-    var after_cr = previous_cr;
-    while (it.nextCodepoint()) |cp| {
-        if (cp == '\n' and after_cr) {
-            after_cr = false;
-            continue;
-        }
-        after_cr = cp == '\r';
-        scalars += 1;
-    }
-    return scalars;
 }

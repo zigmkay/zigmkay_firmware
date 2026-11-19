@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Adapted from zigmkay_firmware 3ee4135d308f18f15cc51b1d73e33e1b36bf517f.
 //! Explicit bounded timed reducer-input and host-control capture, version 2
 //! (companion Raw HID session, protocol version 1).

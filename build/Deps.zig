@@ -15,8 +15,6 @@ pub const MicroBuild = if (MicroBuildApi != void and portsFetched(MicroBuildApi)
 
 /// `zigmkay_firmware`: processor, keycodes and board sources (absent under `-Donly`).
 firmware: ?*std.Build.Dependency = null,
-/// Practice persistence with its bundled SQLite (absent under `-Donly=diagnostic`).
-zqlite: ?*std.Build.Module = null,
 dvui: ?*std.Build.Dependency = null,
 ztray: ?*std.Build.Dependency = null,
 svg2tvg: ?*std.Build.Dependency = null,
@@ -30,7 +28,6 @@ micro: if (MicroBuild == void) void else ?*MicroBuild = if (MicroBuild == void) 
 pub fn init(b: *std.Build, cfg: Config) error{LazyDependencyNeeded}!Deps {
     var deps: Deps = .{};
     var missing = false;
-    if (cfg.only != .diagnostic) deps.zqlite = sqlite(b, cfg);
     if (cfg.hostGraph()) deps.firmware = lazy(b, &missing, "zigmkay_firmware", .{});
     if (cfg.desktop) {
         deps.dvui = lazy(b, &missing, "dvui", .{
@@ -80,19 +77,6 @@ fn lazy(b: *std.Build, missing: *bool, name: []const u8, args: anytype) ?*std.Bu
     const dep = b.lazyDependency(name, args);
     if (dep == null) missing.* = true;
     return dep;
-}
-
-fn sqlite(b: *std.Build, cfg: Config) *std.Build.Module {
-    const module = b.dependency("zqlite", .{
-        .target = cfg.target,
-        .optimize = cfg.optimize,
-        .sqlite3 = @as([]const []const u8, &.{
-            "-std=c99",                     "-DSQLITE_THREADSAFE=1",     "-DSQLITE_OMIT_LOAD_EXTENSION", "-DSQLITE_DQS=0",
-            "-DSQLITE_DEFAULT_MEMSTATUS=0", "-DSQLITE_ENABLE_API_ARMOR", "-DSQLITE_MAX_LENGTH=33554432", "-DSQLITE_MAX_SQL_LENGTH=65536",
-        }),
-    }).module("zqlite");
-    if (b.graph.host.result.os.tag == .windows) module.linkSystemLibrary("advapi32", .{});
-    return module;
 }
 
 /// The comptime half of `std.Build.lazyImport`: microzig's build.zig once

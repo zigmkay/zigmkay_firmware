@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Host-only canonical keymap identity, authored for this companion and
 //! derived from the EuroZig firmware fork (`zigmkay/src/device_protocol.zig`
 //! at e122f75).

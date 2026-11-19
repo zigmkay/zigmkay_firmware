@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Session reducer regressions for the companion Raw HID session, protocol
 //! version 1. The byte literals are copied from the firmware's own tests
 //! (zigmkay_firmware PR #60, zigmkay/tests/test_companion.zig), so they define

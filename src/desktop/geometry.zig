@@ -1,14 +1,13 @@
 const std = @import("std");
 pub const Rect = struct { x: f32, y: f32, w: f32, h: f32 };
-pub const Panel = enum { toolbar, sidebar, physical, inspector, os, testing, callbacks };
+pub const Panel = enum { toolbar, sidebar, physical, os, testing, callbacks };
 
 /// Panels on the 1536 × 1056 design canvas; see docs/design/editor.md.
-pub const reference = [7]Rect{
+pub const reference = [6]Rect{
     .{ .x = 0, .y = 0, .w = 1536, .h = 100 },
     .{ .x = 16, .y = 112, .w = 240, .h = 744 },
-    .{ .x = 268, .y = 112, .w = 800, .h = 528 },
-    .{ .x = 1080, .y = 112, .w = 440, .h = 932 },
-    .{ .x = 268, .y = 652, .w = 800, .h = 392 },
+    .{ .x = 268, .y = 112, .w = 1252, .h = 580 },
+    .{ .x = 268, .y = 704, .w = 1252, .h = 340 },
     .{ .x = 16, .y = 868, .w = 240, .h = 82 },
     .{ .x = 16, .y = 962, .w = 240, .h = 82 },
 };

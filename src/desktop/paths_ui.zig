@@ -67,7 +67,7 @@ pub fn draw(view: *View, model: *const desktop.model.Model, frame: Frame, theme:
     try drawChecks(theme, doc, frame, captured);
     if (diagnostic.len != 0) {
         var failure = theme;
-        failure.text = ui.color(0xF06B73);
+        failure.text = theme.danger;
         ui.label(failure, diagnostic, .{ .x = 28, .y = 440, .w = 844, .h = 20 }, 13);
     }
 
@@ -150,7 +150,7 @@ fn drawChecks(theme: ui.Theme, doc: project.Document, frame: Frame, captured: [3
 
 fn check(theme: ui.Theme, row: usize, passed: bool, text: []const u8) void {
     const y = 322 + @as(f32, @floatFromInt(row)) * 28;
-    const tint = if (passed) ui.color(0x6EC59A) else ui.color(0xF59E0B);
+    const tint = if (passed) theme.success else theme.warning;
     dvui.icon(@src(), "export.check", if (passed) ui.control_icons.saved else ui.control_icons.warning, .{}, .{
         .id_extra = row,
         .color_text = .{ .color = tint },

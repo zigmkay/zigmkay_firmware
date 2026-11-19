@@ -29,10 +29,8 @@ menu. Only app content appears in these assets. Window IDs and screen positions
 vary by session; discover them before recapturing. Theme changes and selecting
 a key for inspection do not modify the project.
 
-Tutor images are reused from the existing
-[native tutor gallery](../../implementation/practice-layout-review.md), which
-documents capture commands and sample-data provenance. They render real UI with
-deterministic offline exercise/history fixtures, rather than personal results.
+Tutor images come from the native `--native-tutor-frames 16` fixture, which
+renders real UI with deterministic typed input rather than personal results.
 The [typing practice guide](../../typing-practice.md) describes the screens.
 
 Capture and conversion outputs belong in `.zig-cache/`; only selected README

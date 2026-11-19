@@ -319,10 +319,6 @@ test "real asynchronous processor output scores draft practice once and stops on
     try t.expectEqual(desktop.practice.State.complete, tutor.session.state);
     try t.expect(completed.effect.runner == .stop);
     try t.expect(tutor.session.scored and tutor.session.wpm(1_001_000) > 0);
-    const result = try desktop.practice_results.capture(&tutor.session, tutor.captured_cohort, null);
-    var comparable: desktop.practice_results.Aggregate = .{};
-    try comparable.add(&result);
-    try t.expect(comparable.best_wpm > 0);
     owner.stop();
     try t.expect(tutor.stopped(completed.effect.runner.stop, snapshot));
     try t.expectEqual(desktop.practice_controller.RunnerState.prepared, tutor.runner_state);

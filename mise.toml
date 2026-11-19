@@ -35,5 +35,5 @@ description = "Start the resident companion and automatically connect to the key
 run = "zig build run -Dbundle -j4 -- --background"
 
 [tasks."typing-practice:test"]
-description = "Check practice generation, metrics, native storage and path policy without devices"
+description = "Check typing test generation, scoring, tutor controls and path policy without devices"
 run = "zig build test-practice -Donly=practice -j4 --test-timeout 45s"

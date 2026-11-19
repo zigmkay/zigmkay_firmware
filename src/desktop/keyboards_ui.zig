@@ -166,7 +166,7 @@ pub fn pill(theme: ui.Theme, value: []const u8, rect: dvui.Rect, fill: dvui.Colo
     dvui.labelNoFmt(@src(), value, .{ .align_x = 0.5, .align_y = 0.5 }, opts);
 }
 
-/// "PCB 0.7 (LK7) · 34 keys" for a catalog entry.
+/// "PCB 0.7 · 34 keys" for a catalog entry.
 pub fn hardwareLine(buffer: []u8, entry: *const library.catalog.Entry) []const u8 {
     const revision = entry.display.revision;
     const keys = entry.default_dimensions.key_count;
@@ -290,7 +290,7 @@ fn footer(theme: ui.Theme, keyboards: *const library.Library, picked: *?Picked) 
             keyboards.unreadable.len,
             if (keyboards.unreadable.len == 1) "project" else "projects",
         }) catch "";
-        text(theme, note, .{ .x = 36, .y = 898, .w = 370, .h = 18 }, 12, ui.color(0xF59E0B), false, 4);
+        text(theme, note, .{ .x = 36, .y = 898, .w = 370, .h = 18 }, 12, theme.warning, false, 4);
     }
     if (ui.iconButton(theme, ui.control_icons.open, "Open folder…", "onboarding.open", .{ .x = 28, .y = 938, .w = 182, .h = 36 }, false)) picked.* = .{ .intent = .open_folder };
     if (ui.iconButton(theme, ui.control_icons.folder, "Change location…", "onboarding.location", .{ .x = 218, .y = 938, .w = 186, .h = 36 }, false)) picked.* = .{ .intent = .change_location };
@@ -419,7 +419,7 @@ fn layoutCard(theme: ui.Theme, layout: library.Layout, rect: dvui.Rect, index: u
     var badge_x = rect.x + rect.w - 16;
     if (runningLayout(layout, context.running)) {
         badge_x -= 100;
-        ui.runningBadge(.{ .x = badge_x, .y = rect.y + 228, .w = 100, .h = 22 }, index);
+        ui.runningBadge(theme, .{ .x = badge_x, .y = rect.y + 228, .w = 100, .h = 22 }, index);
     }
     if (current) {
         badge_x -= 92;

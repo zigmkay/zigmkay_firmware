@@ -210,7 +210,7 @@ fn layoutRow(theme: ui.Theme, choice: Choice, index: usize, y: f32) bool {
     const right_width: f32 = if (choice.running) 104 else 120;
     rowLabel(theme, choice.name, 46, y, width - 56 - right_width - 8, 14, choice.current, 0);
     if (choice.running) {
-        ui.runningBadge(.{ .x = width - padding - 10 - 98, .y = y + 8, .w = 98, .h = 20 }, index);
+        ui.runningBadge(theme, .{ .x = width - padding - 10 - 98, .y = y + 8, .w = 98, .h = 20 }, index);
     } else if (choice.detail.len != 0) {
         var muted = theme;
         muted.text = theme.muted;

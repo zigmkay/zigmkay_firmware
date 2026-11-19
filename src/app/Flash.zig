@@ -351,12 +351,13 @@ pub fn drawPanel(app: *App) Panel {
             .close_requested = &panel.close,
             .details_open = &flash.details_open,
             .diagnostics = diagnostics,
+            .light = app.view.toolbar.light,
         }) catch |err| failed: {
             app.view.report(err);
             break :failed null;
         };
     } else if (flash.pending != null or flash.failure != null) {
-        flash_ui.drawPending(flash.failure, app.jobs.build != null, &panel.close);
+        flash_ui.drawPending(flash.failure, app.jobs.build != null, &panel.close, app.view.toolbar.light);
     }
     return panel;
 }

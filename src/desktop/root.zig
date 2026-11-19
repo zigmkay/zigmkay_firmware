@@ -45,19 +45,6 @@ pub const encoder_state = @import("encoder_state.zig");
 pub const encoder_editor = @import("encoder_editor.zig");
 
 pub const practice_generator = @import("practice_generator.zig");
-pub const practice_results = @import("practice_results.zig");
-
-pub const practice_history = @import("practice_history.zig");
-
-pub const practice_history_runtime = @import("practice_history_runtime.zig");
-
-pub const practice_context = @import("practice_context.zig");
-pub const practice_timing = @import("practice_timing.zig");
-pub const practice_progress = @import("practice_progress.zig");
-pub const practice_analysis = @import("practice_analysis.zig");
-pub const practice_curriculum = @import("practice_curriculum.zig");
-pub const practice_help = @import("practice_help.zig");
-pub const practice_retention = @import("practice_retention.zig");
 pub const owned_worker = @import("owned_worker.zig");
 pub const onboarding = @import("onboarding.zig");
 pub const library = @import("library.zig");

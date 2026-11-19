@@ -11,7 +11,7 @@ pub const zig_version = "0.17.0";
 
 /// Configure a deliberately small graph for constrained CI jobs.
 pub const Only = enum {
-    /// Practice data, application paths, release tooling and subprocess
+    /// Typing tests, application paths, release tooling and subprocess
     /// contracts, without the firmware dependency or native bridges.
     practice,
     /// Only the symbolized artifact-publication diagnostic.

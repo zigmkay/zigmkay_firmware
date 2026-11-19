@@ -1067,23 +1067,3 @@ test "build worker owns verified exports and accepts only the current editor pre
     owns_cancelled = false;
     try t.expect(cancellation.durationTo(std.Io.Clock.awake.now(t.io)).toMilliseconds() < 5000);
 }
-
-test "practice cohorts ignore project renames and caption changes but distinguish translated routes" {
-    const t = std.testing;
-    var template = try project.profiles.create(t.allocator, .qwerty);
-    defer template.deinit();
-    var model = try desktop.model.Model.init(t.allocator, project.profiles.board, template.snapshot);
-    defer model.deinit();
-    const before = try project.snapshot.identity(t.allocator, model.current.snapshot, model.board);
-    try model.rename("Renamed project in another directory");
-    const after = try project.snapshot.identity(t.allocator, model.current.snapshot, model.board);
-    try t.expectEqualSlices(u8, &before.digest, &after.digest);
-    var labels = try desktop.label_cache.LabelCache.init(t.allocator, 1, 2);
-    defer labels.deinit();
-    labels.entries[0].label = "a";
-    const mapping = desktop.practice_context.mapping(&labels, "stable OS source");
-    labels.entries[0].caption = "New display caption";
-    try t.expectEqualSlices(u8, &mapping, &desktop.practice_context.mapping(&labels, "stable OS source"));
-    labels.entries[0].label = "z";
-    try t.expect(!std.mem.eql(u8, &mapping, &desktop.practice_context.mapping(&labels, "stable OS source")));
-}

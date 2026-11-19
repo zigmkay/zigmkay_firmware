@@ -24,7 +24,7 @@ practice: ?*desktop.practice_controller.Controller = null,
 model: ?*desktop.model.Model = null,
 view: ?*editor.View = null,
 now_us: u64 = 0,
-times: [512]desktop.practice_timing.EventTime = undefined,
+times: [512]desktop.practice.EventTime = undefined,
 time_count: usize = 0,
 
 /// Converts the SDL event timestamp to the awake clock in microseconds.

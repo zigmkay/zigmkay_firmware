@@ -33,9 +33,7 @@ const cli = @import("cli.zig");
 const commands = @import("commands.zig");
 const fixtures = @import("fixtures.zig");
 const onboarding_flow = @import("onboarding_flow.zig");
-const practice_fixture = @import("practice_fixture.zig");
 const preferences = @import("preferences.zig");
-const rundown_gallery = @import("rundown_gallery.zig");
 const screens = @import("screens.zig");
 const tray_menu = @import("tray_menu.zig");
 const workers = @import("workers.zig");
@@ -138,7 +136,7 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
         .life = undefined,
         .events = undefined,
         .live = undefined,
-        .practicing = mode.is(.practice) or mode.isRundown() or mode.is(.draft) or mode.light() == .tutor,
+        .practicing = mode.is(.practice) or mode.is(.native_tutor) or mode.is(.draft) or mode.light() == .tutor,
         .tutor = undefined,
         .draft_runtime = undefined,
     };
@@ -230,17 +228,13 @@ pub fn deinit(app: *App) void {
 fn initialModel(gpa: std.mem.Allocator, mode: cli.Mode) !desktop.model.Model {
     var template = try project.profiles.create(gpa, if (mode.is(.draft)) .eurkey else .qwerty);
     defer template.deinit();
-    var model = try desktop.model.Model.init(gpa, project.profiles.board, template.snapshot);
-    errdefer model.deinit();
-    if (mode.isRundown()) try practice_fixture.install(&model);
-    if (mode.isScene(.help)) try practice_fixture.installTapHold(&model);
-    return model;
+    return desktop.model.Model.init(gpa, project.profiles.board, template.snapshot);
 }
 
 /// Onboarding opens first, except in fixtures and in the tutor and companion
 /// previews, which start with the built-in project.
 fn initOnboarding(app: *App) !void {
-    const wizard = app.mode.is(.onboarding);
+    const wizard = app.mode.isOnboarding();
     const preview = app.mode.light() == .tutor or app.mode.light() == .companion;
     app.onboarding = .{
         .active = wizard or (app.frame_limit == null and !preview),
@@ -310,34 +304,10 @@ fn initLive(app: *App) !void {
 }
 
 fn initTutor(app: *App) !void {
-    app.tutor = .{
-        .controller = desktop.practice_controller.Controller.init(try app.model.id()),
-        .timing = desktop.practice_timing.Recorder.init(app.gpa),
-        .history = undefined,
-    };
+    app.tutor = .{ .controller = desktop.practice_controller.Controller.init(try app.model.id()) };
     const practice = &app.tutor.controller;
-    app.tutor.timing.clock = .frame;
-    errdefer app.tutor.timing.deinit();
-    practice.session.recorder = &app.tutor.timing;
     if (app.mode.is(.practice)) _ = try practice.dispatch(practice.action(.{ .start = true }), null, 0);
     if (app.frame_limit == null) try std.Io.randomSecure(app.io, std.mem.asBytes(&practice.seed));
-    const data_path = if (app.user_paths) |owned| owned.paths.data else null;
-    app.tutor.history = try desktop.practice_history_runtime.Runtime.init(app.gpa, app.io, data_path);
-    errdefer app.tutor.history.deinit();
-    if (app.mode.isScene(.data)) try app.useScratchHistory();
-}
-
-/// The data gallery writes a fresh history database in the cache.
-fn useScratchHistory(app: *App) !void {
-    const gpa = app.gpa;
-    const root = try std.Io.Dir.cwd().realPathFileAlloc(app.io, ".", gpa);
-    defer gpa.free(root);
-    const folder = try std.fmt.allocPrint(gpa, "data-{d}", .{std.Io.Clock.awake.now(app.io).toNanoseconds()});
-    defer gpa.free(folder);
-    const path = try std.fs.path.join(gpa, &.{ root, ".zig-cache", "native-data-verification", folder });
-    const history = &app.tutor.history;
-    if (history.path) |previous| gpa.free(previous);
-    history.path = path;
 }
 
 /// Opens the application bundle that holds the build toolchain and the
@@ -419,13 +389,15 @@ const Drawn = struct {
 
 fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     fixtures.resizeStatusWindow(app);
-    const available = app.fitWindow();
+    app.fitWindow();
     try app.window.begin(if (app.frame_limit == null) app.window.beginWait(app.interrupted) else app.native.nanoTime());
     errdefer _ = app.window.end(.{ .manage_backend = app.frame_limit == null }) catch {};
     // DVUI rounds its render scale to hundredths. Keep the fitted editor
     // aligned with the exact pixel edge, including on Retina displays.
     if (!app.practicing and app.window.data().rect.w > 0) app.window.natural_scale = app.window.rect_pixels.w / app.window.data().rect.w;
-    if (!app.fonts_installed and (app.frame_limit == null or app.mode.gallery() != null or app.mode.isStatus())) {
+    if (!app.fonts_installed and (app.frame_limit == null or app.mode.is(.native_tutor) or app.mode.isStatus() or app.mode.isDrawers() or
+        app.mode.isOnboarding() or app.mode.is(.catalog)))
+    {
         try editor_fonts.install(app.gpa, app.io);
         app.fonts_installed = true;
     }
@@ -441,11 +413,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     const can_build = app.canBuild(board);
     fixtures.showStatusDetails(app);
     app.view.callback.busy = app.jobs.busy();
-    app.tutor.transferHistory();
-    const practice = try Tutor.prepareFrame(app, board, now_us);
-    try rundown_gallery.advance(app, practice.labels, now_us);
-    try Tutor.persist(app, practice, now_us);
-    try rundown_gallery.scroll(app, available);
+    const practice = try Tutor.prepareFrame(app, board);
     var screen = try screens.draw(app, board, practice, can_build, now_us);
     const flash_panel = Flash.drawPanel(app);
     try Flash.startTrial(app, can_build, &screen.rendered);
@@ -459,9 +427,8 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     return .{ .delay = delay, .can_build = can_build, .screen = screen, .flash_panel = flash_panel };
 }
 
-/// Scales the design canvas to the window and applies the theme. Returns the
-/// window size before this frame's events.
-fn fitWindow(app: *App) dvui.Size.Natural {
+/// Scales the design canvas to the window and applies the theme.
+fn fitWindow(app: *App) void {
     const window = &app.window;
     const available = window.backend.windowSize();
     const system_scale = window.backend.contentScale();
@@ -473,9 +440,7 @@ fn fitWindow(app: *App) dvui.Size.Natural {
     const scale = if (app.practicing) @max(@as(f32, 0.8), fitted_scale) else fitted_scale;
     window.content_scale = scale * app.life.editor_scale;
     window.snap_to_pixels = window.content_scale == 1;
-    if (app.mode.isRundown()) app.view.toolbar.light = app.count < @as(usize, if (app.mode.isLayoutGallery()) 19 else 7);
     window.themeSet(editor_ui.dvuiTheme(window, app.view.toolbar.light));
-    return available;
 }
 
 fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, control_model: *desktop.model.Model, now_us: u64) !Flow {
@@ -491,7 +456,7 @@ fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, control
         return .stop;
     }
     if (app.frame_limit == null) {
-        const busy = app.jobs.busy() or app.draft_runtime.owner != null or app.tutor.history.worker != null;
+        const busy = app.jobs.busy() or app.draft_runtime.owner != null;
         const budget = desktop.live_keyboard.waitBudget(app.live_enabled, busy, false);
         app.interrupted = try app.native.waitEventTimeout(@min(app.window.waitTime(drawn.delay), budget));
     }
@@ -554,12 +519,9 @@ fn refreshSource(app: *App, now_us: u64) !void {
 }
 
 fn prepareEvents(app: *App, control_model: *desktop.model.Model, now_us: u64) void {
-    const view = &app.tutor.view;
-    const panel_open = view.data_open or view.progress_open or view.diagnostics_open or view.curriculum_open or
-        view.help_open or view.review_open;
     app.events.now_us = now_us;
     app.events.model = control_model;
-    app.draft_runtime.router.owns_practice_input = app.practicing and !panel_open;
+    app.draft_runtime.router.owns_practice_input = app.practicing;
     app.draft_runtime.router.focused = app.focused();
 }
 

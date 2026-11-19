@@ -42,8 +42,9 @@ collections, import tooling and discovery of multiple device identities.
   per document. [The model](../../src/desktop/model.zig) owns arbitrary
   validated board contracts. Changing keyboard types does not require
   generalizing the action model.
-- LK7 has curated schematic geometry and Molekula a measured spatial layout
-  (see [Spatial layouts](../keyboard-projects.md#spatial-layouts)). The other
+- Update (2026-11-19): every catalog board now has a schematic layout from
+  its PCB (see [Key placement](../keyboard-projects.md#key-placement)). Before,
+  LK7 had curated schematic geometry and Molekula a measured layout. The other
   12 catalog entries use a ten-column index grid with hands from their
   processing sides. Editing is possible, but the grid is a poor keyboard
   reference and tutor diagram.

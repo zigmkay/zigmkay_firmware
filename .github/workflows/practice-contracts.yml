@@ -24,7 +24,7 @@ jobs:
         with:
           version: 0.17.0
       # Also the subprocess, flash-job and release tooling tests on every host.
-      - name: Verify compiler and run practice, storage, subprocess and release contracts
+      - name: Verify compiler and run typing test, subprocess and release contracts
         shell: bash
         run: |
           test "$(zig version)" = 0.17.0

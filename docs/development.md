@@ -42,7 +42,7 @@ shell activation is optional.
 | `mise run desktop:check` | Compile the native editor and GUI dependencies without launching |
 | `mise run editor:build` | Assemble the complete application without launching |
 | `mise run editor:test` | Run offline GUI launch, onboarding, tutor, draft, source-refresh and companion fixtures |
-| `mise run typing-practice:test` | Check practice data, storage and application paths |
+| `mise run typing-practice:test` | Check typing test generation, scoring and application paths |
 | `mise run editor` | Launch the editor with automatic keyboard monitoring |
 | `mise run companion` | Launch the tray resident with windows hidden and automatic monitoring |
 
@@ -76,18 +76,11 @@ in caches, and preserve personal projects and attached source bundles.
 | [build.zig](../build.zig) / [build](../build) | Build options, steps, module graph and test wiring |
 | [runtime](../runtime) | Build script shipped inside the application bundle |
 
-- [Typing practice user guide](typing-practice.md): controls, metrics, data and evidence.
-- [Tutor package design](design/typing-practice-packages.md): boundaries and contracts.
+- [Typing practice user guide](typing-practice.md): controls, metrics and fixtures.
 - [Keyboard onboarding and import design](design/keyboard-projects-and-import.md):
   multi-keyboard collections, device-specific companion routing and source migration research.
 - [Keyboard projects user guide](keyboard-projects.md): creation, collections,
   one-way import, native tutor preparation and hardware-free acceptance commands.
-- [Practice implementation](implementation/typing-practice.md): input and scoring.
-- [Practice data](implementation/practice-data.md), [rundown](implementation/practice-rundown.md),
-  [progress](implementation/practice-progress.md), [timing diagnostics](implementation/practice-diagnostics.md),
-  [curriculum](implementation/practice-curriculum.md), and [help/recall](implementation/practice-help.md).
-- [Native layout review](implementation/practice-layout-review.md): visual studies,
-  native screenshots, layout checks and offline gallery reproduction.
 - [README screenshot notes](screenshots/overview/README.md): native capture provenance.
 - [Compatibility status](compatibility.md): remaining acceptance gates.
 
@@ -114,14 +107,14 @@ whose option is missing fails with a message that names it.
 | --- | --- | --- |
 | `check` (default) | Compile every configured source, tool and test | |
 | `test` | Run all offline tests, including `test-practice` and `test-jobs`, and fail when a `test` block is compiled into no test binary | |
-| `test-practice` | Practice data, storage migration and application paths | works with `-Donly=practice` |
+| `test-practice` | Typing test generation, scoring, tutor controls and application paths | works with `-Donly=practice` |
 | `test-jobs` | Subprocess, flash-job, traversal and release tooling tests | works with `-Donly=practice` |
 | `test-desktop` | SDL dummy/software GUI fixtures, GUI unit tests and flash admission | `-Ddesktop` |
 | `test-native` | Query the OS keyboard layout and install a hidden tray; never devices | `-Ddesktop` |
 | `run` | Assemble and launch the editor; `-- --background` starts the companion | `-Dbundle` |
 | `run-project` | Project create/validate/export command; pass arguments after `--` | |
 | `bundle` | Assemble the self-contained application | `-Dbundle` |
-| `tools` | Install `release`, `check-application-bundle`, `catalog-export`, `practice-samples` and `diagnose-build-finalization` (plus `bootsel-transfer` on Windows) to `zig-out/bin` | |
+| `tools` | Install `release`, `check-application-bundle`, `catalog-export` and `diagnose-build-finalization` (plus `bootsel-transfer` on Windows) to `zig-out/bin` | |
 | `check-firmware` | Compile generated, synthetic all-board and imported firmware | `-Dfirmware` |
 | `check-firmware-defaults` | Compile every board's actual default keymap | `-Dfirmware` |
 | `build-project` | Build a verified export into `zig-out/firmware/project.uf2` and `zig-out/bin/project-runner` | `-Dfirmware -Dproject-export=<dir> -Dproject-board=<selector>` |
@@ -133,7 +126,7 @@ whose option is missing fails with a message that names it.
 | `-Ddesktop` | Configure DVUI, SDL3, the tray and vector icons |
 | `-Dfirmware` | Configure the microzig embedded graph (never flashes) |
 | `-Dbundle` | Configure the application bundle; implies `-Ddesktop -Dfirmware` |
-| `-Donly=practice` / `-Donly=diagnostic` | Configure only practice and jobs tests, or only the finalization diagnostic, without the firmware package |
+| `-Donly=practice` / `-Donly=diagnostic` | Configure only typing test and jobs tests, or only the finalization diagnostic, without the firmware package |
 | `-Doptimize`, `-Drelease`, `-Drevision`, `-Dmacos-sdk` | Optimization, release CPU/OS baseline, recorded revision and explicit macOS SDK |
 | `-Dtest-filter=<text>` | Run only matching tests (repeatable); skips the reachability check |
 | `-Dproject-export`, `-Dproject-board` | Inputs of `build-project` |
@@ -237,14 +230,6 @@ network and developer checkout/toolchain access. Windows uses the single
 executable with empty application caches and Zig's offline package mode.
 Interactive desktop/tray and physical device acceptance remain separate gates;
 Linux distribution packaging remains pending.
-
-Practice persistence uses the immutable `zqlite` dependency declared in
-`build.zig.zon`, including its bundled SQLite implementation. Application code
-owns schema validation, transactions and migrations; the translated upstream
-header is used only for SQLite's online backup integration and journal-mode
-retry handling. Current-schema history queries use a read-only connection and
-one read transaction. Legacy imports and schema upgrades reopen for writing
-only when needed.
 
 Project saves retain a `.project.lock` file in the project directory. Cooperating
 instances hold its OS lock while checking the saved digest and publishing the

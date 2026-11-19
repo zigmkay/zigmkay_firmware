@@ -1,7 +1,7 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 // Retained from conlorz/zigmkay_firmware 3ee4135d308f18f15cc51b1d73e33e1b36bf517f,
 // companion-model/src/root.zig, and rewritten for the companion Raw HID session
-// of zigmkay_firmware PR #60. See repository LICENSE for GPL version 2.
+// of zigmkay_firmware PR #60. See repository LICENSE for the GPL version 2 text.
 //! Pure bounded live-session reducer. All times are monotonic milliseconds.
 //! The caller owns the transport and sends the commands this reducer returns.
 const std = @import("std");

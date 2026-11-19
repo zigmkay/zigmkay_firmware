@@ -60,36 +60,22 @@ pub const Mode = union(enum) {
         };
     }
 
-    /// The tutor rundown fixtures, including the native screenshot galleries.
-    pub fn isRundown(mode: Mode) bool {
-        return mode.is(.rundown) or mode.gallery() != null;
-    }
-
     pub fn isStatus(mode: Mode) bool {
         return mode.is(.status) or mode.is(.native_status);
+    }
+
+    /// The onboarding gallery, offscreen or with the native renderer.
+    pub fn isOnboarding(mode: Mode) bool {
+        return mode.is(.onboarding) or mode.is(.native_onboarding);
+    }
+
+    pub fn isDrawers(mode: Mode) bool {
+        return mode.is(.drawers) or mode.is(.native_drawers);
     }
 
     /// Draft fixtures feed key events through the native runner processor.
     pub fn isDraft(mode: Mode) bool {
         return mode.is(.draft) or mode.is(.build);
-    }
-
-    pub fn gallery(mode: Mode) ?Fixture.Gallery {
-        const kind = mode.fixtureKind() orelse return null;
-        return switch (kind) {
-            .gallery => |value| value,
-            else => null,
-        };
-    }
-
-    pub fn isScene(mode: Mode, scene: Fixture.Gallery.Scene) bool {
-        const value = mode.gallery() orelse return false;
-        return value.scene == scene;
-    }
-
-    pub fn isLayoutGallery(mode: Mode) bool {
-        const value = mode.gallery() orelse return false;
-        return value.layout;
     }
 };
 
@@ -121,11 +107,14 @@ pub const Fixture = struct {
         onboarding,
         catalog,
         status,
+        /// `--offline-drawers-frames`: the combo, callback and encoder drawers.
+        drawers,
         native_status,
+        native_drawers,
+        native_onboarding,
         practice,
-        rundown,
-        /// `--native-<scene>-frames` and `--native-layout-<scene>-frames`.
-        gallery: Gallery,
+        /// `--native-tutor-frames`: screenshots of the tutor's typing tests.
+        native_tutor,
         companion,
         native_tray,
         source_refresh,
@@ -135,7 +124,7 @@ pub const Fixture = struct {
 
         fn minimumFrames(kind: Kind) usize {
             return switch (kind) {
-                .rundown, .gallery => 20,
+                .native_tutor => 16,
                 .companion => 9,
                 .practice, .native_tray, .source_refresh => 3,
                 .build => 2,
@@ -147,25 +136,16 @@ pub const Fixture = struct {
             return switch (kind) {
                 .build => 30_000,
                 .draft => 1000,
-                .gallery => |value| if (value.layout) 200 else 100,
                 else => 100,
             };
         }
 
         fn needsNativeVideo(kind: Kind) bool {
             return switch (kind) {
-                .native_tray, .gallery, .native_status => true,
+                .native_tray, .native_tutor, .native_status, .native_drawers, .native_onboarding => true,
                 else => false,
             };
         }
-    };
-
-    pub const Gallery = struct {
-        scene: Scene,
-        /// Layout galleries resize the window and scroll each panel.
-        layout: bool,
-
-        pub const Scene = enum { data, progress, diagnostics, curriculum, help, rundown };
     };
 };
 
@@ -242,36 +222,18 @@ fn parseKind(flag: []const u8) error{Usage}!Fixture.Kind {
         .{ "--offline-onboarding-frames", .onboarding },
         .{ "--offline-catalog-frames", .catalog },
         .{ "--offline-status-frames", .status },
+        .{ "--offline-drawers-frames", .drawers },
         .{ "--native-status-frames", .native_status },
+        .{ "--native-drawers-frames", .native_drawers },
+        .{ "--native-onboarding-frames", .native_onboarding },
         .{ "--offline-practice-frames", .practice },
-        .{ "--offline-rundown-frames", .rundown },
+        .{ "--native-tutor-frames", .native_tutor },
         .{ "--offline-companion-frames", .companion },
         .{ "--native-tray-frames", .native_tray },
         .{ "--offline-source-refresh-frames", .source_refresh },
         .{ "--offline-build-frames", .build },
     });
-    if (map.get(flag)) |kind| return kind;
-    if (std.mem.startsWith(u8, flag, "--native-layout-")) {
-        const scene = parseScene(flag["--native-layout-".len..]) orelse return error.Usage;
-        return .{ .gallery = .{ .scene = scene, .layout = true } };
-    }
-    if (std.mem.startsWith(u8, flag, "--native-")) {
-        const scene = parseScene(flag["--native-".len..]) orelse return error.Usage;
-        return .{ .gallery = .{ .scene = scene, .layout = false } };
-    }
-    return error.Usage;
-}
-
-fn parseScene(name: []const u8) ?Fixture.Gallery.Scene {
-    const map = std.StaticStringMap(Fixture.Gallery.Scene).initComptime(.{
-        .{ "data-frames", .data },
-        .{ "progress-frames", .progress },
-        .{ "diagnostics-frames", .diagnostics },
-        .{ "curriculum-frames", .curriculum },
-        .{ "help-frames", .help },
-        .{ "rundown-frames", .rundown },
-    });
-    return map.get(name);
+    return map.get(flag) orelse error.Usage;
 }
 
 const dummy_video: Environment = .{ .video_driver = "dummy" };
@@ -312,25 +274,17 @@ test "physical flash requires explicit authorization" {
 test "fixture modes keep their frame bounds and video requirements" {
     const t = std.testing;
     try expectFixture(.{ .kind = .launch, .frames = 3 }, &.{ "app", "--offline-frames", "3" }, dummy_video);
+    try expectFixture(.{ .kind = .drawers, .frames = 24 }, &.{ "app", "--offline-drawers-frames", "24" }, dummy_video);
     try expectFixture(.{ .kind = .build, .frames = 30_000 }, &.{ "app", "--offline-build-frames", "30000" }, dummy_video);
     try expectFixture(
         .{ .kind = .{ .draft = "/m.zon" }, .frames = 600 },
         &.{ "app", "--offline-draft-frames", "600", "/m.zon" },
         dummy_video,
     );
-    try expectFixture(
-        .{ .kind = .{ .gallery = .{ .scene = .help, .layout = true } }, .frames = 126 },
-        &.{ "app", "--native-layout-help-frames", "126" },
-        .{},
-    );
-    try expectFixture(
-        .{ .kind = .{ .gallery = .{ .scene = .data, .layout = false } }, .frames = 20 },
-        &.{ "app", "--native-data-frames", "20" },
-        .{},
-    );
-    try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--offline-rundown-frames", "19" }, dummy_video));
+    try expectFixture(.{ .kind = .native_tutor, .frames = 16 }, &.{ "app", "--native-tutor-frames", "16" }, .{});
+    try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--native-tutor-frames", "15" }, .{}));
     try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--offline-frames", "101" }, dummy_video));
-    try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--native-help-frames", "126" }, .{}));
+    try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tutor-frames", "16" }, dummy_video));
     try t.expectError(error.AbsoluteRunnerManifestRequired, parse(&.{ "app", "--offline-draft-frames", "9", "m" }, dummy_video));
     try t.expectError(error.DummyVideoRequired, parse(&.{ "app", "--offline-frames", "3" }, .{}));
     try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tray-frames", "3" }, dummy_video));

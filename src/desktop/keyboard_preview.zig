@@ -36,7 +36,7 @@ pub fn draw(theme: ui.Theme, geometry: Geometry, bounds: dvui.Rect, style: Style
         const index = placed.key_index;
         const missing = if (style.missing) |keys| index < keys.len and keys[index] else false;
         const id = style.id *% 4099 +% order;
-        const danger = ui.color(0xF06B73);
+        const danger = theme.danger;
         const fill = if (missing) ui.mix(theme.keycap, danger, 0.12) else theme.keycap;
         const border = @max(0.75, @min(1.5, rect.w / 24));
         const corner = @max(2, rect.w * 0.12);
@@ -67,6 +67,7 @@ pub fn draw(theme: ui.Theme, geometry: Geometry, bounds: dvui.Rect, style: Style
             .size = rect.w * 0.42,
             .id_extra = id,
             .layers = theme.layers,
+            .turn = .{ .radians = placed.rotation, .pivot = rect.center() },
         });
     }
 }

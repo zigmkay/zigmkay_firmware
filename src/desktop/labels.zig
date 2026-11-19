@@ -244,6 +244,27 @@ fn knownUsage(code: u8, buffer: []u8) []const u8 {
     return std.fmt.bufPrint(buffer, "HID {d}", .{code}) catch "?";
 }
 
+/// A symbol as inspectors spell keys out: the symbol, then its name.
+pub fn spelled(symbol: Symbol, buffer: []u8) []const u8 {
+    return std.fmt.bufPrint(buffer, "{s} {s}", .{ symbol.text(), symbol.name() }) catch symbol.name();
+}
+
+/// An enum tag in words for the inspector: "VolumeUp" becomes "Volume up".
+pub fn words(tag: []const u8, buffer: []u8) []const u8 {
+    var used: usize = 0;
+    for (tag, 0..) |char, index| {
+        const upper = std.ascii.isUpper(char);
+        if (upper and index != 0 and used < buffer.len) {
+            buffer[used] = ' ';
+            used += 1;
+        }
+        if (used == buffer.len) break;
+        buffer[used] = if (upper and index != 0) std.ascii.toLower(char) else char;
+        used += 1;
+    }
+    return buffer[0..used];
+}
+
 pub fn tap(value: p.Tap, buffer: []u8) []const u8 {
     return tapLabel(value, buffer, false);
 }
@@ -267,8 +288,9 @@ fn tapLabelWithLayout(
         appendSummary(buffer, &used, keyPressLabel(km, key, physical, false, &key_buffer, &scratch));
         if (key.dead) appendSummary(buffer, &used, "Dead key");
     }
-    if (value.media_key) |media| appendSummary(buffer, &used, @tagName(media));
-    if (value.mouse_action) |mouse| appendSummary(buffer, &used, @tagName(mouse));
+    var name: [64]u8 = undefined;
+    if (value.media_key) |media| appendSummary(buffer, &used, words(@tagName(media), &name));
+    if (value.mouse_action) |mouse| appendSummary(buffer, &used, words(@tagName(mouse), &name));
     if (value.custom) |custom| appendSummary(buffer, &used, signal(custom, &scratch));
     if (value.one_shot) |one| {
         appendSummary(buffer, &used, "One-shot");
@@ -434,6 +456,30 @@ fn appendSummary(buffer: []u8, used: *usize, text: []const u8) void {
         .{ if (used.* == 0) "" else " · ", text },
     ) catch return;
     used.* += part.len;
+}
+
+/// What a key does in plain words, as the editor explains it below the
+/// keyboard: "Tap: K. Hold: L ⇧ Shift after 180 ms." Mode names never appear.
+pub fn behaviour(value: ?p.Action, doc: p.Document, buffer: []u8) []const u8 {
+    const a = value orelse return "Falls through to the layer below.";
+    var tap_buffer: [256]u8 = undefined;
+    var hold_buffer: [256]u8 = undefined;
+    return switch (a) {
+        .none => "Does nothing.",
+        .tap_only => |t| std.fmt.bufPrint(buffer, "Tap: {s}.", .{tap(t, &tap_buffer)}) catch "Tap.",
+        .hold_only => |h| std.fmt.bufPrint(buffer, "Hold: {s}.", .{hold(h, doc, &hold_buffer)}) catch "Hold.",
+        .tap_hold => |th| std.fmt.bufPrint(buffer, "Tap: {s}. Hold: {s} after {d} ms{s}.", .{
+            tap(th.tap, &tap_buffer),
+            hold(th.hold, doc, &hold_buffer),
+            th.tapping_term.ms,
+            if (th.retro_tapping) ", or the tap when released alone" else "",
+        }) catch "Tap and hold.",
+        .tap_with_autofire => |af| std.fmt.bufPrint(buffer, "Tap: {s}. Hold: repeats every {d} ms after {d} ms.", .{
+            tap(af.tap, &tap_buffer),
+            af.repeat_interval.ms,
+            af.initial_delay.ms,
+        }) catch "Tap, repeating while held.",
+    };
 }
 
 pub fn signal(id: u8, buffer: []u8) []const u8 {
@@ -694,7 +740,8 @@ test "compact keycaps draw keyboard symbols and keep descriptive search labels" 
     try expectCaption("⌃⌥⇧⌘", keycapModifiers(.macos, 0xff, &buffer));
     try expectCaption("Ctrl+⇧+Alt+Win", keycapModifiers(.windows, 0xff, &buffer));
     try expectCaption("🔊", tapLabel(.{ .media_key = .VolumeUp }, &buffer, true));
-    try std.testing.expectEqualStrings("VolumeUp", tap(.{ .media_key = .VolumeUp }, &buffer));
+    try std.testing.expectEqualStrings("Volume up", tap(.{ .media_key = .VolumeUp }, &buffer));
+    try std.testing.expectEqualStrings("Wheel down", tap(.{ .mouse_action = .WheelDown }, &buffer));
     const chord: p.Tap = .{ .key_press = .{ .tap_keycode = 29, .tap_modifiers = .{ .left_gui = true } } };
     try expectCaption(if (running_host == .macos) "⌘Z" else "Win+Z", tapLabel(chord, &buffer, true));
     try std.testing.expect(
@@ -888,8 +935,8 @@ test "compound tap and one shot summaries show every populated schema field" {
     for ([_][]const u8{
         "A",
         "Dead key",
-        "VolumeUp",
-        "WheelDown",
+        "Volume up",
+        "Wheel down",
         "Toggle companion logging",
         "One-shot",
         "L42",
@@ -946,4 +993,41 @@ test "empty and small caller buffers keep bounded label fallbacks" {
     try t.expect(containsIgnoreCase(hold(.{ .layer_id = 77 }, doc, &buffer), "Named stable layer"));
     try t.expectEqualStrings("Inherited", keycap(null, doc, &buffer));
     try t.expectEqualStrings("None", keycap(.none, doc, &buffer));
+}
+
+test "behaviour sentences spell out every key type without mode names" {
+    const doc: p.Document = .{
+        .schema_version = 1,
+        .board_id = @splat(0),
+        .profile_id = @splat(0),
+        .physical_layout = "fixture",
+        .name = "Fixture",
+        .key_ids = &.{},
+        .layers = &.{ .{ .id = 0, .name = "Base", .actions = &.{} }, .{ .id = 7, .name = "Numbers", .actions = &.{} } },
+    };
+    const t = std.testing;
+    var buffer: [512]u8 = undefined;
+    var plain: [512]u8 = undefined;
+    const a: p.Tap = .{ .key_press = .{ .tap_keycode = 4 } };
+    try t.expectEqualStrings("Tap: A.", keycap_symbols.plain(behaviour(.{ .tap_only = a }, doc, &buffer), &plain));
+    try t.expectEqualStrings("Hold: L1 Numbers.", behaviour(.{ .hold_only = .{ .layer_id = 7 } }, doc, &buffer));
+    const both = behaviour(.{ .tap_hold = .{
+        .tap = a,
+        .hold = .{ .hold_modifiers = .{ .left_shift = true } },
+        .tapping_term = .{ .ms = 200 },
+        .retro_tapping = true,
+    } }, doc, &buffer);
+    try t.expect(containsIgnoreCase(both, "after 200 ms, or the tap when released alone."));
+    try t.expect(containsIgnoreCase(both, "Shift"));
+    const repeat = behaviour(.{ .tap_with_autofire = .{
+        .tap = a,
+        .initial_delay = .{ .ms = 300 },
+        .repeat_interval = .{ .ms = 50 },
+    } }, doc, &buffer);
+    try t.expect(containsIgnoreCase(repeat, "Hold: repeats every 50 ms after 300 ms."));
+    try t.expectEqualStrings("Does nothing.", behaviour(.none, doc, &buffer));
+    try t.expectEqualStrings("Falls through to the layer below.", behaviour(null, doc, &buffer));
+    for ([_][]const u8{ "Tap / Hold", "Autofire", "tap_hold", "Mode" }) |mode| {
+        try t.expect(!containsIgnoreCase(both, mode) and !containsIgnoreCase(repeat, mode));
+    }
 }

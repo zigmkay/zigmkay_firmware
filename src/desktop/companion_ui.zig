@@ -16,7 +16,7 @@ pub const Frame = struct {
     modifiers: layout.Modifiers = .{},
     pressed: []const bool,
     practicing: bool = false,
-    assistance: desktop.practice_results.Assistance = .guided,
+    assistance: desktop.practice_controller.Assistance = .guided,
     live: bool = false,
     active_layers: ?u16 = null,
     targets: ?[]const bool = null,
@@ -67,7 +67,6 @@ fn drawKey(key: desktop.physical_view.DrawKey, theme: ui.Theme, layer: usize) !v
     face.a = 238;
     var options = ui.options(theme, bounds, 17);
     options.id_extra = key.placed.id;
-    options.rotation = key.placed.rotation;
     options.background = true;
     options.corners = .all(@max(4, bounds.w * 0.12));
     options.border = .all(if (key.pressed or key.target or key.hold) 2.5 else 2);
@@ -82,8 +81,15 @@ fn drawKey(key: desktop.physical_view.DrawKey, theme: ui.Theme, layer: usize) !v
         options.color_border = .{ .color = ui.color(0x50D2FF) };
     }
     if (key.pressed) options.color_fill = .{ .color = layer_color };
-    const box = dvui.box(@src(), .{}, options);
-    box.deinit();
+    // DVUI boxes ignore rotation; a turned key draws its face as a path.
+    const turn: ui.Turn = .{ .radians = key.placed.rotation, .pivot = bounds.center() };
+    if (turn.radians != 0) {
+        const border = options.borderGet().x;
+        ui.turnedBox(bounds, turn, .round(@max(4, bounds.w * 0.12)), options.color_fill.?.color, options.color_border.?.color, border);
+    } else {
+        const box = dvui.box(@src(), .{}, options);
+        box.deinit();
+    }
     const strong = key.pressed or key.target or key.hold;
     const text_color = if (strong) ui.color(0xFFFFFF) else theme.text;
     const arena = dvui.currentWindow().arena();
@@ -102,6 +108,7 @@ fn drawKey(key: desktop.physical_view.DrawKey, theme: ui.Theme, layer: usize) !v
         .id_extra = key.placed.id,
         .layer_colors = !key.pressed,
         .layers = theme.layers,
+        .turn = turn,
     });
 }
 

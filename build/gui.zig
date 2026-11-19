@@ -16,6 +16,8 @@ pub const test_roots = [_][]const u8{
     "src/desktop/icon_resources.zig",
     "src/desktop/components/key.zig",
     "src/desktop/onboarding_ui.zig",
+    "src/desktop/keyboard_ui.zig",
+    "src/desktop/key_editor_ui.zig",
     "src/platform/companion_window.zig",
 };
 
@@ -26,7 +28,6 @@ const fixtures = [_]struct { []const u8, []const u8 }{
     .{ "--offline-catalog-frames", "56" },
     .{ "--offline-status-frames", "24" },
     .{ "--offline-practice-frames", "3" },
-    .{ "--offline-rundown-frames", "20" },
     .{ "--offline-companion-frames", "9" },
     .{ "--offline-source-refresh-frames", "3" },
 };
@@ -47,6 +48,8 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     _ = s.add(step, .desktop, g.icon_resources);
     _ = s.unit(step, .desktop, "src/desktop/components/key.zig", g.key_renderer_deps);
     _ = s.add(step, .desktop, g.onboarding_ui);
+    _ = s.add(step, .desktop, g.keyboard_ui);
+    _ = s.add(step, .desktop, g.key_editor_ui);
     _ = s.add(step, .desktop, g.companion_window);
     for (test_fixtures.flash_session) |run| step.dependOn(&run.?.step);
 

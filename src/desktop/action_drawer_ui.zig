@@ -27,7 +27,7 @@ pub fn draw(session: *desktop.action_form.Session, model: *const desktop.model.M
         if (status == .current) {
             const selected = std.mem.count(bool, session.selected, &.{true});
             dvui.label(@src(), "{d} selected · stable layer {d}", .{ selected, session.layer_id }, .{});
-            try forms.draw(&session.draft, model.document());
+            try forms.draw(&session.draft, model.document(), theme, .{});
         }
     }
     const buttons = dvui.box(@src(), .{ .dir = .horizontal }, .{ .expand = .horizontal });

@@ -136,10 +136,10 @@ fn drawRename(view: *View, theme: ui.Theme, bounds: dvui.Rect) bool {
 /// Whether the layout is saved, shown as a quiet note next to the breadcrumb.
 fn drawSave(theme: ui.Theme, save: Save) void {
     const text, const tint, const icon: ?[]const u8 = switch (save) {
-        .saved => .{ "Saved", ui.color(0x6EC59A), ui.control_icons.saved },
+        .saved => .{ "Saved", theme.success, ui.control_icons.saved },
         .pending => .{ "Edited", theme.muted, null },
         .saving => .{ "Saving…", theme.muted, null },
-        .failed => .{ "Save failed · see Details", ui.color(0xF06B73), ui.control_icons.warning },
+        .failed => .{ "Save failed · see Details", theme.danger, ui.control_icons.warning },
         .manual => return,
     };
     var x: f32 = 616;
@@ -260,16 +260,31 @@ fn drawActivity(view: *View, theme: ui.Theme, frame: Frame, width: f32) void {
     if (ui.iconButton(theme, if (view.details_open) null else ui.control_icons.expand, "Details", "editor.activity.details", .{ .x = row_width - 92, .y = 5, .w = 92, .h = 26 }, false)) {
         view.details_open = !view.details_open;
     }
-    if (view.details_open) drawDetails(view, activity, theme);
+    if (view.details_open) drawDetails(view, activity, frame, theme);
 }
 
 /// A spinner while busy, otherwise a status dot or a warning mark.
 fn drawActivityIcon(activity: Activity, theme: ui.Theme) void {
-    const tint = if (activity.failed) ui.color(0xF06B73) else if (activity.busy) ui.color(0x328BFF) else ui.color(0x6EC59A);
+    const tint = if (activity.failed) theme.danger else if (activity.busy) theme.accent else theme.success;
+    if (activity.failed) {
+        dvui.icon(@src(), "activity.failed", ui.control_icons.warning, .{}, .{
+            .rect = .{ .x = 7, .y = 10, .w = 16, .h = 16 },
+            .color_text = .{ .color = tint },
+            .padding = .{},
+            .margin = .{},
+        });
+        return;
+    }
     if (!activity.busy) {
-        var icon_theme = theme;
-        icon_theme.text = tint;
-        ui.label(icon_theme, if (activity.failed) "!" else "●", .{ .x = 8, .y = 8, .w = 18, .h = 20 }, 14);
+        const dot = dvui.box(@src(), .{}, .{
+            .rect = .{ .x = 11, .y = 14, .w = 8, .h = 8 },
+            .background = true,
+            .color_fill = .{ .color = tint },
+            .corners = .all(4),
+            .padding = .{},
+            .margin = .{},
+        });
+        dot.deinit();
         return;
     }
     const track = dvui.box(@src(), .{}, .{
@@ -290,36 +305,97 @@ fn drawActivityIcon(activity: Activity, theme: ui.Theme) void {
     });
 }
 
-fn drawDetails(view: *View, activity: Activity, theme: ui.Theme) void {
+const Step = enum { pending, active, done, failed };
+
+/// The work flow as three steps, derived from the build and flash state.
+fn steps(frame: Frame) [3]Step {
+    if (frame.build_active) return .{ .active, .pending, .pending };
+    if (frame.flash_active) return .{ .done, .active, .pending };
+    if (frame.flash_succeeded) return .{ .done, .done, .done };
+    if (frame.flash_failed) return .{ .done, .failed, .pending };
+    if (std.mem.eql(u8, frame.build_status, "Built snapshot")) return .{ .done, .pending, .pending };
+    return .{ .pending, .pending, .pending };
+}
+
+fn drawDetails(view: *View, activity: Activity, frame: Frame, theme: ui.Theme) void {
+    const w: f32 = 600;
+    const h: f32 = 380;
     const popup = dvui.floatingWindow(@src(), .{ .modal = false }, .{
-        .rect = .{ .x = @max(16, dvui.windowRect().w - 650), .y = 110, .w = 620, .h = 240 },
-        .padding = .all(18),
+        .rect = .{ .x = @max(16, dvui.windowRect().w - w - 24), .y = 108, .w = w, .h = h },
+        .padding = .{},
         .background = true,
         .color_fill = .{ .color = theme.panel },
         .color_text = .{ .color = theme.text },
         .color_border = .{ .color = theme.border },
         .border = .all(1),
-        .corners = .all(10),
+        .corners = .all(12),
+        .tag = "editor.activity.details_panel",
     });
     defer popup.deinit();
-    ui.label(theme, "Build and Flash activity", .{ .x = 0, .y = 0, .w = 584, .h = 25 }, 17);
+    var muted = theme;
+    muted.text = theme.muted;
+    ui.label(theme, "Build and Flash activity", .{ .x = 20, .y = 18, .w = 480, .h = 26 }, 18);
+    if (ui.iconButton(theme, ui.control_icons.remove, "", "editor.activity.dismiss", .{ .x = w - 48, .y = 16, .w = 30, .h = 30 }, false)) view.details_open = false;
+
+    // The current state with its icon, as in the status row.
+    const tint = if (activity.failed) theme.danger else if (activity.busy) theme.accent else theme.success;
+    if (activity.busy) {
+        dvui.spinner(@src(), .{
+            .rect = .{ .x = 20, .y = 60, .w = 18, .h = 18 },
+            .min_size_content = .{ .w = 18, .h = 18 },
+            .padding = .{},
+            .margin = .{},
+            .color_text = .{ .color = tint },
+        });
+    } else {
+        dvui.icon(@src(), "activity.state", if (activity.failed) ui.control_icons.warning else ui.control_icons.saved, .{}, .{
+            .rect = .{ .x = 20, .y = 60, .w = 18, .h = 18 },
+            .color_text = .{ .color = tint },
+            .padding = .{},
+            .margin = .{},
+        });
+    }
+    const headline = if (activity.failed) (if (frame.diagnostic.len != 0) "Needs attention" else "Flash failed") else activity.message;
+    var strong = theme;
+    strong.text = if (activity.failed) theme.danger else theme.text;
+    var headline_options = ui.options(strong, .{ .x = 48, .y = 58, .w = w - 68, .h = 22 }, 15);
+    headline_options.padding = .{};
+    headline_options.font = headline_options.font.?.withWeight(.bold);
+    dvui.labelNoFmt(@src(), headline, .{ .align_y = 0.5, .ellipsize = true }, headline_options);
+    const detail = if (activity.hint.len != 0) activity.hint else if (activity.failed) "Press Flash to try again once the cause is fixed" else frame.connection;
+    ui.label(muted, detail, .{ .x = 48, .y = 82, .w = w - 68, .h = 18 }, 12);
+
+    drawSteps(theme, steps(frame), w);
+
+    const log = dvui.box(@src(), .{}, .{
+        .rect = .{ .x = 20, .y = 176, .w = w - 40, .h = h - 176 - 72 },
+        .background = true,
+        .color_fill = .{ .color = theme.bg },
+        .color_border = .{ .color = theme.border },
+        .border = .all(1),
+        .corners = .all(8),
+        .padding = .all(12),
+        .margin = .{},
+    });
     {
-        const scroll = dvui.scrollArea(@src(), .{}, .{ .rect = .{ .x = 0, .y = 36, .w = 584, .h = 105 }, .background = false });
+        defer log.deinit();
+        const scroll = dvui.scrollArea(@src(), .{}, .{ .expand = .both, .background = false, .padding = .{} });
         defer scroll.deinit();
         const text = dvui.textLayout(@src(), .{ .break_lines = true }, .{
             .expand = .horizontal,
             .background = false,
-            .font = ui.options(theme, .{}, 14).font,
+            .font = ui.options(theme, .{}, 13).font,
+            .color_text = .{ .color = theme.text },
             .padding = .{},
         });
-        text.addText(activity.full, .{});
+        text.addText(if (activity.full.len != 0) activity.full else "Nothing has been built in this session.", .{});
         if (activity.hint.len != 0) {
             text.addText("\n\n", .{});
             text.addText(activity.hint, .{});
         }
         text.deinit();
     }
-    if (ui.button(theme, "Copy details", "editor.activity.copy", .{ .x = 0, .y = 155, .w = 130, .h = 32 })) {
+    if (ui.iconButton(theme, ui.control_icons.copy, "Copy details", "editor.activity.copy", .{ .x = 20, .y = h - 56, .w = 150, .h = 36 }, false)) {
         const full = activity.full;
         const details = if (activity.hint.len == 0)
             full
@@ -327,5 +403,60 @@ fn drawDetails(view: *View, activity: Activity, theme: ui.Theme) void {
             std.fmt.allocPrint(dvui.currentWindow().arena(), "{s}\n\n{s}", .{ full, activity.hint }) catch full;
         dvui.clipboardTextSet(details);
     }
-    if (ui.button(theme, "Close", "editor.activity.close", .{ .x = 474, .y = 155, .w = 110, .h = 32 })) view.details_open = false;
+    if (ui.iconButton(theme, null, "Close", "editor.activity.close", .{ .x = w - 20 - 100, .y = h - 56, .w = 100, .h = 36 }, false)) view.details_open = false;
+}
+
+/// Build › Flash › Reconnect as dots on a line; the current step is ringed.
+fn drawSteps(theme: ui.Theme, state: [3]Step, w: f32) void {
+    const names = [_][]const u8{ "Build", "Flash", "Reconnect" };
+    const left: f32 = 60;
+    const right = w - 60;
+    const y: f32 = 128;
+    const spacing = (right - left) / 2;
+    for (0..2) |index| {
+        const x = left + spacing * @as(f32, @floatFromInt(index));
+        const done = state[index] == .done;
+        ui.divider(theme, .{ .x = x + 8, .y = y - 1, .w = spacing - 16, .h = 2 }, 40 + index);
+        if (done) {
+            const line = dvui.box(@src(), .{}, .{
+                .id_extra = index,
+                .rect = .{ .x = x + 8, .y = y - 1, .w = spacing - 16, .h = 2 },
+                .background = true,
+                .color_fill = .{ .color = theme.success },
+                .padding = .{},
+                .margin = .{},
+            });
+            line.deinit();
+        }
+    }
+    for (names, state, 0..) |name, step, index| {
+        const x = left + spacing * @as(f32, @floatFromInt(index));
+        const tint = switch (step) {
+            .pending => theme.border,
+            .active => theme.accent,
+            .done => theme.success,
+            .failed => theme.danger,
+        };
+        const size: f32 = if (step == .active or step == .failed) 16 else 12;
+        const dot = dvui.box(@src(), .{}, .{
+            .id_extra = index,
+            .rect = .{ .x = x - size / 2, .y = y - size / 2, .w = size, .h = size },
+            .background = true,
+            .color_fill = .{ .color = if (step == .active) theme.panel else tint },
+            .color_border = .{ .color = tint },
+            .border = .all(if (step == .active) 3 else 0),
+            .corners = .all(size / 2),
+            .padding = .{},
+            .margin = .{},
+        });
+        dot.deinit();
+        var caption = theme;
+        caption.text = if (step == .pending) theme.muted else if (step == .failed) theme.danger else theme.text;
+        var opts = ui.options(caption, .{ .x = x - 60, .y = y + 14, .w = 120, .h = 18 }, 13);
+        opts.padding = .{};
+        opts.background = false;
+        opts.id_extra = index;
+        if (step != .pending) opts.font = opts.font.?.withWeight(.bold);
+        dvui.labelNoFmt(@src(), name, .{ .align_x = 0.5 }, opts);
+    }
 }

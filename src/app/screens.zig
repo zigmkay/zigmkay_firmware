@@ -71,7 +71,7 @@ fn drawEditor(app: *App, board: *const boards.OwnedBoard, toolbar: Toolbar) !edi
     });
 }
 
-/// The keyboard and its PCB revision, such as "Leonardo Keycaprio · PCB 0.7 (LK7)".
+/// The keyboard and its PCB revision, such as "Leonardo Keycaprio · PCB 0.7".
 fn keyboardName(board: *const boards.OwnedBoard) ![]const u8 {
     const display = board.entry.display;
     return std.fmt.allocPrint(dvui.currentWindow().arena(), "{s} · PCB {s}", .{ display.name, display.revision });

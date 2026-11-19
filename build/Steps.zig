@@ -25,7 +25,7 @@ pub fn init(b: *std.Build) Steps {
     const steps: Steps = .{
         .check = b.step("check", "Compile every configured source, tool and test without running anything"),
         .@"test" = b.step("test", "Run all offline tests and check that every test block is compiled"),
-        .test_practice = b.step("test-practice", "Run practice data, storage migration and application path tests"),
+        .test_practice = b.step("test-practice", "Run typing test, tutor control and application path tests"),
         .test_jobs = b.step("test-jobs", "Run subprocess, flash-job, traversal and release tooling tests"),
         .test_desktop = b.step("test-desktop", "Run SDL dummy/software GUI fixtures and GUI unit tests (-Ddesktop)"),
         .test_native = b.step("test-native", "Query the OS keyboard layout and install a hidden tray; never devices (-Ddesktop)"),

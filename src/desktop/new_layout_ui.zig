@@ -207,7 +207,7 @@ fn duplicateList(view: *View, theme: ui.Theme, owned: ?*const library.Library, t
         const detail = std.fmt.bufPrint(&line, "{s} · PCB {s}", .{ layout.entry.display.name, layout.entry.display.revision }) catch "";
         page.text(theme, detail, .{ .x = 18, .y = y + 23, .w = 300, .h = 16 }, 11, theme.muted, false, 700 + index);
         if (!library.sameHardware(layout.entry, target))
-            page.pill(theme, "other revision", .{ .x = 350, .y = y + 12, .w = 108, .h = 20 }, ui.mix(theme.panel, ui.color(0xF59E0B), 0.15), null, ui.color(0xF59E0B), 800 + index);
+            page.pill(theme, "other revision", .{ .x = 350, .y = y + 12, .w = 108, .h = 20 }, ui.mix(theme.panel, theme.warning, 0.15), null, theme.warning, 800 + index);
     }
 }
 
@@ -264,7 +264,7 @@ fn drawPreview(view: *View, theme: ui.Theme, entry: *const catalog.Entry, contex
     }
     const candidate = context.candidate orelse {
         const message = if (context.failure.len != 0) context.failure else "Choose a starting point";
-        page.text(theme, message, .{ .x = 600, .y = 340, .w = 868, .h = 20 }, 14, if (context.failure.len != 0) ui.color(0xF06B73) else theme.muted, false, 63);
+        page.text(theme, message, .{ .x = 600, .y = 340, .w = 868, .h = 20 }, 14, if (context.failure.len != 0) theme.danger else theme.muted, false, 63);
         return;
     };
     const doc = candidate.snapshot.document;
@@ -395,9 +395,9 @@ const Tone = enum { ok, warning, danger, info };
 fn note(theme: ui.Theme, row: usize, top: f32, tone: Tone, message: []const u8) void {
     const y = top + 54 + @as(f32, @floatFromInt(row)) * 24;
     const tint = switch (tone) {
-        .ok => ui.color(0x6EC59A),
-        .warning => ui.color(0xF59E0B),
-        .danger => ui.color(0xF06B73),
+        .ok => theme.success,
+        .warning => theme.warning,
+        .danger => theme.danger,
         .info => theme.muted,
     };
     const icon = switch (tone) {

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Bounded picotool flash wrapper. Standalone executable root; depends only on std.
 //!
 //! usage: picotool_flash <picotool> <firmware.uf2> [options]

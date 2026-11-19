@@ -48,19 +48,18 @@ const Families = struct {
     }
 };
 
-/// The catalog entries of `family`, one per distinct revision.
+/// The catalog entries of `family`, one per distinct revision in revision
+/// order: the primary selector of each.
 fn revisions(family: usize, out: *[max_families]usize) []const usize {
     const name = catalog.entries[family].display.name;
     var len: usize = 0;
     for (catalog.entries, 0..) |entry, index| {
-        if (!std.mem.eql(u8, entry.display.name, name)) continue;
-        const known = for (out[0..len]) |seen| {
-            if (std.mem.eql(u8, catalog.entries[seen].display.revision, entry.display.revision)) break true;
-        } else false;
-        if (!known) {
-            out[len] = index;
-            len += 1;
-        }
+        if (!std.mem.eql(u8, entry.display.name, name) or !entry.display.primary) continue;
+        var at = len;
+        while (at > 0 and std.mem.order(u8, entry.display.revision, catalog.entries[out[at - 1]].display.revision) == .lt) : (at -= 1)
+            out[at] = out[at - 1];
+        out[at] = index;
+        len += 1;
     }
     return out[0..len];
 }
@@ -234,7 +233,7 @@ fn drawList(view: *View, theme: ui.Theme, families: Families) void {
     page.text(theme, "Missing a keyboard? Boards come from the pinned firmware catalog.", .{ .x = 40, .y = 1004, .w = 472, .h = 18 }, 12, theme.muted, false, 13);
 }
 
-/// "LK1 · LK2 · LK6 · LK7 · LK8 · 30–34 keys" for a family.
+/// "0.1 · 0.2 · 0.4 · 0.6 · 0.7 · 0.8 · 30–34 keys" for a family.
 fn familyLine(buffer: []u8, family: usize) []const u8 {
     var storage: [max_families]usize = undefined;
     var writer: std.Io.Writer = .fixed(buffer);
@@ -253,12 +252,12 @@ fn templateLine(buffer: []u8, entry: *const catalog.Entry) []const u8 {
     var writer: std.Io.Writer = .fixed(buffer);
     writer.writeAll("Firmware default: ") catch {};
     var first = true;
-    for (catalog.entries) |candidate| {
-        if (!std.mem.eql(u8, candidate.display.name, entry.display.name) or
-            !std.mem.eql(u8, candidate.display.revision, entry.display.revision)) continue;
+    // The primary selector's template leads.
+    for ([_]bool{ true, false }) |primary| for (catalog.entries) |candidate| {
+        if (!desktop.library.sameHardware(&candidate, entry) or candidate.display.primary != primary) continue;
         writer.print("{s}{s}", .{ if (first) "" else ", ", candidate.display.template }) catch break;
         first = false;
-    }
+    };
     if (std.mem.eql(u8, entry.selector, "lk7")) writer.writeAll(" · built-in QWERTY and EurKEY layouts") catch {};
     return writer.buffered();
 }

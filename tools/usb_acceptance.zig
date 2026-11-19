@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Explicit, bounded hardware acceptance. No arguments/help/offline never touch HID.
 const std = @import("std");
 const builtin = @import("builtin");

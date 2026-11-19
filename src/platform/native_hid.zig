@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Adapted from zigmkay_firmware 3ee4135d308f18f15cc51b1d73e33e1b36bf517f,
 //! zigmkay-companion/src/main.zig. SDL bindings are supplied by the desktop.
 const std = @import("std");

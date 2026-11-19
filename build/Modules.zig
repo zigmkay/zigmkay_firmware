@@ -38,9 +38,6 @@ pub const Core = struct {
     tray_lifecycle: *Module,
     flash_presenter: *Module,
     geometry: *Module,
-    zqlite: ?*Module,
-    /// `zqlite` alone, for the persistent practice stores.
-    zqlite_only: []const Import,
 };
 
 /// Modules on top of the firmware package's processor and keycodes.
@@ -52,7 +49,7 @@ pub const Host = struct {
     defaults: *Module,
     /// A separate default keymap inventory as a test root.
     defaults_test: *Module,
-    physical: *Module,
+    lk7_ids: *Module,
     catalog: *Module,
     protocol: *Module,
     profile: *Module,
@@ -140,6 +137,8 @@ pub const Gui = struct {
     native_draft_input: *Module,
     icon_resources: *Module,
     onboarding_ui: *Module,
+    keyboard_ui: *Module,
+    key_editor_ui: *Module,
     companion_window: *Module,
     audit_options: *std.Build.Step.Options,
 
@@ -155,7 +154,7 @@ pub const Gui = struct {
 };
 
 pub fn init(b: *std.Build, cfg: Config, deps: Deps) Modules {
-    const core = initCore(b, cfg, deps);
+    const core = initCore(b, cfg);
     const host = if (deps.firmware) |firmware| initHost(b, cfg, core, firmware) else null;
     const gui = if (host) |h| if (deps.dvui) |dvui| initGui(b, cfg, deps, core, h, dvui) else null else null;
     return .{ .b = b, .cfg = cfg, .core = core, .host = host, .gui = gui };
@@ -171,7 +170,7 @@ pub fn root(m: Modules, path: []const u8, imports: []const Import) *Module {
     });
 }
 
-fn initCore(b: *std.Build, cfg: Config, deps: Deps) Core {
+fn initCore(b: *std.Build, cfg: Config) Core {
     const owned_zon = b.createModule(.{ .root_source_file = b.path("src/project/owned_zon.zig") });
     const uf2 = b.createModule(.{ .root_source_file = b.path("src/artifact/uf2.zig") });
     const jobs_deps = dupe(b, &.{ .{ .name = "owned-zon", .module = owned_zon }, .{ .name = "firmware-uf2", .module = uf2 } });
@@ -198,8 +197,6 @@ fn initCore(b: *std.Build, cfg: Config, deps: Deps) Core {
         .tray_lifecycle = b.createModule(.{ .root_source_file = b.path("src/desktop/tray_lifecycle.zig"), .target = cfg.target, .optimize = cfg.optimize }),
         .flash_presenter = b.createModule(.{ .root_source_file = b.path("src/desktop/flash_presenter.zig"), .target = cfg.target, .optimize = cfg.optimize, .imports = dupe(b, &.{.{ .name = "flash-controller", .module = flash_controller }}) }),
         .geometry = b.createModule(.{ .root_source_file = b.path("src/desktop/geometry.zig") }),
-        .zqlite = deps.zqlite,
-        .zqlite_only = if (deps.zqlite) |zqlite| dupe(b, &.{.{ .name = "zqlite", .module = zqlite }}) else &.{},
     };
 }
 
@@ -215,12 +212,12 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
     const zigmkay_only = dupe(b, &.{.{ .name = "zigmkay", .module = zigmkay }});
     const keycodes = b.createModule(.{ .root_source_file = sources.keycodes, .imports = zigmkay_only });
     const layout = b.createModule(.{ .root_source_file = b.path("src/layout/root.zig"), .imports = zigmkay_only });
-    const physical = b.createModule(.{ .root_source_file = b.path("src/catalog/lk7_physical_layout.zig"), .imports = dupe(b, &.{.{ .name = "layout-model", .module = layout }}) });
+    const lk7_ids = b.createModule(.{ .root_source_file = b.path("src/catalog/lk7_key_ids.zig"), .imports = dupe(b, &.{.{ .name = "layout-model", .module = layout }}) });
     const defaults = fw_build.defaultKeymaps(b, sources, zigmkay, keycodes);
     const catalog = b.createModule(.{ .root_source_file = b.path("src/catalog/root.zig"), .target = t, .optimize = o, .imports = dupe(b, &.{
         .{ .name = "firmware-defaults", .module = defaults },
         .{ .name = "layout-model", .module = layout },
-        .{ .name = "lk7-physical", .module = physical },
+        .{ .name = "lk7-key-ids", .module = lk7_ids },
     }) });
     for (fw_build.boards.entries, 0..) |board, index|
         catalog.addAnonymousImport(b.fmt("default-source-{d}", .{index}), .{ .root_source_file = firmware.path(b.fmt("keyboards/{s}", .{board.default_keymap})) });
@@ -233,7 +230,7 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .{ .name = "layout-model", .module = layout },
         .{ .name = "device-protocol", .module = protocol },
         .{ .name = "rollercole-profile", .module = profile },
-        .{ .name = "lk7-physical", .module = physical },
+        .{ .name = "lk7-key-ids", .module = lk7_ids },
         .{ .name = "owned-zon", .module = core.owned_zon },
     });
     const project = b.createModule(.{ .root_source_file = b.path("src/project/root.zig"), .imports = project_deps });
@@ -280,7 +277,6 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .{ .name = "zkeycodes", .module = keycodes },
         .{ .name = "input-source", .module = input_source },
         .{ .name = "companion-jobs", .module = core.jobs },
-        .{ .name = "zqlite", .module = core.zqlite.? },
         .{ .name = "flash-controller", .module = core.flash_controller },
         .{ .name = "desktop-geometry", .module = core.geometry },
         .{ .name = "flash-presenter", .module = core.flash_presenter },
@@ -308,7 +304,7 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
             module.optimize = o;
             break :defaults_test module;
         },
-        .physical = physical,
+        .lk7_ids = lk7_ids,
         .catalog = catalog,
         .protocol = protocol,
         .profile = profile,
@@ -439,6 +435,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
     }) });
     const flash_ui = b.createModule(.{ .root_source_file = b.path("src/desktop/flash_ui.zig"), .target = t, .imports = dupe(b, &.{
         .{ .name = "dvui", .module = dvui },
+        .{ .name = "editor-ui", .module = ui },
         .{ .name = "flash-presenter", .module = core.flash_presenter },
     }) });
     const tray = deps.ztray.?.module("ztray");
@@ -480,16 +477,13 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
     const action_form_ui = desktopModule(b, cfg, "action_form_ui.zig", &.{
         .{ .name = "desktop-core", .module = dc },
         .{ .name = "dvui", .module = dvui },
+        .{ .name = "editor-ui", .module = ui },
         .{ .name = "project", .module = host.project },
         .{ .name = "layout-model", .module = host.layout },
     });
     const with_form = editor ++ [_]Import{.{ .name = "action-form-ui", .module = action_form_ui }};
     const action_drawer_ui = desktopModule(b, cfg, "action_drawer_ui.zig", &with_form);
-    const inspector_ui = desktopModule(b, cfg, "inspector_ui.zig", &(editor ++ [_]Import{
-        .{ .name = "editor-fonts", .module = fonts },
-        .{ .name = "project", .module = host.project },
-    }));
-    const combo_ui = desktopModule(b, cfg, "combo_ui.zig", &with_form);
+    const combo_ui = desktopModule(b, cfg, "combo_ui.zig", &(with_form ++ [_]Import{.{ .name = "project", .module = host.project }}));
     const encoder_ui = desktopModule(b, cfg, "encoder_ui.zig", &with_form);
     const callback_ui = desktopModule(b, cfg, "callback_ui.zig", &editor);
     const layer_ui = desktopModule(b, cfg, "layer_ui.zig", &(editor ++ [_]Import{.{ .name = "project", .module = host.project }}));
@@ -497,6 +491,12 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
     const keyboard_ui = desktopModule(b, cfg, "keyboard_ui.zig", &(editor ++ [_]Import{
         .{ .name = "editor-fonts", .module = fonts },
         .{ .name = "layout-model", .module = host.layout },
+        .{ .name = "project", .module = host.project },
+    }));
+    const key_editor_ui = desktopModule(b, cfg, "key_editor_ui.zig", &(editor ++ [_]Import{
+        .{ .name = "project", .module = host.project },
+        .{ .name = "keyboard-ui", .module = keyboard_ui },
+        .{ .name = "zkeymap", .module = host.keymap },
     }));
     const toolbar_ui = desktopModule(b, cfg, "toolbar_ui.zig", &editor);
     const paths_ui = desktopModule(b, cfg, "paths_ui.zig", &(editor ++ [_]Import{.{ .name = "project", .module = host.project }}));
@@ -506,7 +506,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .{ .name = "layer-ui", .module = layer_ui },
         .{ .name = "keyboard-ui", .module = keyboard_ui },
         .{ .name = "host-palette-ui", .module = host_palette_ui },
-        .{ .name = "inspector-ui", .module = inspector_ui },
+        .{ .name = "key-editor-ui", .module = key_editor_ui },
         .{ .name = "combo-ui", .module = combo_ui },
         .{ .name = "callback-ui", .module = callback_ui },
         .{ .name = "encoder-ui", .module = encoder_ui },
@@ -558,6 +558,8 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .native_draft_input = native_draft_input,
         .icon_resources = icon_resources,
         .onboarding_ui = onboarding_ui,
+        .keyboard_ui = keyboard_ui,
+        .key_editor_ui = key_editor_ui,
         .companion_window = companion_window,
         .audit_options = audit_options,
         .vector_test_deps = dupe(b, &.{ .{ .name = "svg2tvg", .module = svg2tvg }, .{ .name = "icons", .module = icons } }),
@@ -590,7 +592,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
             .{ .name = "physical-ui", .module = physical_ui },
             .{ .name = "action-form-ui", .module = action_form_ui },
             .{ .name = "action-drawer-ui", .module = action_drawer_ui },
-            .{ .name = "inspector-ui", .module = inspector_ui },
+            .{ .name = "key-editor-ui", .module = key_editor_ui },
             .{ .name = "combo-ui", .module = combo_ui },
             .{ .name = "layer-ui", .module = layer_ui },
             .{ .name = "host-palette-ui", .module = host_palette_ui },

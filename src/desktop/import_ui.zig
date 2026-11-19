@@ -59,7 +59,7 @@ fn drawSource(theme: ui.Theme, context: Context, intent: *Intent) !void {
         var buffer: [96]u8 = undefined;
         const commit = if (context.source) |source| if (source.provenance.commit) |value| value[0..@min(7, value.len)] else "local folder" else "sample";
         const label = std.fmt.bufPrint(&buffer, "Analyzed · {s}", .{commit}) catch "Analyzed";
-        page.pill(theme, label, .{ .x = 1116, .y = 80, .w = 236, .h = 40 }, ui.color(0x1F3A2E), null, ui.color(0x6EC59A), 1);
+        page.pill(theme, label, .{ .x = 1116, .y = 80, .w = 236, .h = 40 }, ui.mix(theme.panel, theme.success, 0.16), null, theme.success, 1);
         if (ui.iconButtonEnabled(theme, ui.control_icons.refresh, "Analyze again", "import.analyze", .{ .x = 1362, .y = 80, .w = 158, .h = 40 }, false, !context.busy)) intent.* = .analyze;
     } else if (context.inspected) {
         if (ui.iconButtonEnabled(theme, ui.control_icons.forward, "Analyze keymap", "import.analyze", .{ .x = 1116, .y = 80, .w = 404, .h = 40 }, true, !context.busy)) intent.* = .analyze;
@@ -92,20 +92,66 @@ fn drawSource(theme: ui.Theme, context: Context, intent: *Intent) !void {
 
 /// Before analysis: what happens, in order.
 fn drawSteps(theme: ui.Theme, context: Context) void {
-    page.panel(theme, .{ .x = 16, .y = 176, .w = 1504, .h = 470 }, 1);
+    page.panel(theme, .{ .x = 16, .y = 176, .w = 1504, .h = 400 }, 1);
     page.text(theme, "Bring a Zig keymap over", .{ .x = 48, .y = 210, .w = 900, .h = 30 }, 22, theme.text, true, 10);
-    const steps = [_][2][]const u8{
-        .{ "1  Capture", "Paste a public GitHub URL, optionally ending in /tree/<ref>, or choose a local folder. The ref resolves to an immutable commit." },
-        .{ "2  Analyze", "The selected module is evaluated with the pinned firmware and Zig 0.17.0. Repository build scripts and callbacks never run." },
-        .{ "3  Compare", "The found keymap appears next to your keyboard. Keys without a counterpart are outlined, and differences are listed." },
-        .{ "4  Create", "A new layout is added to your collection. The original repository is never changed." },
+    page.text(theme, "Nothing is created until you confirm the comparison.", .{ .x = 48, .y = 240, .w = 900, .h = 20 }, 14, theme.muted, false, 11);
+    const Step = struct { title: []const u8, icon: []const u8, text: []const u8 };
+    const steps = [_]Step{
+        .{ .title = "Capture", .icon = ui.control_icons.git, .text = "Paste a public GitHub URL, optionally ending in /tree/<ref>, or choose a local folder. The ref resolves to an immutable commit." },
+        .{ .title = "Analyze", .icon = ui.control_icons.search, .text = "The selected module is evaluated with the pinned firmware and Zig 0.17.0. Repository build scripts and callbacks never run." },
+        .{ .title = "Compare", .icon = ui.control_icons.transfer, .text = "The found keymap appears next to your keyboard. Keys without a counterpart are outlined, and differences are listed." },
+        .{ .title = "Create", .icon = ui.control_icons.add, .text = "A new layout is added to your collection. The original repository is never changed." },
     };
+    const gap: f32 = 16;
+    const card_w = (1504 - 64 - gap * 3) / 4;
     for (steps, 0..) |step, index| {
-        const y = 266 + @as(f32, @floatFromInt(index)) * 70;
-        page.text(theme, step[0], .{ .x = 48, .y = y, .w = 300, .h = 22 }, 17, theme.text, true, 20 + index);
-        page.text(theme, step[1], .{ .x = 48, .y = y + 26, .w = 1400, .h = 20 }, 14, theme.muted, false, 30 + index);
+        const x = 48 + @as(f32, @floatFromInt(index)) * (card_w + gap);
+        const y: f32 = 284;
+        const card = dvui.box(@src(), .{}, .{
+            .id_extra = index,
+            .rect = .{ .x = x, .y = y, .w = card_w, .h = 236 },
+            .background = true,
+            .color_fill = .{ .color = theme.bg },
+            .color_border = .{ .color = theme.border },
+            .border = .all(1),
+            .corners = .all(10),
+            .padding = .{},
+            .margin = .{},
+        });
+        card.deinit();
+        const badge = dvui.box(@src(), .{}, .{
+            .id_extra = index,
+            .rect = .{ .x = x + 20, .y = y + 20, .w = 40, .h = 40 },
+            .background = true,
+            .color_fill = .{ .color = ui.mix(theme.panel, theme.accent, 0.16) },
+            .corners = .all(10),
+            .padding = .{},
+            .margin = .{},
+        });
+        badge.deinit();
+        dvui.icon(@src(), "import.step", step.icon, .{}, .{
+            .id_extra = index,
+            .rect = .{ .x = x + 30, .y = y + 30, .w = 20, .h = 20 },
+            .color_text = .{ .color = theme.accent },
+            .padding = .{},
+            .margin = .{},
+        });
+        var number: [16]u8 = undefined;
+        page.text(theme, std.fmt.bufPrint(&number, "Step {d}", .{index + 1}) catch "", .{ .x = x + 20, .y = y + 76, .w = 200, .h = 16 }, 12, theme.muted, false, 20 + index);
+        page.text(theme, step.title, .{ .x = x + 20, .y = y + 96, .w = card_w - 40, .h = 24 }, 18, theme.text, true, 30 + index);
+        const body = dvui.textLayout(@src(), .{ .break_lines = true }, .{
+            .id_extra = index,
+            .rect = .{ .x = x + 20, .y = y + 130, .w = card_w - 40, .h = 96 },
+            .background = false,
+            .font = ui.editorFont(step.text, 14),
+            .color_text = .{ .color = theme.muted },
+            .padding = .{},
+            .margin = .{},
+        });
+        body.addText(step.text, .{});
+        body.deinit();
     }
-    if (context.failure.len != 0) page.text(theme, context.failure, .{ .x = 48, .y = 560, .w = 1400, .h = 20 }, 14, ui.color(0xF06B73), false, 40);
+    if (context.failure.len != 0) page.text(theme, context.failure, .{ .x = 48, .y = 536, .w = 1400, .h = 20 }, 14, theme.danger, false, 40);
 }
 
 fn drawComparison(theme: ui.Theme, context: Context, comparison: *const Comparison, intent: *Intent) !void {
@@ -185,8 +231,8 @@ fn well(theme: ui.Theme, rect: dvui.Rect, id: usize) void {
 fn differences(theme: ui.Theme, comparison: *const Comparison, host_source: []const u8) void {
     const report = comparison.report;
     const exact = report.exact();
-    const amber = ui.color(0xF59E0B);
-    const green = ui.color(0x6EC59A);
+    const amber = theme.warning;
+    const green = theme.success;
     const tint = if (exact) green else amber;
     const box = dvui.box(@src(), .{}, .{
         .rect = .{ .x = 16, .y = 660, .w = 1504, .h = 204 },

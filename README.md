@@ -8,18 +8,18 @@ A native visual editor, an on-demand keyboard companion, and a typing tutor
 for programmable keyboards running [Zigmkay firmware](https://github.com/zigmkay/zigmkay_firmware).
 Written in Zig.
 
-[Get started](#get-started-with-mise) · [Companion](#your-layout-one-hotkey-away) · [Editor](#program-your-keyboard-visually) · [Tutor](#learn-your-layout-with-the-typing-tutor) · [Development](#development)
+[Get started](#get-started-with-mise) · [Companion](#your-layout-one-hotkey-away) · [Editor](#program-your-keyboard-visually) · [Tutor](#try-your-layout-with-the-typing-tutor) · [Development](#development)
 
 </div>
 
 ![Zigmkay editor showing a split keyboard, four layers, a tap/hold key inspector, and Build and Flash controls](docs/screenshots/overview/editor.png)
 
 Choose what a key does when tapped or held, see the layout while you work,
-and practice the keys that need attention. The editor and companion share a
+and try it out in a typing test. The editor and companion share a
 resident desktop application, accessible from its little keyboard tray icon.
 
 *All images below are real native macOS application captures. The companion
-is shown offline; tutor exercises and history use deterministic sample data.
+is shown offline; tutor exercises use deterministic sample input.
 [Capture details](docs/screenshots/overview/README.md).*
 
 ## Get started with mise
@@ -80,12 +80,15 @@ above shows the explicitly labeled offline draft view.
 
 ## Program your keyboard visually
 
-The physical keyboard, layer list, OS keyboard palette and key inspector live
-in one window. Select a key, search for an action, or drag an OS keyboard chord
-into the inspector. Apply edits explicitly, with undo/redo available afterward.
+The physical keyboard, layer list and OS keyboard palette live in one window.
+Every key has two halves: click the upper half to choose what it types and the
+lower half to choose what it does while held. Press the key on your computer's
+keyboard, search for an action, or drag an OS keyboard key onto either half.
+Changes apply at once, with undo/redo available afterward.
 
-- **Tap, hold, tap/hold and repeat:** tune tapping terms and repeat delays;
-  combine key chords with left/right modifiers.
+- **Tap, hold and autofire without modes:** the key type follows from what you
+  set; tune tapping terms and autofire delays, and combine key chords with
+  left/right modifiers.
 - **Layers and one-shots:** add, duplicate and name layers, use layer holds,
   and distinguish inherited assignments from keys that do nothing.
 - **More than letters:** assign media controls, mouse actions, companion signals,
@@ -100,7 +103,7 @@ into the inspector. Apply edits explicitly, with undo/redo available afterward.
 
 **Build**, **Flash** and optional **Auto-build** sit in the editor toolbar shown
 above. The installed application includes everything needed to build firmware
-and run practice offline. Startup does not download or prepare packages.
+and run the tutor offline. Startup does not download or prepare packages.
 
 Click **Flash** to build the current project if needed, request BOOTSEL, transfer
 the verified UF2, and wait for reconnection. If BOOTSEL is not discovered, the
@@ -121,87 +124,19 @@ live companion. **Quit Zigmkay** exits the resident application.
   <img src="docs/screenshots/overview/tray.png" alt="Native macOS keyboard tray icon and Zigmkay menu with Open Editor, Show Companion, device status, zoom and Quit" width="360">
 </p>
 
-## Learn your layout with the typing tutor
+## Try your layout with the typing tutor
 
-Choose **Open tutor** in the editor. Practice fresh English text with Words,
-Mixed case or Punctuation presets, or use a retained Zig lesson. Choose length
-and assistance independently; reproducible challenge seeds let you share an
-exercise with a friend.
+Choose **Open tutor** in the editor. Before a test, the tutor shows your
+keyboard's layout and highlights each key you press, so you can check a freshly
+flashed layout key by key. Start an English typing test of 1, 3, 5 or 10
+sentences, or one of three short Zig lessons, and see your words per minute and
+accuracy. The tutor saves nothing between sessions.
 
-![Active typing tutor highlighting the next character and the key to tap](docs/screenshots/typing-practice/tutor.png)
+![Typing tutor highlighting the next character and the key to tap](docs/screenshots/typing-practice/tutor.png)
 
-### Learn a few keys, then build up
-
-Six guided stages take you from **Find keys** and **Build fluency** through
-**Shift**, **Layers**, **Modifiers** and **Real text**. Start with a small
-reachable alphabet and readable words, then add one letter or key family at
-a time. Suggestions use matching practice history; you choose when to advance.
-Saved lesson context can be resumed later.
-
-![Guided lesson screen with six stages, a small starting alphabet and a suggested next step](docs/screenshots/typing-practice/curriculum-wide.png)
-
-### Get help when you need it
-
-Use full guidance, delayed hints, hints on request, a layout-only reference,
-or hidden assistance. Cyan marks keys to **hold** and amber marks the key to
-**tap**. Delayed hints can adapt to your clean character timing. Optional recall
-review suggests familiar targets to revisit with help hidden.
-
-<details>
-<summary>See hint guidance and recall review</summary>
-
-![Tutor showing separate Hold and Tap guidance without moving the keyboard](docs/screenshots/typing-practice/help-wide.png)
-
-![Optional recall review showing targets and recommended review intervals](docs/screenshots/typing-practice/review-wide.png)
-
-</details>
-
-### Turn mistakes into the next exercise
-
-Each completed run separates speed, attempt accuracy and first-pass success.
-Layer and modifier heatmaps show missed characters alongside practice exposure.
-Compare this run, the last ten matching runs or all matching history, inspect
-confusions, and start fresh weak-spot drills from the result.
-
-![Completed exercise with speed and accuracy cards, a layer heatmap and targeted weak-spot practice](docs/screenshots/typing-practice/rundown-compact-wide.png)
-
-### See progress and understand hesitation
-
-Track speed and accuracy trends, character progress, daily activity and voluntary
-practice goals. Dive into character medians, slow-tail timing, transitions,
-run rhythm and individual recorded events. Comparisons keep different layouts,
-input sources and assistance settings separate.
-
-![Progress dashboard with speed and accuracy trends alongside a character progress matrix](docs/screenshots/typing-practice/progress-wide.png)
-
-<details>
-<summary>See daily activity, character timing and run rhythm</summary>
-
-![Daily activity view with practice minutes and optional daily goals](docs/screenshots/typing-practice/activity-wide.png)
-
-![Character timing analysis with median, p95, personal reference and transition timings](docs/screenshots/typing-practice/diagnostics-wide.png)
-
-![Run rhythm chart and raw event inspector](docs/screenshots/typing-practice/rhythm-wide.png)
-
-</details>
-
-### Keep your practice history
-
-History is stored locally in SQLite. Export a standalone practice database and
-merge it on another computer; saved curriculum context travels with it. Practice
-data tools include migration, transfer previews and history management.
-
-<details>
-<summary>See practice data and transfer tools</summary>
-
-![Practice data screen with local storage and database export/import controls](docs/screenshots/typing-practice/data-wide.png)
-
-</details>
-
-The [typing practice guide](docs/typing-practice.md) covers controls, metrics,
-storage and evidence rules. Text input measures output and timing; it cannot
-prove which finger or physical route you used. Lesson and recall suggestions
-are initial policies for manual validation.
+The [typing practice guide](docs/typing-practice.md) covers the controls, the
+keyboard guide and input sources. Text input measures output and timing; it
+cannot prove which finger or physical route you used.
 
 ## Development
 
@@ -221,6 +156,13 @@ remaining platform and hardware acceptance work.
 
 ## License
 
-Zigmkay companion is free software under the **GNU General Public License,
-version 2**. See [LICENSE](LICENSE). Imported dependencies retain their own
-license notices.
+Zigmkay companion is free software: you can redistribute it and/or modify it
+under the terms of the **GNU General Public License as published by the Free
+Software Foundation, either version 2 of the License, or (at your option) any
+later version** (`GPL-2.0-or-later`). See [LICENSE](LICENSE) for the version 2
+text.
+
+The application compiles in the zigmkay firmware, which is licensed under GPL
+version 2 only. Builds that include it are therefore distributed under GPL
+version 2. Imported dependencies retain their own license notices; see
+[NOTICE](NOTICE).

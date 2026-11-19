@@ -23,20 +23,27 @@ const lk7_templates = [_]Template{
     .{ .label = "EurKEY Next Mac", .selector = "lk7", .curated = .eurmac },
 };
 
-/// The templates of the hardware of `entry`: the firmware default of each of
-/// its selectors. The LK7 offers its built-in layouts, which share the board
-/// identity of existing LK7 projects.
 /// Room for every template of one keyboard.
 pub const Templates = [catalog.entries.len + lk7_templates.len]Template;
 
+/// The templates of the hardware of `entry`: the firmware default of each of
+/// its selectors, the primary one first. In place of its firmware default the
+/// LK7 offers its built-in layouts, which share the board identity of
+/// existing LK7 projects.
 pub fn templates(entry: *const catalog.Entry, out: *Templates) []const Template {
-    if (std.mem.eql(u8, entry.selector, "lk7")) return &lk7_templates;
     var len: usize = 0;
-    for (&catalog.entries) |*candidate| {
-        if (!library.sameHardware(candidate, entry)) continue;
+    for ([_]bool{ true, false }) |primary| for (&catalog.entries) |*candidate| {
+        if (!library.sameHardware(candidate, entry) or candidate.display.primary != primary) continue;
+        if (std.mem.eql(u8, candidate.selector, "lk7")) {
+            for (lk7_templates) |template| {
+                out[len] = template;
+                len += 1;
+            }
+            continue;
+        }
         out[len] = .{ .label = candidate.display.template, .selector = candidate.selector };
         len += 1;
-    }
+    };
     return out[0..len];
 }
 

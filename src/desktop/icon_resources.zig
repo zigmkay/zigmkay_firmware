@@ -46,6 +46,12 @@ pub const controls = struct {
     pub const refresh = lucide.@"refresh-cw";
     pub const file = lucide.@"file-code";
     pub const transfer = lucide.@"arrow-left-right";
+    pub const delete = lucide.@"trash-2";
+    pub const encoder = lucide.@"rotate-cw";
+    pub const external = lucide.@"square-arrow-out-up-right";
+    pub const autofire = lucide.repeat;
+    pub const inherit = lucide.@"arrow-down";
+    pub const nothing = lucide.ban;
 };
 const Entry = struct { name: []const u8, bytes: []const u8 };
 

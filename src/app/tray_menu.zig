@@ -62,8 +62,6 @@ pub fn updateResidency(app: *App) void {
 pub fn waitWhileIdle(app: *App) !App.Flow {
     if (app.frame_limit != null or app.life.editor_visible or app.life.companion_visible) return .proceed;
     if (app.jobs.busy() or !app.flash.idle() or app.draft_runtime.owner != null) return .proceed;
-    const history = &app.tutor.history;
-    if (history.worker != null or (history.queued != 0 and history.error_value == null)) return .proceed;
     app.tray.update(.{ .live_mode = app.live_enabled, .status = app.live.status(), .companion_visible = false });
     var event: Backend.c.SDL_Event = undefined;
     while (Backend.c.SDL_PollEvent(&event)) _ = try app.events.raw(event);

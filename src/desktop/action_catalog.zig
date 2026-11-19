@@ -36,8 +36,8 @@ pub fn label(entry: Entry, doc: p.Document, buffer: []u8) []const u8 {
             ) catch "Layer";
             break :blk std.fmt.bufPrint(buffer, "Layer {d}", .{id}) catch "Layer";
         },
-        .media => |value| @tagName(value),
-        .mouse => |value| @tagName(value),
+        .media => |value| labels.spelled(labels.mediaSymbol(value), buffer),
+        .mouse => |value| labels.spelled(labels.mouseSymbol(value), buffer),
         .callback => |id| std.fmt.bufPrint(buffer, "Callback {d}", .{id}) catch "Callback",
         .one_shot => "One-shot",
         .signal => |id| labels.signal(id, buffer),
@@ -68,6 +68,9 @@ fn append(
     const matches = switch (entry) {
         .key => |code| labels.matchesUsage(labels.running_host, code, query),
         .modifier => |bit| labels.matchesUsage(labels.running_host, 224 + bit, query),
+        // Firmware names such as "VolumeMute" stay searchable.
+        .media => |value| labels.containsIgnoreCase(label(entry, doc, &buffer), query) or labels.containsIgnoreCase(@tagName(value), query),
+        .mouse => |value| labels.containsIgnoreCase(label(entry, doc, &buffer), query) or labels.containsIgnoreCase(@tagName(value), query),
         else => labels.containsIgnoreCase(label(entry, doc, &buffer), query),
     };
     if (matches) {
@@ -80,7 +83,9 @@ fn append(
 pub fn search(doc: p.Document, target: Target, category: Category, query: []const u8, out: []Entry) usize {
     var count: usize = 0;
     inline for (@typeInfo(@import("zkeycodes").layouts.keycodes.kc.basic).@"enum".field_values) |value| {
-        if (value < 224) append(doc, target, category, query, .{ .key = @intCast(value) }, out, &count);
+        // The keyboard-page Mute and Volume usages (127 to 129) repeat the
+        // media keys, which macOS honours too; offer only the media keys.
+        if (value < 224 and (value < 127 or value > 129)) append(doc, target, category, query, .{ .key = @intCast(value) }, out, &count);
     }
     append(doc, target, category, query, .{ .key = 252 }, out, &count);
     for (0..8) |bit| append(doc, target, category, query, .{ .modifier = @intCast(bit) }, out, &count);
@@ -163,4 +168,25 @@ test "picker uses stable document layer and deduplicated callback IDs with bound
     try t.expectEqual(@as(usize, 1), search(doc, .hold, .all, "show", &out));
     try t.expectEqual(@as(u8, 255), out[0].signal);
     try t.expectEqual(@as(usize, 3), search(doc, .hold, .signal, "", &out));
+}
+
+test "volume keys appear once, as media keys with their symbols" {
+    const t = std.testing;
+    const doc: p.Document = .{
+        .schema_version = 1,
+        .board_id = @splat(0),
+        .profile_id = @splat(0),
+        .physical_layout = "synthetic",
+        .name = "Picker",
+        .key_ids = &.{},
+        .layers = &.{},
+    };
+    var out: [16]Entry = undefined;
+    const found = search(doc, .tap, .all, "volu", &out);
+    try t.expectEqual(@as(usize, 3), found);
+    for (out[0..found]) |entry| try t.expect(entry == .media);
+    var buffer: [64]u8 = undefined;
+    const mute: Entry = .{ .media = .VolumeMute };
+    try t.expectEqualStrings(labels.keycap_symbols.Symbol.literal(.mute) ++ " Mute", label(mute, doc, &buffer));
+    try t.expectEqual(@as(usize, 1), search(doc, .tap, .all, "mute", &out));
 }

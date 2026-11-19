@@ -135,14 +135,19 @@ test "new layouts start from templates, blank or a copy without touching the ori
     const t = std.testing;
     const lk7 = desktop.library.catalog.find("lk7").?;
     var buffer: new_layout.Templates = undefined;
+    // PCB 0.7 offers the built-in LK7 layouts first, then the contributed
+    // firmware defaults of the same revision.
     const lk7_templates = new_layout.templates(lk7, &buffer);
-    try t.expectEqual(@as(usize, 4), lk7_templates.len);
+    try t.expectEqual(@as(usize, 6), lk7_templates.len);
+    try t.expectEqualStrings("Rollercole · default", lk7_templates[0].label);
+    try t.expectEqualStrings("Colemak", lk7_templates[4].label);
+    try t.expectEqualStrings("US International", lk7_templates[5].label);
     var eurmac = try new_layout.prepare(t.allocator, t.io, lk7, .{ .template = lk7_templates[3] });
     defer eurmac.deinit();
     try t.expectEqualStrings("lk7_schematic_v1", eurmac.snapshot.document.physical_layout);
     try t.expectEqualStrings("Q", eurmac.captions[0][0]);
     const keycaprio = desktop.library.catalog.find("keycaprio_colemak_0_7").?;
-    try t.expectEqual(@as(usize, 2), new_layout.templates(keycaprio, &buffer).len);
+    try t.expectEqual(@as(usize, 6), new_layout.templates(keycaprio, &buffer).len);
     var blank = try new_layout.prepare(t.allocator, t.io, keycaprio, .blank);
     defer blank.deinit();
     try t.expectEqual(@as(usize, 1), blank.snapshot.document.layers.len);

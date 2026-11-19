@@ -69,7 +69,7 @@ export fn desktopHostPaletteCompileProbe(
     model: *const desktop.model.Model,
     cache: *const desktop.host_palette.Cache,
 ) void {
-    _ = @import("host-palette-ui").draw(view, model, cache, @import("editor-ui").Theme.get(false)) catch null;
+    _ = @import("host-palette-ui").draw(view, model, cache, @import("editor-ui").Theme.get(false), false) catch null;
 }
 
 export fn desktopLayerCompileProbe(view: *@import("layer-ui").View, model: *const desktop.model.Model) void {
@@ -190,7 +190,7 @@ export fn desktopActionFormCompileProbe(
     draft: *desktop.action_form.Draft,
     document: *const @import("project").Document,
 ) void {
-    @import("action-form-ui").draw(draft, document.*) catch {};
+    @import("action-form-ui").draw(draft, document.*, @import("editor-ui").Theme.get(false), .{}) catch {};
 }
 
 export fn desktopActionDrawerCompileProbe(
@@ -205,25 +205,27 @@ export fn desktopActionDrawerCompileProbe(
     ) catch {};
 }
 
-export fn desktopInspectorCompileProbe(
+export fn desktopKeyEditorCompileProbe(
     session: *desktop.inspector_session.Session,
     model: *const desktop.model.Model,
-    view: *@import("inspector-ui").View,
+    view: *@import("key-editor-ui").View,
+    host: *const desktop.host_palette.Cache,
 ) void {
-    _ = @import("inspector-ui").draw(
+    _ = @import("key-editor-ui").draw(
         session,
         model,
         view,
         @import("editor-ui").Theme.get(false),
-        false,
+        .{ .anchor = null, .host = host },
     ) catch null;
 }
 
 export fn desktopComboCompileProbe(
     session: *desktop.combo_editor.Session,
     model: *const desktop.model.Model,
+    board: *const @import("combo-ui").Board,
 ) void {
-    _ = @import("combo-ui").draw(session, model, @import("editor-ui").Theme.get(false), "") catch null;
+    _ = @import("combo-ui").draw(session, model, @import("editor-ui").Theme.get(false), "", board.*) catch null;
 }
 
 export fn desktopCallbackCompileProbe(

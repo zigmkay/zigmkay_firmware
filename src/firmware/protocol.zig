@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Companion-owned host codec for the zigmkay companion Raw HID session,
 //! protocol version 1 (zigmkay_firmware PR #60, `zigmkay/src/companion.zig`).
 //!

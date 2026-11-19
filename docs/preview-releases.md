@@ -27,7 +27,7 @@ uses baseline CPUs and explicit minimum OS versions, including the native flash
 helpers. The installed layouts are `zig-out/Zigmkay.app`, `zig-out/Zigmkay.exe`
 and `zig-out/Zigmkay.AppDir`. Linux's Zig `AppRun` resolves the application and
 libraries from its own location; the application resolves resources from its
-executable. User projects, SQLite history, exports and compiler caches stay in
+executable. User projects, exports and compiler caches stay in
 the existing platform user-storage locations, outside the installation/mount.
 
 Run `zig-out/bin/release package ABSOLUTE_PACKAGE_PATH ABSOLUTE_OUTPUT_DIRECTORY
@@ -91,36 +91,6 @@ completes flashing. There is no mass-storage byte-for-byte flash read-back.
 Version-1 tool and bundle descriptors continue to use picotool; version 2 records
 the backend and the executable hashes (the wrapper hash identifies the helper).
 
-## History upgrades and rollback
-
-The schema stays at **3**. Schemas 1–3 and legacy ZON histories are supported.
-Record, timing, metric and generator versions remain independent; incompatible
-payload changes require explicit version changes. Newer schemas, foreign
-application IDs and unsupported payloads report storage errors without resetting
-or replacing history. Other editor features remain available.
-
-An upgrade reserves the SQLite writer, rechecks the version, and uses a separate
-read connection with SQLite's online backup API. This includes committed WAL
-pages. A synced backup is atomically published exclusively under persistent
-`typing-practice/backups` and integrity-checked before transactional DDL. Backup
-failure aborts the upgrade; migration failure rolls back the schema and data.
-Record/timing bytes, IDs and import receipts are preserved. Current-schema
-read-only queries still work while another instance holds a writer reservation.
-Backups are retained without automatic pruning.
-
-To roll back:
-
-1. Quit **all** Zigmkay instances.
-2. Archive the **entire** current `typing-practice` history directory, including
-   any WAL and SHM files. Do not copy only the main active SQLite file.
-3. Put the chosen standalone backup in a clean history directory under the name
-   `practice.sqlite3`. Do not leave the newer database's WAL/SHM files beside it.
-4. Launch the older application that supports the snapshot's schema and payloads.
-
-History recorded after the snapshot remains in your archive and is absent from
-the restored database. There is no automatic downgrade or restore UI. The app's
-normal **Export database** action also produces a standalone online backup.
-
 ## CI and publishing
 
 The [application workflow](../.github/workflows/application-bundle.yml) preserves
@@ -145,14 +115,12 @@ by commit. Failed gates never run publishing. A failed draft upload can be resum
 a rerun against an already published release refuses to replace its assets.
 
 Run `zig build test-practice test-jobs` for focused offline contracts, and `zig build check test` for the
-full source suite. Historical SQL/ZON fixtures are committed; generated databases
-and packaging outputs belong in caches. Native Windows driver-free flashing and
+full source suite. Packaging outputs belong in caches. Native Windows driver-free flashing and
 desktop/device acceptance need a separately requested hardware task.
 
 References: [AppImage concepts](https://docs.appimage.org/introduction/concepts.html),
 [appimagetool](https://github.com/AppImage/appimagetool#usage),
 [static runtime](https://github.com/AppImage/type2-runtime),
-[SQLite online backup](https://www.sqlite.org/backup.html),
 [picotool driver requirements](https://github.com/raspberrypi/picotool#zadig),
 [RP2040 UF2 workflow](https://www.raspberrypi.com/documentation/microcontrollers/pico-series.html#drag-and-drop-a-program-onto-your-pico-series-device),
 [Flatpak device permissions](https://docs.flatpak.org/en/latest/sandbox-permissions.html).

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Offline wrapper checks against the fake picotool. No USB access.
 const std = @import("std");
 const flash = @import("picotool_flash.zig");

@@ -4,7 +4,7 @@
 const std = @import("std");
 const p = @import("root.zig");
 const original = @import("rollercole-profile");
-const physical = @import("lk7-physical");
+const lk7_ids = @import("lk7-key-ids").ids;
 pub const registered_source = @embedFile("rollercole-source");
 pub const registered_binding = "official_lk7_e310ab36";
 pub const registered_entry = "rollercole.zig";
@@ -13,7 +13,7 @@ pub const names = [_][]const u8{ "Danish Rollercole", "QWERTY", "EurKEY draft", 
 
 pub const key_ids: [34][]const u8 = blk: {
     var ids: [34][]const u8 = undefined;
-    for (physical.keys, 0..) |key, index| ids[index] = std.fmt.comptimePrint("lk7_{x:0>4}", .{key.id});
+    for (lk7_ids, 0..) |id, index| ids[index] = std.fmt.comptimePrint("lk7_{x:0>4}", .{id});
     break :blk ids;
 };
 

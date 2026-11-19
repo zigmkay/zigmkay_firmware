@@ -10,9 +10,6 @@ macOS/Windows/Linux C bridge bytes. Window, font and folder-dialog Zig adapters
 are carried with the same GPLv2 provenance. The lazy pinned FreeType dependency
 retains its upstream license files; release bundles must include its attribution.
 
-The zqlite dependency is pinned to karlseguin/zqlite.zig revision
-865223b734a5113f731ab1eb1d7d81c8ac252913 and retains its MIT license.
-It supplies the Zig database API and bundled public-domain SQLite implementation.
 The legacy keymap API shares the input-source package's implementation and native
 bridges; duplicate bridge copies were removed without changing the retained bytes.
 
@@ -22,6 +19,16 @@ Its implementation baseline is 3ee4135d308f18f15cc51b1d73e33e1b36bf517f;
 the intervening changes are planning documents only.
 
 LICENSE is copied verbatim from that repository (GNU GPL version 2).
+
+License grant (2026-11-18): the copyright holder of the first-party sources,
+including the sources extracted below from the reference repository paths it
+authored, offers them under GPL version 2 or (at your option) any later version
+(SPDX GPL-2.0-or-later). Earlier "GPLv2" statements in this file record
+provenance. Exceptions: the historical fixture
+tests/fixtures/historical/rollercole-0.16.zig.txt contains third-party work and
+stays GPL version 2 only, and imported dependencies keep their own licenses.
+The pinned zigmkay firmware is GPL version 2 only, so distributed builds that
+compile it in are distributed under GPL version 2.
 No host implementation has been imported at bootstrap. Preserve existing
 copyright/license notices when importing source. Dependency notices and asset
 licenses must accompany their eventual imports; this file is not a complete
@@ -235,3 +242,10 @@ Keycap symbol icons (2026-11-18): src/desktop/icon_resources.zig maps keycap
 symbols to lucide icons from the pinned icon package. Its first-party SVG
 paths follow the lucide 24-unit grid; the forward-delete icon mirrors the
 lucide `delete` path (ISC license, Lucide contributors).
+
+Key placement (2026-11-19): src/catalog/schematic/*.zon hold schematic key
+grids in key units, derived and rounded from published PCB switch positions;
+no PCB file is copied. Sources, named in each file header: StephanMoeller/
+Leonardo-KeycapRio 473f41f (CC BY-NC-SA 4.0), StephanMoeller/clacky-chan
+328530c and StephanMoeller/Tucky-Two-Times 29dedf9 (no license stated),
+opendata-nuernberg/molekula 78ca099 (MIT) and GroooveBob/DASBOB 3f49dda (MIT).

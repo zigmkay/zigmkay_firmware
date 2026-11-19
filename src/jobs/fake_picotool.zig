@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+// SPDX-License-Identifier: GPL-2.0-or-later
 //! Offline picotool stand-in for the flash wrapper tests. Never opens a device.
 //! The `--ser` value selects a behavior: `mode` or `mode|path`.
 const std = @import("std");

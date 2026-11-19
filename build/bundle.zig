@@ -84,7 +84,6 @@ fn pins(b: *std.Build, revision: []const u8) *std.Build.Step.Options {
     options.addOption([]const []const u8, "license_hashes", &.{
         manifest.dependencies.dvui.hash,
         manifest.dependencies.ztray.hash,
-        manifest.dependencies.zqlite.hash,
         manifest.dependencies.svg2tvg.hash,
         manifest.dependencies.icons.hash,
         manifest.dependencies.inter.hash,
