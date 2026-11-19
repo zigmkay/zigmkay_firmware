@@ -10,6 +10,16 @@ pub const MicroBuild = microzig.MicroBuild(.{
     .rp2xxx = true,
 });
 
+/// Where `addKeyboardFirmware` finds its sources.
+pub const Sources = struct {
+    /// This keyboards directory; `Board` paths are relative to it.
+    keyboards: std.Build.LazyPath,
+    /// `zigmkay/src/root.zig`.
+    processor: std.Build.LazyPath,
+    /// `zkeycodes/root.zig`.
+    keycodes: std.Build.LazyPath,
+};
+
 pub fn build(b: *std.Build) void {
     const selected_keyboard = b.option([]const u8, "keyboard", keyboardOptionDescription(b)) orelse boards.boards[0].name;
 
@@ -24,13 +34,18 @@ pub fn build(b: *std.Build) void {
 
     const zkeycodes_dep = b.dependency("zkeycodes", .{});
     const zkeycodes_mod = zkeycodes_dep.module("zkeycodes");
+    const sources: Sources = .{
+        .keyboards = b.path("."),
+        .processor = zigmkay_dep.path("src/root.zig"),
+        .keycodes = zkeycodes_dep.path("root.zig"),
+    };
 
     const sample = boards.find(selected_keyboard) orelse {
         printAvailableSamples();
         std.debug.panic("Unknown keyboard sample: '{s}'", .{selected_keyboard});
     };
 
-    const firmware = addKeyboardFirmware(b, mb, &target, optimize, "zigmkay_firmware", sample, zigmkay_dep, zkeycodes_dep, b.path("."), null);
+    const firmware = addKeyboardFirmware(b, mb, &target, optimize, "zigmkay_firmware", sample, sources, null);
     mb.install_firmware(firmware, .{});
 
     const firmware_uf2 = firmware.get_emitted_bin(.{ .uf2 = .{ .family_id = .RP2040 } });
@@ -64,7 +79,7 @@ pub fn build(b: *std.Build) void {
     // Compile every keyboard so a broken keymap fails the tests, not just the
     // one selected with -Dkeyboard.
     for (boards.boards) |keyboard| {
-        const keyboard_firmware = addKeyboardFirmware(b, mb, &target, optimize, keyboard.name, keyboard, zigmkay_dep, zkeycodes_dep, b.path("."), null);
+        const keyboard_firmware = addKeyboardFirmware(b, mb, &target, optimize, keyboard.name, keyboard, sources, null);
         test_step.dependOn(&keyboard_firmware.exe.step);
     }
 
@@ -75,9 +90,8 @@ pub fn build(b: *std.Build) void {
 /// wires the firmware's microzig into them, so sharing one instance between
 /// several firmwares makes microzig appear twice in the same module graph.
 ///
-/// `root` is this keyboards directory, which `board` paths are relative to:
-/// `b.path(".")` here, `keyboards_dep.path(".")` from another package. A
-/// non-null `keymap` replaces the board's own keymap file.
+/// Other packages reach this through `@import("zigmkay_firmware").keyboards`.
+/// A non-null `keymap` replaces the board's own keymap file.
 pub fn addKeyboardFirmware(
     b: *std.Build,
     mb: *MicroBuild,
@@ -85,25 +99,23 @@ pub fn addKeyboardFirmware(
     optimize: std.builtin.OptimizeMode,
     name: []const u8,
     board: boards.Board,
-    zigmkay_dep: *std.Build.Dependency,
-    zkeycodes_dep: *std.Build.Dependency,
-    root: std.Build.LazyPath,
+    sources: Sources,
     keymap: ?std.Build.LazyPath,
 ) *MicroBuild.Firmware {
     const firmware = mb.add_firmware(.{
         .name = name,
         .target = target,
         .optimize = optimize,
-        .root_source_file = root.path(b, board.root_source_file),
+        .root_source_file = sources.keyboards.path(b, board.root_source_file),
     });
-    const zigmkay_mod = b.createModule(.{ .root_source_file = zigmkay_dep.path("src/root.zig") });
+    const zigmkay_mod = b.createModule(.{ .root_source_file = sources.processor });
     const zkeycodes_mod = b.createModule(.{
-        .root_source_file = zkeycodes_dep.path("root.zig"),
+        .root_source_file = sources.keycodes,
         .imports = &.{.{ .name = "zigmkay", .module = zigmkay_mod }},
     });
     firmware.add_app_import("zigmkay", zigmkay_mod, .{ .depend_on_microzig = true });
     firmware.add_app_import("zkeycodes", zkeycodes_mod, .{ .depend_on_microzig = true });
-    if (keymap orelse if (board.keymap) |file| root.path(b, file) else null) |keymap_source| {
+    if (keymap orelse if (board.keymap) |file| sources.keyboards.path(b, file) else null) |keymap_source| {
         const keymap_mod = b.createModule(.{
             .root_source_file = keymap_source,
             .imports = &.{

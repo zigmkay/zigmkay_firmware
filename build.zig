@@ -3,6 +3,11 @@ const builtin = @import("builtin");
 
 const zigmkay_build = @import("zigmkay");
 
+/// For packages that build firmware from this one, such as the companion:
+/// the keyboard table and recipe, and microzig, pinned once by zigmkay.
+pub const keyboards = @import("keyboards/build.zig");
+pub const microzig = zigmkay_build.microzig;
+
 pub const FlashSteps = zigmkay_build.FlashSteps;
 
 /// Adds the `flash`, `flash_pt` and `flash_mount` steps and the
