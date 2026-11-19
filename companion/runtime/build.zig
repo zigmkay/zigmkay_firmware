@@ -21,7 +21,7 @@ pub fn build(b: *std.Build) void {
     const export_option = b.option([]const u8, "project-export", "Frozen project export");
     const board_option = b.option([]const u8, "project-board", "Board selector");
     const native_only = b.option(bool, "native-only", "Skip the embedded dependency graph") orelse false;
-    const fw = b.lazyDependency("zigmkay_firmware", .{}) orelse return;
+    const fw = b.dependency("zigmkay_firmware", .{});
     const processor = fw.module("zigmkay");
     const zigmkay: []const std.Build.Module.Import = &.{.{ .name = "zigmkay", .module = processor }};
     const keycodes = b.createModule(.{ .root_source_file = fw.path("zkeycodes/root.zig"), .imports = zigmkay });
@@ -35,9 +35,9 @@ pub fn build(b: *std.Build) void {
         step.dependOn(&install.step);
     } else runner_step.dependOn(&b.addFail("build-runner requires an absolute project-export").step);
     if (native_only) return;
-    const mz = b.lazyImport(@This(), "microzig") orelse return;
-    const mz_dep = b.lazyDependency("microzig", .{}) orelse return;
-    const mb = mz.MicroBuild(.{ .rp2xxx = true }).init(b, mz_dep) orelse return;
+    // microzig is pinned once, by the firmware's zigmkay package.
+    const mz_dep = fw.builder.dependency("zigmkay", .{}).builder.dependency("microzig", .{});
+    const mb = @import("zigmkay_firmware").keyboards.MicroBuild.init(b, mz_dep) orelse return;
     const path = export_option orelse return;
     const board = board_option orelse @panic("Missing board");
     const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*;

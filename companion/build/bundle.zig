@@ -79,7 +79,6 @@ pub fn add(s: *tests.Suite, deps: Deps, app: *Compile, bootsel: ?*Compile) void 
 /// its manifest, and the application identity.
 fn pins(b: *std.Build, revision: []const u8) *std.Build.Step.Options {
     const manifest = @import("../build.zig.zon");
-    const firmware = manifest.dependencies.zigmkay_firmware;
     const options = b.addOptions();
     options.addOption([]const []const u8, "license_hashes", &.{
         manifest.dependencies.dvui.hash,
@@ -92,10 +91,22 @@ fn pins(b: *std.Build, revision: []const u8) *std.Build.Step.Options {
     options.addOption([]const u8, "manifest", runtime.manifest(b));
     options.addOption([]const u8, "runtime_source_root", runtime.source_root);
     options.addOption([]const []const u8, "runtime_closure", &runtime.closure);
-    options.addOption([]const u8, "firmware_hash", firmware.hash);
-    options.addOption([]const u8, "microzig_hash", manifest.dependencies.microzig.hash);
-    options.addOption([]const u8, "firmware_revision", firmware.url[std.mem.lastIndexOfScalar(u8, firmware.url, '#').? + 1 ..]);
+    // Untracked: the assembler always runs, and the firmware directory holds caches.
+    options.addOptionPathUntracked("firmware_source", b.dependency("zigmkay_firmware", .{}).path("."));
+    options.addOption([]const u8, "firmware_root", runtime.firmware_root);
+    options.addOption([]const []const u8, "firmware_paths", &runtime.firmware_paths);
+    // The firmware is part of this repository, so its revision is the source
+    // commit; development builds without one record an all-zero revision.
+    options.addOption([]const u8, "firmware_revision", if (isCommit(revision)) revision else &zero_revision);
     options.addOption([]const u8, "application_version", manifest.version);
     options.addOption([]const u8, "source_revision", revision);
     return options;
+}
+
+const zero_revision: [40]u8 = @splat('0');
+
+fn isCommit(revision: []const u8) bool {
+    if (revision.len != 40) return false;
+    for (revision) |c| if (!std.ascii.isHex(c)) return false;
+    return true;
 }

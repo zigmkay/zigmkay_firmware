@@ -136,8 +136,9 @@ pub fn main(init: std.process.Init) !void {
         try assembly.copy(args[6], "tools/picotool_flash");
         try assembly.copy(args[7], "tools/picotool");
     }
-    try assembly.package(pins.firmware_hash);
-    try assembly.package(pins.microzig_hash);
+    // The firmware package of this repository, and the packages it pins.
+    for (pins.firmware_paths) |path| try assembly.copy(try std.fs.path.join(a, &.{ pins.firmware_source, path }), try std.fs.path.join(a, &.{ "build", pins.firmware_root, path }));
+    try assembly.closure(pins.firmware_source);
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "build/build.zig.zon" }), .data = pins.manifest });
     assembly.hash.update(pins.manifest);
     const manifest: jobs.application_bundle.Manifest = .{ .version = 2, .backend = if (builtin.os.tag == .windows) .windows_bootsel else .picotool, .id = assembly.hash.finalResult(), .firmware_revision = pins.firmware_revision, .wrapper_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[6], a, .limited(128 * 1024 * 1024))), .picotool_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[7], a, .limited(128 * 1024 * 1024))) };

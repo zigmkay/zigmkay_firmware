@@ -241,7 +241,7 @@ test "selected firmware inventory is complete and all geometry indexes validate"
         );
     }
     try std.testing.expect(find("yak") == null);
-    try std.testing.expectEqualStrings("examples/yak/main.zig", unselected_examples[0]);
+    try std.testing.expectEqualStrings("my_keyboards/rollercole/encoder_demo.zig", unselected_examples[0]);
     try std.testing.expect(find("encoder_demo") == null);
 }
 

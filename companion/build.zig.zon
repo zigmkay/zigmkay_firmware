@@ -29,20 +29,10 @@
             .hash = "N-V-__8AAAv-sAOXPycbcfSerQ5vsDx3k-PZC5fy2p9ScNi8",
             .lazy = true,
         },
-        .microzig = .{
-            .url = "https://github.com/ZigEmbeddedGroup/microzig/releases/download/0.17.12/microzig.tar.gz",
-            .hash = "microzig-0.17.12-D20YSbDKAAA_aWCmmydsldbUrhmCUzNFqseEIAE4__5g",
-            .lazy = true,
-        },
+        // The firmware of this repository: processor, keycodes, keyboards and,
+        // through zigmkay, the microzig and picotool pins.
         .zigmkay_firmware = .{
-            .url = "git+https://github.com/conlorz/zigmkay_firmware.git#83b689262ae4a6f814ba9c7aa9fa868bf734350f",
-            .hash = "zigmkay_firmware-0.1.0-EZ4qwwEqPAAFIPjJhcIZCyqxpcP3nHeXzeRd6JIKQeIs",
-            .lazy = true,
-        },
-        .picotool = .{
-            .url = "git+https://github.com/allyourcodebase/picotool.git#d8df33801dbea792128baaab516291720d400a91",
-            .hash = "picotool-2.3.1-PtJrRaJNAAA3xRwGctKAdomuKCJXz5UwMOrhzQ_Z2f-e",
-            .lazy = true,
+            .path = "..",
         },
     },
     .paths = .{ "build.zig", "build.zig.zon", ".zigversion", "mise.toml", "AGENTS.md", "README.md", "LICENSE", "NOTICE", "tests", "src", "build", "tools", "runtime", "packaging" },

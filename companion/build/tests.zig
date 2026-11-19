@@ -243,7 +243,7 @@ pub fn addHost(s: *Suite, fixtures: *Fixtures) void {
     // Nested analysis builds run against the bundled runtime closure, exactly
     // as the installed application does, with the repository's import fixtures.
     const importer_options = b.addOptions();
-    importer_options.addOptionPathDirectory("repository", runtime.tree(b, &.{"tests/fixtures/import"}));
+    importer_options.addOptionPathDirectory("repository", runtime.tree(b, b.dependency("zigmkay_firmware", .{}), &.{"tests/fixtures/import"}));
     importer_options.addOption([]const u8, "compiler", b.graph.zig_exe);
     // Absolute: the nested build runs in the runtime tree, not in this repository.
     importer_options.addOption([]const u8, "packages", b.pathJoin(&.{ b.root.toString(b.allocator) catch @panic("OOM"), "zig-pkg" }));
