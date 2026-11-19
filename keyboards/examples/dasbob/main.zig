@@ -8,10 +8,10 @@ pub const std_options = microzig.std_options(.{});
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const gpio = rp2xxx.gpio;
-const rollercole_shared_keymap = @import("keymap.zig");
+const rollercole_shared_keymap = @import("keymap");
 const zigmkay = @import("zigmkay");
 const zkeycodes = @import("zkeycodes");
-const keymap = @import("keymap.zig");
+const keymap = @import("keymap");
 
 // uart
 const uart_rx_pin = gpio.num(1);

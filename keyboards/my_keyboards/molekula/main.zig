@@ -35,7 +35,7 @@ const time = rp2xxx.time;
 const gpio = rp2xxx.gpio;
 
 // Import our keymap definitions from keymap.zig
-const keymap = @import("keymap.zig");
+const keymap = @import("keymap");
 
 // =============================================================================
 // UART CONFIGURATION (Serial Communication)
