@@ -1,0 +1,414 @@
+name: Self-contained application
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*-preview.*']
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Windows finalization diagnostic, Windows GUI verification, or full bundle verification
+        type: choice
+        options: [diagnostic, gui, full]
+        default: diagnostic
+
+permissions:
+  contents: read
+
+# A new push supersedes the PR's running checks. Tags and unrelated labels
+# never cancel anything.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'full-ci' && format('-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Pull requests build macOS arm64, Windows and Linux. Pushes to main, tags,
+# manual runs and PRs labeled `full-ci` add macOS x86_64, the isolated
+# Windows verification, a second Linux runtime and the ReleaseSafe source job.
+env:
+  FULL_CI: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+
+jobs:
+  windows-finalization:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'diagnostic'
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+          cache-size-limit: 4096
+      - name: Build only the symbolized finalization reproduction
+        run: zig build tools -Donly=diagnostic -j2 --summary all
+      - name: Reproduce artifact publication without firmware compilation or devices
+        shell: pwsh
+        run: |
+          & ./zig-out/bin/diagnose-build-finalization.exe "$env:RUNNER_TEMP/finalization ü" 2>&1 | Tee-Object -FilePath finalization.log
+          exit $LASTEXITCODE
+      - name: Preserve exact executable, PDB and diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-finalization-${{ github.sha }}
+          retention-days: 3
+          path: |
+            zig-out/bin/diagnose-build-finalization*
+            finalization.log
+            ${{ runner.temp }}/finalization ü
+  # Linux has its own job so linux-runtime starts as soon as its package exists.
+  bundle-linux:
+    if: (github.event_name != 'workflow_dispatch' || inputs.mode == 'full') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
+    strategy:
+      matrix:
+        include: [{ os: ubuntu-22.04, platform: linux-x86_64, jobs: 4 }]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps: &bundle-steps
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+          # Windows exceeded the default 2 GiB limit and saved an empty cache.
+          cache-size-limit: 4096
+      - name: Install Linux desktop and package inspection dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sed -n 's/^deb /deb-src /p' /etc/apt/sources.list | sudo tee /etc/apt/sources.list.d/zigmkay-source.list
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libdbus-1-dev libx11-dev libudev-dev bubblewrap file binutils xkb-data
+      - name: Assemble all runtime inputs
+        shell: bash
+        run: |
+          set -eu
+          sdk=()
+          if [ "$RUNNER_OS" = macOS ]; then sdk=("-Dmacos-sdk=$(xcrun --show-sdk-path)"); fi
+          zig build bundle tools -Dbundle -Drelease=true -Doptimize=safe "-Drevision=$GITHUB_SHA" "${sdk[@]}" -j${{ matrix.jobs }} --summary all
+      - name: Validate the preview tag against this exact commit
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        env:
+          PREVIEW_TAG: ${{ github.ref_name }}
+        run: zig-out/bin/release validate-tag "$PREVIEW_TAG" "$GITHUB_SHA"
+      - name: Verify native desktop behavior offline
+        if: inputs.mode != 'gui'
+        shell: bash
+        run: |
+          set -eu
+          zig build test-desktop -Ddesktop -Doptimize=safe -j2 --test-timeout 180s
+      - name: Package the unsigned preview
+        shell: bash
+        run: |
+          set -eu
+          case "$RUNNER_OS" in
+            macOS) root="$GITHUB_WORKSPACE/zig-out/Zigmkay.app" ;;
+            Windows) root="$GITHUB_WORKSPACE/zig-out/Zigmkay.exe" ;;
+            Linux) root="$GITHUB_WORKSPACE/zig-out/Zigmkay.AppDir" ;;
+          esac
+          zig-out/bin/release package "$root" "$GITHUB_WORKSPACE/release-assets" "$GITHUB_SHA"
+      - name: Relocated macOS offline builds and practice
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -eu
+          target="$RUNNER_TEMP/Zigmkay offline ü"
+          mkdir -p "$target/home"
+          hdiutil attach release-assets/*.dmg -nobrowse -readonly -mountpoint "$target/dmg"
+          cp -R "$target/dmg/Zigmkay.app" "$target/"
+          hdiutil detach "$target/dmg"
+          cp zig-out/bin/check-application-bundle "$target/check"
+          chmod -R a-w "$target/Zigmkay.app"
+          profile="(version 1)(allow default)(deny network*)(deny file-read* (subpath \"$GITHUB_WORKSPACE\"))(deny file-read* (subpath \"$RUNNER_TOOL_CACHE\"))(deny file-read* (subpath \"/Applications/Xcode.app\"))(deny file-read* (subpath \"/Library/Developer\"))"
+          cd "$target"
+          for pass in cold warm; do
+            echo "Offline bundle verification: $pass"
+            env -i HOME="$target/home" PATH=/usr/bin:/bin SDKROOT=/missing DEVELOPER_DIR=/missing ZIG_LOCAL_PKG_DIR=/missing \
+              sandbox-exec -p "$profile" ./check "$target/Zigmkay.app/Contents/Resources" "$target/home/Library/Caches/zigmkay" all
+          done
+          env -i HOME="$target/home" PATH=/usr/bin:/bin SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software \
+            sandbox-exec -p "$profile" "$target/Zigmkay.app/Contents/MacOS/zigmkay-companion" --offline-build-frames 30000
+      - name: Single Windows executable builds and practice
+        if: runner.os == 'Windows' && (env.FULL_CI == 'true' || inputs.mode == 'gui')
+        timeout-minutes: 30
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          zig build-exe tools/check_windows_isolation.zig -OReleaseSafe -lws2_32 '-femit-bin=zig-out/bin/check-windows-isolation.exe'
+          if ($LASTEXITCODE) { throw 'Could not build the isolation preflight' }
+          $target = Join-Path $env:RUNNER_TEMP 'Zigmkay offline ü'
+          New-Item -ItemType Directory -Force "$target/install", "$target/home", "$target/config", "$target/cache", "$target/tmp" | Out-Null
+          Copy-Item release-assets/*.exe "$target/install/Zigmkay.exe"
+          Copy-Item zig-out/bin/check-application-bundle.exe "$target/check.exe"
+          Copy-Item zig-out/bin/check-windows-isolation.exe "$target/isolation.exe"
+          Copy-Item zig-out/bin/release.exe "$target/release.exe"
+          & "$target/release.exe" extract-windows "$target/install/Zigmkay.exe" "$target/cache/zigmkay/cache"
+          if ($LASTEXITCODE) { throw 'Could not extract the runtime' }
+          $env:HOME = "$target/home"
+          $env:APPDATA = "$target/config"
+          $env:LOCALAPPDATA = "$target/cache"
+          $env:USERPROFILE = "$target/home"
+          $env:TEMP = "$target/tmp"
+          $env:TMP = "$target/tmp"
+          $env:ZIG_LOCAL_PKG_DIR = 'C:\missing'
+          $env:ZIG_LIB_DIR = 'C:\missing'
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          # A separate, unprivileged account scopes isolation to the test tree.
+          # Never change the machine's default outbound policy: hosted runner
+          # management uses more processes and services than Runner.Worker.
+          $username = "zigmkay-$([guid]::NewGuid().ToString('N').Substring(0, 8))"
+          $password = ConvertTo-SecureString "Z!$([guid]::NewGuid().ToString('N'))a9" -AsPlainText -Force
+          $credential = [pscredential]::new("$env:COMPUTERNAME\$username", $password)
+          $denied = @($env:GITHUB_WORKSPACE, $env:RUNNER_TOOL_CACHE)
+          $denied += @("${env:ProgramFiles(x86)}/Windows Kits", "${env:ProgramFiles(x86)}/Microsoft Visual Studio", "$env:ProgramFiles/Microsoft Visual Studio") | Where-Object { Test-Path $_ }
+          $profiles = Get-NetFirewallProfile | Select-Object Name, Enabled
+          $rule = "zigmkay-offline-$([guid]::NewGuid())"
+          $identity = $null
+          function Invoke-Isolated([string]$Phase, [string]$Executable, [string[]]$Arguments, [int]$TimeoutSeconds) {
+            Write-Host "Starting $Phase"
+            $stdout = "$target/$Phase.stdout.log"
+            $stderr = "$target/$Phase.stderr.log"
+            $quoted = @($Arguments | ForEach-Object { '"' + $_ + '"' })
+            $process = Start-Process -FilePath $Executable -ArgumentList $quoted -Credential $credential -WorkingDirectory $target -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+            $timer = [System.Diagnostics.Stopwatch]::StartNew()
+            try {
+              while (!$process.WaitForExit(10000)) {
+                Write-Host "$Phase running for $([int]$timer.Elapsed.TotalSeconds)s"
+                if ($timer.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw "$Phase timed out" }
+              }
+              if ($process.ExitCode -ne 0) { throw "$Phase failed: $($process.ExitCode)" }
+            } finally {
+              if (!$process.HasExited) { & "$env:SystemRoot/System32/taskkill.exe" /PID $process.Id /T /F }
+              if (Test-Path $stdout) { Get-Content $stdout }
+              if (Test-Path $stderr) { Get-Content $stderr }
+              $process.Dispose()
+            }
+          }
+          try {
+            $user = New-LocalUser -Name $username -Password $password -AccountNeverExpires -PasswordNeverExpires
+            Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $user
+            $identity = "*$($user.SID.Value)"
+            & icacls $target /grant "${identity}:(OI)(CI)(M)"
+            if ($LASTEXITCODE) { throw 'Could not grant access to the isolated test directory' }
+            New-NetFirewallRule -Name $rule -DisplayName 'Zigmkay isolated test account' -Direction Outbound -LocalUser "D:(A;;CC;;;$($user.SID.Value))" -Action Block -Profile Any | Out-Null
+            Set-NetFirewallProfile -All -Enabled True
+            if (Get-NetFirewallProfile -PolicyStore ActiveStore | Where-Object { !$_.Enabled }) { throw 'Firewall is not enabled' }
+            foreach ($path in $denied) {
+              # Block contents/execution, retaining metadata and ACL access for cleanup.
+              & icacls $path /deny "${identity}:(OI)(CI)(RD,X)"
+              if ($LASTEXITCODE) { throw "Could not enforce access isolation: $path" }
+            }
+            # W and D both include SYNCHRONIZE, which read handles also need.
+            # Use the specific delete right DE rather than the D shorthand.
+            & icacls "$target/install" /deny "${identity}:(OI)(CI)(WD,AD,WEA,WA,DE,DC)"
+            if ($LASTEXITCODE) { throw 'Could not make the installation read-only' }
+            & icacls "$target/cache/zigmkay/cache/runtime" /deny "${identity}:(OI)(CI)(WD,AD,WEA,WA,DE,DC)"
+            if ($LASTEXITCODE) { throw 'Could not make extracted resources read-only' }
+            foreach ($path in @("$target/install/Zigmkay.exe", "$target/cache/zigmkay/cache/runtime")) {
+              $deniedSync = (Get-Acl $path).Access | Where-Object {
+                $_.AccessControlType -eq 'Deny' -and ($_.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::Synchronize)
+              }
+              if ($deniedSync) { throw "Read-only isolation denies SYNCHRONIZE: $path" }
+            }
+            Invoke-Isolated -Phase preflight -Executable "$target/isolation.exe" -Arguments @("$target/install/Zigmkay.exe", "$env:GITHUB_WORKSPACE/build.zig") -TimeoutSeconds 30
+            if ('${{ inputs.mode }}' -ne 'gui') {
+              Invoke-Isolated -Phase cold -Executable "$target/check.exe" -Arguments @("$target/install/Zigmkay.exe", "$target/cache/zigmkay/cache", 'all') -TimeoutSeconds 720
+              Invoke-Isolated -Phase warm -Executable "$target/check.exe" -Arguments @("$target/install/Zigmkay.exe", "$target/cache/zigmkay/cache", 'all') -TimeoutSeconds 300
+            }
+            $env:SDL_VIDEODRIVER = 'dummy'
+            $env:SDL_RENDER_DRIVER = 'software'
+            Invoke-Isolated -Phase gui -Executable "$target/install/Zigmkay.exe" -Arguments @('--offline-build-frames', '30000') -TimeoutSeconds 120
+            Write-Host 'Windows offline verification completed'
+          } finally {
+            Remove-NetFirewallRule -Name $rule -ErrorAction Continue
+            foreach ($profile in $profiles) { Set-NetFirewallProfile -Name $profile.Name -Enabled $profile.Enabled }
+            if ($identity) {
+              foreach ($path in $denied) { & icacls $path /remove:d $identity }
+              & icacls "$target/install" /remove:d $identity
+              & icacls "$target/cache/zigmkay/cache/runtime" /remove:d $identity
+              & icacls $target /remove:g $identity
+            }
+            Remove-LocalUser -Name $username -ErrorAction Continue
+          }
+      - name: Preserve Windows isolation diagnostics
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-isolation-diagnostics
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/Zigmkay offline ü/*.log
+      - name: Preserve downloads and corresponding dependency sources
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: preview-${{ matrix.platform }}
+          if-no-files-found: error
+          path: release-assets/*
+      - name: Archive selected dependency sources
+        shell: bash
+        run: tar -czf dependency-sources-${{ matrix.platform }}.tar.gz -C zig-out/corresponding-source .
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sources-${{ matrix.platform }}
+          path: dependency-sources-*.tar.gz
+      - name: Preserve Linux runtime verifier
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-runtime-verifier
+          path: zig-out/bin/check-application-bundle
+
+  bundle:
+    if: (github.event_name != 'workflow_dispatch' || inputs.mode == 'full' || inputs.mode == 'gui') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
+    strategy:
+      fail-fast: false
+      matrix:
+        # The 3-core macos-15 runner keeps -j2; the 4-core runners use -j4.
+        include: ${{ fromJSON(inputs.mode == 'gui' && '[{"os":"windows-2025","platform":"windows-x86_64","jobs":4}]' || (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && '[{"os":"macos-15","platform":"macos-aarch64","jobs":2},{"os":"macos-15-intel","platform":"macos-x86_64","jobs":4},{"os":"windows-2025","platform":"windows-x86_64","jobs":4}]' || '[{"os":"macos-15","platform":"macos-aarch64","jobs":2},{"os":"windows-2025","platform":"windows-x86_64","jobs":4}]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps: *bundle-steps
+
+  linux-runtime:
+    needs: bundle-linux
+    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && '["ubuntu-22.04","ubuntu-24.04"]' || '["ubuntu-24.04"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - name: Install runtime isolation and FUSE support
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap fuse3 libxkbcommon0 libdbus-1-3 libx11-6
+          if sysctl kernel.apparmor_restrict_unprivileged_userns >/dev/null 2>&1; then sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0; fi
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: preview-linux-x86_64
+          path: downloads
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: linux-runtime-verifier
+          path: verifier
+      - name: Verify relocated mounted and extracted packages without network, Zig or SDK access
+        shell: bash
+        run: |
+          set -euo pipefail
+          target="$RUNNER_TEMP/Zigmkay offline ü"
+          mkdir -p "$target/install" "$target/home" "$target/cache" "$target/config" "$target/data" "$target/tmp"
+          cp downloads/*.AppImage "$target/install/Zigmkay.AppImage"
+          cp verifier/check-application-bundle "$target/check"
+          chmod +x "$target/install/Zigmkay.AppImage" "$target/check"
+          cd "$target/install"
+          ./Zigmkay.AppImage --appimage-mount > "$target/mountpoint" &
+          mount_pid=$!
+          cleanup() {
+            status=$?
+            kill "$mount_pid" 2>/dev/null || true
+            if [ "$status" -ne 0 ]; then
+              for log in "$target"/cache/zigmkay/builds/build-*/build.{stdout,stderr}.log; do
+                if [ -f "$log" ]; then
+                  printf 'Compiler diagnostic: %s\n' "$log"
+                  cat "$log"
+                fi
+              done
+            fi
+          }
+          trap cleanup EXIT
+          for i in $(seq 1 30); do
+            if [ -s "$target/mountpoint" ]; then break; fi
+            kill -0 "$mount_pid"
+            sleep 1
+          done
+          mount=$(head -n1 "$target/mountpoint")
+          test -f "$mount/usr/share/zigmkay/application.zon"
+          ./Zigmkay.AppImage --appimage-extract >/dev/null
+          chmod -R a-w squashfs-root
+          # Give Clang writable temporary space without hiding the FUSE mount in /tmp.
+          sandbox=(bwrap --unshare-net --ro-bind / / --dev /dev --proc /proc --tmpfs "$GITHUB_WORKSPACE" --tmpfs "$RUNNER_TOOL_CACHE" --tmpfs /usr/include --bind "$target" "$target" --setenv TMPDIR "$target/tmp" --setenv HOME "$target/home" --setenv XDG_CONFIG_HOME "$target/config" --setenv XDG_DATA_HOME "$target/data" --setenv XDG_CACHE_HOME "$target/cache" --setenv PATH /usr/bin:/bin --setenv ZIG_LIB_DIR /missing --setenv ZIG_LOCAL_PKG_DIR /missing --setenv SDL_VIDEODRIVER dummy --setenv SDL_RENDER_DRIVER software --chdir "$target")
+          if [ -d /usr/lib/gcc ]; then sandbox+=(--tmpfs /usr/lib/gcc); fi
+          for root in "$mount" "$target/install/squashfs-root"; do
+            for pass in cold warm; do
+              "${sandbox[@]}" --setenv LD_LIBRARY_PATH "$root/usr/lib" "$target/check" "$root/usr/share/zigmkay" "$target/cache/zigmkay" all
+            done
+            "${sandbox[@]}" "$root/AppRun" --offline-build-frames 30000
+            rm -rf "$target/cache/zigmkay"
+          done
+      - name: Preserve Linux runtime diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: linux-runtime-diagnostics-${{ matrix.os }}
+          if-no-files-found: ignore
+          path: ${{ runner.temp }}/Zigmkay offline ü/cache/zigmkay/builds/build-*/build.*.log
+
+  source:
+    if: (github.event_name != 'workflow_dispatch' || inputs.mode == 'full') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+      - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
+      - run: zig build check test -Doptimize=safe -j2 --test-timeout 180s
+
+  publish:
+    needs: [bundle, bundle-linux, linux-runtime, source]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    concurrency:
+      group: preview-release-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: preview-*
+          merge-multiple: true
+          path: release-assets
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: sources-*
+          merge-multiple: true
+          path: dependency-sources
+      - name: Assemble source archive and validate the complete release inventory
+        env:
+          PREVIEW_TAG: ${{ github.ref_name }}
+        run: |
+          set -eu
+          zig build tools test-jobs -Donly=practice -Doptimize=safe -j2
+          zig-out/bin/release validate-tag "$PREVIEW_TAG" "$GITHUB_SHA"
+          mkdir -p source/application source/dependencies
+          git archive "$GITHUB_SHA" | tar -xf - -C source/application
+          cp dependency-sources/*.tar.gz source/dependencies/
+          tar -czf release-assets/corresponding-source.tar.gz -C source .
+          zig-out/bin/release finalize "$GITHUB_WORKSPACE/release-assets" "$GITHUB_SHA"
+      - name: Create or resume a draft, upload assets, then publish a prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREVIEW_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$PREVIEW_TAG" --json isDraft > "$RUNNER_TEMP/existing-release.json"; then
+            zig-out/bin/release validate-existing-release "$RUNNER_TEMP/existing-release.json"
+          else
+            gh release create "$PREVIEW_TAG" --verify-tag --draft --prerelease --title "Zigmkay $PREVIEW_TAG — unsigned preview" --notes-file packaging/preview-notes.md
+          fi
+          gh release upload "$PREVIEW_TAG" release-assets/* --clobber
+          gh release edit "$PREVIEW_TAG" --draft=false --prerelease

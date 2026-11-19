@@ -1,0 +1,21 @@
+.{
+    .name = .zigmkay_keycaprio_us_intl,
+    .version = "0.1.0",
+    .fingerprint = 0xb5cef71a114ea26, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .microzig = .{
+            .url = "https://github.com/ZigEmbeddedGroup/microzig/releases/download/0.17.12/microzig.tar.gz",
+            .hash = "microzig-0.17.12-D20YSbDKAAA_aWCmmydsldbUrhmCUzNFqseEIAE4__5g",
+        },
+        .zigmkay_firmware = .{
+            .url = "git+https://github.com/EuroZig/zigmkay_firmware.git#c060ef3ab2dcc2c44724c1861a972407577fdd8c",
+            .hash = "zigmkay_firmware-0.1.0-EZ4qw9PCOwAEjky0OYs-AkUixVcrvWR_PVt1iHaLpEdG",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

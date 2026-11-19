@@ -1,0 +1,31 @@
+name: Native practice contracts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  practice:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install pinned Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+      # Also the subprocess, flash-job and release tooling tests on every host.
+      - name: Verify compiler and run typing test, subprocess and release contracts
+        shell: bash
+        run: |
+          test "$(zig version)" = 0.17.0
+          zig build test-practice test-jobs -Donly=practice -j4 --test-timeout 45s

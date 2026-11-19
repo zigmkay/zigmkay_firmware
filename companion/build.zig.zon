@@ -1,0 +1,49 @@
+.{
+    .name = .zigmkay_companion,
+    .version = "0.1.0-preview.1",
+    .fingerprint = 0xf34c18ab8685e700,
+    .minimum_zig_version = "0.17.0",
+    .dependencies = .{
+        .ztray = .{
+            .url = "git+https://github.com/StaffinityAI/ztray.git#142d423abc36a181795dc30155d8898e076e7b84",
+            .hash = "ztray-0.1.0-dev.1-HZHL7ObFBwBPA2nIePXaZhLSNf35hR3re9GhjPNOlEZv",
+            .lazy = true,
+        },
+        .dvui = .{
+            .url = "git+https://github.com/david-vanderson/dvui.git#42a68b9277b1440897909f3edc7fe3f6c8cb701c",
+            .hash = "dvui-0.6.0-dev-AQFJmcYbBAEymq0cKpazU5jM0uRuxqSYcVFEYTlbxw54",
+            .lazy = true,
+        },
+        .svg2tvg = .{
+            .url = "git+https://github.com/nat3Github/zig-lib-svg2tvg#b41ef1eb5b432c9026deaad31046789247a1fe29",
+            .hash = "svg2tvg-0.0.0-HpMZuXH9BQA3K8zSdy8LfbrbuWwOYyZdvQa55n2KTCbv",
+            .lazy = true,
+        },
+        .icons = .{
+            .url = "git+https://github.com/nat3Github/zig-lib-icons.git#e03de2f8da513cd603a72642f901d6128e01a495",
+            .hash = "icons-0.1.0-iJxA-ZBcLwBVzCP4wa8KwYaZw4bMrYP7eNgI-i6MrMI8",
+            .lazy = true,
+        },
+        .inter = .{
+            .url = "https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip",
+            .hash = "N-V-__8AAAv-sAOXPycbcfSerQ5vsDx3k-PZC5fy2p9ScNi8",
+            .lazy = true,
+        },
+        .microzig = .{
+            .url = "https://github.com/ZigEmbeddedGroup/microzig/releases/download/0.17.12/microzig.tar.gz",
+            .hash = "microzig-0.17.12-D20YSbDKAAA_aWCmmydsldbUrhmCUzNFqseEIAE4__5g",
+            .lazy = true,
+        },
+        .zigmkay_firmware = .{
+            .url = "git+https://github.com/conlorz/zigmkay_firmware.git#83b689262ae4a6f814ba9c7aa9fa868bf734350f",
+            .hash = "zigmkay_firmware-0.1.0-EZ4qwwEqPAAFIPjJhcIZCyqxpcP3nHeXzeRd6JIKQeIs",
+            .lazy = true,
+        },
+        .picotool = .{
+            .url = "git+https://github.com/allyourcodebase/picotool.git#d8df33801dbea792128baaab516291720d400a91",
+            .hash = "picotool-2.3.1-PtJrRaJNAAA3xRwGctKAdomuKCJXz5UwMOrhzQ_Z2f-e",
+            .lazy = true,
+        },
+    },
+    .paths = .{ "build.zig", "build.zig.zon", ".zigversion", "mise.toml", "AGENTS.md", "README.md", "LICENSE", "NOTICE", "tests", "src", "build", "tools", "runtime", "packaging" },
+}

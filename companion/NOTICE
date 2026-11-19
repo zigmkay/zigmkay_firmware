@@ -1,0 +1,251 @@
+zigmkay_companion extraction provenance
+
+The S08 desktop practice, lesson text, editor model, assignments and build
+debounce are extracted from the unchanged reference paths under
+zigmkay-companion/src/editor/. They retain the repository's GPLv2 provenance.
+Historical source fixtures preserve original whitespace deliberately as
+byte-exact project data.
+The input-source package also retains the reference zkeymap LICENSE and exact
+macOS/Windows/Linux C bridge bytes. Window, font and folder-dialog Zig adapters
+are carried with the same GPLv2 provenance. The lazy pinned FreeType dependency
+retains its upstream license files; release bundles must include its attribution.
+
+The legacy keymap API shares the input-source package's implementation and native
+bridges; duplicate bridge copies were removed without changing the retained bytes.
+
+The migration reference is conlorz/zigmkay_firmware at
+4755dac978658d10fd9b3bd13a184a1e1198b975 (local/monorepo).
+Its implementation baseline is 3ee4135d308f18f15cc51b1d73e33e1b36bf517f;
+the intervening changes are planning documents only.
+
+LICENSE is copied verbatim from that repository (GNU GPL version 2).
+
+License grant (2026-11-18): the copyright holder of the first-party sources,
+including the sources extracted below from the reference repository paths it
+authored, offers them under GPL version 2 or (at your option) any later version
+(SPDX GPL-2.0-or-later). Earlier "GPLv2" statements in this file record
+provenance. Exceptions: the historical fixture
+tests/fixtures/historical/rollercole-0.16.zig.txt contains third-party work and
+stays GPL version 2 only, and imported dependencies keep their own licenses.
+The pinned zigmkay firmware is GPL version 2 only, so distributed builds that
+compile it in are distributed under GPL version 2.
+No host implementation has been imported at bootstrap. Preserve existing
+copyright/license notices when importing source. Dependency notices and asset
+licenses must accompany their eventual imports; this file is not a complete
+release attribution inventory.
+
+The selected firmware dependency is mainline zigmkay/zigmkay_firmware with the
+Raw HID companion session of zigmkay/zigmkay_firmware PR #60, pinned to that
+PR head on conlorz/zigmkay_firmware at 83b689262ae4a6f814ba9c7aa9fa868bf734350f
+with an immutable package hash in build.zig.zon until the PR merges. The
+companion builds its 14 board selectors (src/firmware/boards.zig) from that
+source; this is not a native release or an accepted stable contract.
+
+First portable imports (2026-10-10):
+- keymap-project/src -> src/project (schema/source/export).
+- companion-model/src and portable reducer fixtures -> src/session.
+- layout-model physical_layout.zig -> src/layout; root action
+  declarations are aliases to official firmware core, not copied types.
+- keyboards/my_keyboards/rollercole/lk7_physical_layout.zig -> src/catalog.
+All use reference implementation baseline 3ee4135d308f18f15cc51b1d73e33e1b36bf517f.
+No firmware processor, action implementation, protocol codec, zkeycodes, board
+wiring or imported C bridge is copied into this repository. The host side of
+the companion Raw HID protocol (src/firmware/protocol.zig) is first-party and
+follows the firmware's documented report layout. GPL LICENSE remains verbatim.
+
+USB host extraction (2026-10-11): live_adapter.zig and session_capture.zig from
+zigmkay-companion/src -> src/session; the existing SDL Native adapter
+from zigmkay-companion/src/main.zig -> src/platform/native_hid.zig.
+The native adapter takes the desktop's SDL bindings as an explicit type input;
+no C bridge is added by that extraction. Portable refresh checks replace
+the GUI-only frame assertions, which remain in the reference for S08 acceptance.
+
+Native acceptance preparation (2026-10-11): lazy SDL3 build package pinned to
+allyourcodebase/SDL 0a9d5c36488aad32fcf989d465eb879db6e356b4, package
+sdl-1.0.3+3.4.16-i4QD0e0HqgDYP8m4T3rMJShyaDLy8ksp8qzCrCSncaPB.
+Upstream SDL 3.4.16 package hash N-V-__8AABHq9wIiTHGY4qR6mw45F_TX8FSvqsQQ-Wtq1tzY.
+SDL is distributed under the zlib license; retained dependency sources include
+their licenses. No SDL/C source is modified or copied into first-party code.
+The current desktop graph uses DVUI's upstream SDL3 and FreeType dependencies
+and build configuration directly; the local SDL configuration adjustment has
+been removed. DVUI, ztray, SVG/TinyVG and icons are pinned in build.zig.zon.
+Reference zig-flash/src/{main,transfer,uf2,volume}.zig -> src/platform/flash/,
+GPL-2.0 from the same reference implementation baseline above. The historical
+filesystem transfer sources are retired; pure validation now lives in
+src/artifact/uf2.zig. Historical acceptance records remain preserved.
+
+Jobs/runner extraction (2026-10-11): companion-jobs/src -> src/jobs
+and apps/keymap-test/{main,protocol,fixture,callback_fixture,test_runner}.zig ->
+src/runner from reference 4755dac978658d10fd9b3bd13a184a1e1198b975.
+These GPLv2 sources use the selected firmware-owned processor and action types.
+
+Keymap extraction (2026-10-11): zkeymap/src/** and example/main.zig ->
+src/keymap/ from reference 4755dac978658d10fd9b3bd13a184a1e1198b975.
+The three existing C bridges are preserved byte-for-byte under the reference
+GPLv2 provenance. The src/keymap wrapper was later retired; its input-source
+implementation and the C bridges live in src/input. New build logic and deterministic fixtures are Zig.
+
+Historical callback fixture (2026-10-11): reference
+keyboards/my_keyboards/rollercole/shared_keymap_3x5_2.zig ->
+tests/fixtures/historical/rollercole-0.16.zig.txt, exact original bytes from
+the implementation baseline above. This GPLv2 source is immutable test data,
+embedded for schema/source preservation checks and never compiled by default.
+SHA-256: 9f4dd8dd3900799e4484d1d34851de369b2e3af0cd005f5f4ecceb4ea057a945.
+
+Desktop physical view extraction (2026-10-11): physical fitting and key drawing
+from zigmkay-companion/src/components/{layout,key}.zig at reference
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{physical_view,components/key,components/layout}.zig.
+These GPLv2 sources preserve caption fitting, rotated geometry, layer colors,
+modifier indicators and practice guidance. Board geometry, labels, signals and
+optional GUI icon resources are injected; no reference firmware path is imported.
+
+Desktop tray extraction (2026-10-11): zigmkay-companion/src/{desktop,tray_icon}.zig
+from reference 4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{tray_lifecycle,tray_native,tray_icon}.zig. GPLv2;
+the PNG generator uses Zig 0.17's renamed ISO-HDLC CRC32 alias. Native bridges remain in the pinned
+ztray dependency and are unchanged by the extraction.
+
+Desktop event log extraction (2026-10-11):
+zigmkay-companion/src/components/log.zig at reference
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{event_history,components/log}.zig, GPLv2. The bounded
+history and three-column event display use injected document dimensions and
+label cache rather than a fixed compiled keymap.
+
+Desktop encoder extraction (2026-10-11):
+zigmkay-companion/src/components/encoder.zig at reference
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/components/encoder.zig, GPLv2. The retained circle/activity
+display receives independently cached document encoder actions and injected
+timestamps; it no longer aliases fixed key indices 38/39.
+
+Desktop icon resource mapping (2026-10-11): names and asset selections from
+zigmkay-companion/src/components/cache.zig at reference
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/icon_resources.zig, GPLv2. The assets are external immutable
+inputs from nat3Github/zig-lib-icons b7299b19fa11caa5be93ef49743d8fc31a4bf9a0;
+the TinyVG decoder is from nat3Github/zig-lib-svg2tvg
+2c72af8ff00621b094ca70f03440405f59511fbb. No icon assets or dependency code are
+committed here. Release bundles still require dependency license attribution.
+
+Desktop tutor view and navigation extraction (2026-10-11):
+zigmkay-companion/src/editor/{practice_view,try_state}.zig at reference
+4755dac978658d10fd9b3bd13a184a1e1198b975 -> src/desktop, GPLv2.
+The Unicode focus/wrapping rules and asynchronous Try-it-out ownership state
+remain pure and retain their reference fixtures.
+
+Desktop tutor controls and drawing extraction (2026-10-11): reference
+zigmkay-companion/src/editor/practice_drawer.zig and tutor methods in
+zigmkay-companion/src/editor/main.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{practice_controller,practice_presentation,practice_ui}.zig,
+GPLv2. Rendering preserves the tutor presentation; first-party controller glue
+uses injected time, document identity, dynamic keyboard frames and explicit
+runner effects.
+
+Desktop host substitute and event routing extraction (2026-10-11): reference
+zigmkay-companion/src/editor/host_input.zig and SDL input handling in
+zigmkay-companion/src/editor/main.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{host_input,draft_input,draft_input_native}.zig, GPLv2.
+LK7 mapping is explicitly board-bound; other board mappings are injected and
+validated rather than inferred from key counts or source geometry.
+
+Desktop live companion extraction (2026-10-11): reference
+zigmkay-companion/src/editor/live_keyboard.zig and drawFreeCompanion in
+zigmkay-companion/src/editor/practice_drawer.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/live_keyboard.zig and practice_ui.zig, GPLv2.
+The extracted presentation binds accepted session identity/coherence and uses
+board-sized caller-owned pressed storage.
+
+Desktop typed action form extraction (2026-10-11): reference
+zigmkay-companion/src/editor/forms.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{action_form,action_form_ui}.zig, GPLv2.
+Typed draft conversion and simultaneous fields retain reference behavior;
+GUI controls use selected-project stable layers and owned host aliases.
+
+Desktop mixed inspector extraction (2026-10-11): reference
+zigmkay-companion/src/editor/session.zig and the inert setup portion of
+zigmkay-companion/src/editor/fixture.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{inspector_session,inspector_fixture}.zig, GPLv2.
+Reference mutation/inheritance fixtures retain their behavior with owned dynamic
+storage, injected board validation and explicit selection freshness checks.
+
+Desktop mixed inspector rendering extraction (2026-10-11): reference
+zigmkay-companion/src/editor/inspector.zig and chordDrop/stageChord in
+zigmkay-companion/src/editor/main.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/inspector_ui.zig, GPLv2. Retained controls stage owned
+drafts and return bound document-operation intents; inspector_action.zig is
+first-party Zig binding glue.
+
+Desktop combo drawer extraction (2026-10-11): reference
+zigmkay-companion/src/editor/combo_drawer.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{combo_editor,combo_ui}.zig, GPLv2.
+Retained controls and first-party binding glue use selected-document stable
+key/layer IDs and return explicit snapshot/draft-bound Save/Delete intents.
+
+Desktop callback drawer extraction (2026-10-11): reference
+zigmkay-companion/src/editor/callback_drawer.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/callback_ui.zig, GPLv2. Retained controls return explicit
+source-operation intents. callback_editor.zig is first-party ownership glue.
+
+Desktop event pump extraction (2026-10-11): reference
+zigmkay-companion/src/editor/events.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/platform/events.zig, GPLv2. Retained recursive SDL dispatch also
+preserves child-window IME/candidate/drop event destinations.
+
+Desktop layer sidebar extraction (2026-10-11): reference
+zigmkay-companion/src/editor/main.zig sidebar at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/layer_ui.zig, GPLv2. layer_editor.zig is first-party
+stable-ID action binding glue.
+
+Desktop host palette extraction (2026-10-11): reference
+zigmkay-companion/src/editor/{main,labels}.zig at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/{host_palette,host_palette_ui}.zig, GPLv2.
+Owned preview caching and chord_action.zig binding are first-party Zig glue.
+
+Desktop physical editor extraction (2026-10-11): reference
+zigmkay-companion/src/editor/main.zig keyboard at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/keyboard_ui.zig, GPLv2. key_selection.zig supplies
+first-party document/selection-bound operation glue.
+
+Desktop toolbar extraction (2026-10-11): reference
+zigmkay-companion/src/editor/main.zig toolbar at
+4755dac978658d10fd9b3bd13a184a1e1198b975 ->
+src/desktop/toolbar_ui.zig, GPLv2. Board/profile/capability frames and
+captured profile-switch effects are first-party Zig integration glue.
+
+Bounded subprocess pipe handling (2026-10-12):
+src/jobs/root.zig follows Zig 0.17.0 std/process.zig run(), with
+producer-before-reader cancellation cleanup and POSIX build process groups.
+Copyright (c) Zig contributors, MIT (Expat); see src/jobs/LICENSE.zig-stdlib.
+
+Editor font (2026-11-18): Inter 4.1 by Rasmus Andersson
+(rsms/inter release Inter-4.1.zip, package hash
+N-V-__8AAAv-sAOXPycbcfSerQ5vsDx3k-PZC5fy2p9ScNi8) is pinned in build.zig.zon.
+src/desktop/fonts.zig embeds its static Regular and SemiBold faces in the
+desktop application. Inter is licensed under the SIL Open Font License 1.1;
+release bundles copy the package's LICENSE.txt. No font files are committed.
+
+Keycap symbol icons (2026-11-18): src/desktop/icon_resources.zig maps keycap
+symbols to lucide icons from the pinned icon package. Its first-party SVG
+paths follow the lucide 24-unit grid; the forward-delete icon mirrors the
+lucide `delete` path (ISC license, Lucide contributors).
+
+Key placement (2026-11-19): src/catalog/schematic/*.zon hold schematic key
+grids in key units, derived and rounded from published PCB switch positions;
+no PCB file is copied. Sources, named in each file header: StephanMoeller/
+Leonardo-KeycapRio 473f41f (CC BY-NC-SA 4.0), StephanMoeller/clacky-chan
+328530c and StephanMoeller/Tucky-Two-Times 29dedf9 (no license stated),
+opendata-nuernberg/molekula 78ca099 (MIT) and GroooveBob/DASBOB 3f49dda (MIT).

@@ -1,0 +1,36 @@
+name: Offline source checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig 0.17.0
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+      - name: Verify Zig version
+        run: test "$(zig version)" = 0.17.0
+      - name: Install xkbcommon development library
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
+      - name: Check source contracts first (no device access)
+        timeout-minutes: 10
+        run: zig build check -j2 --test-timeout 30s
+      - name: Test nested source traversal before the complete matrix
+        timeout-minutes: 2
+        run: zig test src/jobs/source_files.zig --test-filter nested
+      - name: Test portable contracts and imported processor traces (no device access)
+        timeout-minutes: 20
+        run: zig build test -j2 --test-timeout 180s --summary all
+      - name: Compile generated, synthetic, default and imported firmware matrices without devices
+        run: zig build check-firmware check-firmware-defaults -Dfirmware -j2 --summary all

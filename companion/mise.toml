@@ -1,0 +1,39 @@
+[tools]
+zig = "0.17.0"
+
+[tasks.test]
+description = "Run all offline companion tests"
+run = "zig build test"
+
+[tasks.check]
+description = "Compile every source, tool and test without device access"
+run = "zig build check"
+
+[tasks."desktop:check"]
+description = "Compile the native editor, GUI dependencies and smoke probes without launching or accessing devices"
+dir = "{{config_root}}"
+run = "zig build check -Ddesktop -j4"
+
+[tasks.editor]
+dir = "{{config_root}}"
+description = "Launch the editor and automatically connect to the keyboard"
+run = "zig build run -Dbundle -j4"
+
+[tasks."editor:build"]
+dir = "{{config_root}}"
+description = "Assemble the complete offline editor and companion without launching"
+run = "zig build bundle -Dbundle -j4"
+
+[tasks."editor:test"]
+dir = "{{config_root}}"
+description = "Run offline GUI launch, onboarding, tutor, draft, source-refresh and companion fixtures"
+run = "zig build test-desktop -Ddesktop -j4"
+
+[tasks.companion]
+dir = "{{config_root}}"
+description = "Start the resident companion and automatically connect to the keyboard"
+run = "zig build run -Dbundle -j4 -- --background"
+
+[tasks."typing-practice:test"]
+description = "Check typing test generation, scoring, tutor controls and path policy without devices"
+run = "zig build test-practice -Donly=practice -j4 --test-timeout 45s"

@@ -1,0 +1,377 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1056" viewBox="0 0 1536 1056" font-family="Inter, Helvetica, Arial, sans-serif" font-size="14">
+<style>
+.bg{fill:#15171B}.panel{fill:#1E2126}.ctl{fill:#2A2E35}.raised{fill:#3A3F48}.key{fill:#272B32}
+.bd{stroke:#383D46;stroke-width:1}.t{fill:#EDEFF2}.m{fill:#9AA3B0}.acc{fill:#3B82F6}.w{fill:#FFFFFF}
+.ic{color:#EDEFF2}.icm{color:#9AA3B0}.icw{color:#FFFFFF}
+.kb{stroke:#A93B3E;stroke-width:1.5}.ksel{fill:#533036;stroke:#EF4444;stroke-width:2.5}
+.rowsel{fill:#4C292D;stroke:#EF4444;stroke-width:1.5}
+.l0{color:#EF4444;fill:#EF4444}.l1{color:#3B82F6;fill:#3B82F6}.l2{color:#F59E0B;fill:#F59E0B}
+.l3{color:#22C55E;fill:#22C55E}.l4{color:#A855F7;fill:#A855F7}.l5{color:#14B8A6;fill:#14B8A6}
+.on{fill:#22C55E}.sw{fill:#3A3F48}.knob{fill:#EDEFF2}
+text{font-family:Inter,Helvetica,Arial,sans-serif}
+.h{font-size:19px;font-weight:600}.b{font-size:14px}.s{font-size:12px}.xs{font-size:9px}
+.lg{font-size:24px;text-anchor:middle}.lt{font-size:21px;text-anchor:middle}.ok{font-size:15px;text-anchor:middle}
+.c{text-anchor:middle}.e{text-anchor:end}.sb{font-weight:600}
+text{fill:#EDEFF2}.s11{font-size:11px}.s12{font-size:12px}.s19{font-size:19px}.s13{font-size:13px}.s15{font-size:15px}.s17{font-size:17px}.s22{font-size:22px}.s28{font-size:28px}
+.d{fill:#F06B73}.icd{color:#F06B73}.ica{color:#3B82F6}.icg{color:#6EC59A}.okc{fill:#6EC59A}.kbb{stroke:#3463B1;stroke-width:1.5}.ln{fill:#383D46}.dash{fill:none;stroke:#383D46;stroke-dasharray:4 3}.mono text{font-family:Menlo,Consolas,monospace}
+</style>
+<defs>
+<symbol id="shift" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18v-6H5l7-7 7 7h-4v6H9z"/></symbol>
+<symbol id="caps" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19h6"/><path d="M9 15v-3H5l7-7 7 7h-4v3H9z"/></symbol>
+<symbol id="ctrl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></symbol>
+<symbol id="opt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h6l6 18h6"/><path d="M14 3h7"/></symbol>
+<symbol id="cmd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
+<symbol id="bksp" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5a2 2 0 0 0-1.344.519l-6.328 5.74a1 1 0 0 0 0 1.481l6.328 5.741A2 2 0 0 0 10 19h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"/><path d="m12 9 6 6"/><path d="m18 9-6 6"/></symbol>
+<symbol id="del" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5a2 2 0 0 1 1.344.519l6.328 5.74a1 1 0 0 1 0 1.481l-6.328 5.741A2 2 0 0 1 14 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="m12 9-6 6"/><path d="m6 9 6 6"/></symbol>
+<symbol id="enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v7a4 4 0 0 1-4 4H4"/><path d="m9 10-5 5 5 5"/></symbol>
+<symbol id="tab" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 12H3"/><path d="m11 18 6-6-6-6"/><path d="M21 5v14"/></symbol>
+<symbol id="space" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/></symbol>
+<symbol id="esc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 1 1 10 10"/><path d="m2 22 10-10"/><path d="M8 22H2v-6"/></symbol>
+<symbol id="layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+<symbol id="left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+<symbol id="right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+<symbol id="up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+<symbol id="down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+<symbol id="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="chevr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="kbd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></symbol>
+<symbol id="folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+<symbol id="build" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+<symbol id="zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+<symbol id="undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+<symbol id="redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
+<symbol id="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+<symbol id="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+<symbol id="dup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+<symbol id="paste" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></symbol>
+<symbol id="search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="spk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/></symbol>
+<symbol id="volup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#spk"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></symbol>
+<symbol id="voldn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#spk"/><path d="M16 9a5 5 0 0 1 0 6"/></symbol>
+<symbol id="mouse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="7"/></symbol>
+<symbol id="wu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><path d="m9 10 3-3 3 3"/></symbol>
+<symbol id="wd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><path d="m9 12 3 3 3-3"/></symbol>
+<symbol id="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="refresh" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M8 16H3v5"/></symbol>
+<symbol id="ext" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+<symbol id="trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+<symbol id="cw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+<symbol id="ccw" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+<symbol id="warn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+<symbol id="info" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+<symbol id="file" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/></symbol>
+<symbol id="git" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M6 21V9a9 9 0 0 0 9 9"/></symbol>
+<symbol id="chip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+<symbol id="chevu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></symbol>
+<symbol id="func" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.5 3.5a2.6 2.6 0 0 0-3.3 2.1L10.4 18.4a2.6 2.6 0 0 1-3.3 2.1"/><path d="M8 10h7.5"/></symbol>
+<symbol id="link" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+<filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000" flood-opacity="0.5"/></filter>
+<symbol id="pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+<symbol id="fopen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+<symbol id="tpl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="7" x="3" y="3" rx="1"/><rect width="9" height="7" x="3" y="14" rx="1"/><rect width="5" height="7" x="16" y="14" rx="1"/></symbol>
+<symbol id="blank" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M21 19a2 2 0 0 1-2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M9 21h1"/><path d="M14 3h1"/><path d="M14 21h1"/><path d="M3 9v1"/><path d="M21 9v1"/><path d="M3 14v1"/><path d="M21 14v1"/></symbol>
+<symbol id="export" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/></symbol>
+<symbol id="ok" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3 4 7l4 4"/><path d="M4 7h16"/><path d="m16 21 4-4-4-4"/><path d="M20 17H4"/></symbol>
+<symbol id="plug" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></symbol>
+</defs>
+<rect class="bg" width="1536" height="1056"/>
+<rect class="panel" width="1536" height="64"/><rect y="64" width="1536" height="1" class="ln"/>
+<text class="t" x="24" y="40" font-size="22" font-weight="700">Zigmkay</text>
+<rect x="128" y="22" width="1" height="20" class="ln"/><text x="144" y="38" class="m b">My Keyboards</text>
+<rect class="ctl bd" x="986" y="14" width="168" height="36" rx="8"/><use href="#git" class="ic" x="1002" y="23" width="18" height="18"/><text class="t b" x="1028" y="37">Import from Git</text>
+<rect class="acc" x="1164" y="14" width="136" height="36" rx="8"/><use href="#plus" class="icw" x="1180" y="23" width="18" height="18"/><text class="w b sb" x="1206" y="37">Keyboard</text>
+<rect class="ctl bd" x="1310" y="14" width="164" height="36" rx="8"/><use href="#left" class="ic" x="1324" y="23" width="18" height="18"/><text class="t b" x="1350" y="37">Back to editor</text>
+<rect class="ctl bd" x="1484" y="14" width="36" height="36" rx="8"/><use href="#moon" class="ic" x="1493" y="23" width="18" height="18"/>
+
+<!-- Hardware -->
+<rect class="panel bd" x="16" y="80" width="400" height="960" rx="12"/>
+<text class="t h" x="36" y="116">Hardware</text>
+<text class="m s" x="36" y="138">Collection ~/…/My Keyboards · 4 keyboards</text>
+<rect x="28.5" y="156.5" width="375" height="91" rx="10" fill="#212D3F" stroke="#3B82F6" stroke-width="1.5"/>
+<rect class="bg" x="40" y="170" width="120" height="64" rx="8"/><g><rect x="50.0" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="58.4" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.8" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="75.2" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.6" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="108.8" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.2" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="125.6" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="134.0" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="142.4" y="181.0" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="50.0" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="58.4" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.8" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="75.2" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.6" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="108.8" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.2" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="125.6" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="134.0" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="142.4" y="189.4" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="50.0" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="58.4" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.8" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="75.2" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.6" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="108.8" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.2" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="125.6" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="134.0" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="142.4" y="197.8" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="75.2" y="208.3" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.6" y="208.3" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="108.8" y="208.3" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.2" y="208.3" width="7.6" height="7.6" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/></g>
+<text class="t b sb" x="174" y="192">Leonardo Keycaprio</text><text class="m s" x="174" y="211">PCB 0.7 (LK7) · 34 keys</text><text class="m s" x="174" y="229">3 layouts</text>
+<rect x="358" y="182" width="34" height="20" rx="10" fill="#1F3A2E"/><circle class="on" cx="375" cy="192" r="4"/>
+<rect x="28.5" y="259.5" width="375" height="91" rx="10" class="ctl bd"/>
+<rect class="bg" x="40" y="273" width="120" height="64" rx="8"/><g><rect x="49.0" y="285.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="57.6" y="283.9" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.2" y="283.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="74.8" y="283.9" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.4" y="285.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="109.2" y="285.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.8" y="283.9" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="126.4" y="283.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="135.0" y="283.9" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="143.6" y="285.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="49.0" y="294.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="57.6" y="292.5" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.2" y="291.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="74.8" y="292.5" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.4" y="294.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="109.2" y="294.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.8" y="292.5" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="126.4" y="291.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="135.0" y="292.5" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="143.6" y="294.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="57.6" y="302.8" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.2" y="301.1" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="74.8" y="300.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.4" y="301.1" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="109.2" y="302.8" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.8" y="301.1" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="126.4" y="300.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="135.0" y="301.1" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.4" y="311.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="109.2" y="311.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/></g>
+<text class="t b sb" x="174" y="295">Keycaprio</text><text class="m s" x="174" y="314">PCB 0.4 · 30 keys</text><text class="m s" x="174" y="332">1 layout</text>
+<rect x="28.5" y="362.5" width="375" height="91" rx="10" class="ctl bd"/>
+<rect class="bg" x="40" y="376" width="120" height="64" rx="8"/><g><rect x="49.0" y="387.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="57.6" y="385.9" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.2" y="385.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="74.8" y="385.9" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.4" y="387.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="109.2" y="387.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.8" y="385.9" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="126.4" y="385.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="135.0" y="385.9" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="143.6" y="387.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="49.0" y="396.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="57.6" y="394.5" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.2" y="393.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="74.8" y="394.5" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.4" y="396.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="109.2" y="396.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.8" y="394.5" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="126.4" y="393.6" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="135.0" y="394.5" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="143.6" y="396.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="49.0" y="404.8" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="57.6" y="403.1" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="66.2" y="402.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="74.8" y="403.1" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.4" y="404.8" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="109.2" y="404.8" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.8" y="403.1" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="126.4" y="402.2" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="135.0" y="403.1" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="143.6" y="404.8" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="74.8" y="413.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="83.4" y="413.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="109.2" y="413.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="117.8" y="413.0" width="7.7" height="7.7" rx="1.1" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/></g>
+<text class="t b sb" x="174" y="398">Keycaprio</text><text class="m s" x="174" y="417">PCB 0.7 · 34 keys</text><text class="m s" x="174" y="435">1 layout</text>
+<rect x="28.5" y="465.5" width="375" height="91" rx="10" class="ctl bd"/>
+<rect class="bg" x="40" y="479" width="120" height="64" rx="8"/><g><rect x="52.8" y="489.3" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="60.6" y="487.8" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="68.4" y="487.0" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="76.2" y="487.8" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="84.0" y="489.3" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="107.4" y="489.3" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="115.2" y="487.8" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="123.0" y="487.0" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="130.8" y="487.8" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="138.6" y="489.3" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="45.0" y="497.1" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="52.8" y="495.6" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="60.6" y="494.8" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="68.4" y="495.6" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="76.2" y="497.1" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="84.0" y="497.9" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="107.4" y="497.1" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="115.2" y="495.6" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="123.0" y="494.8" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="130.8" y="495.6" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="138.6" y="497.1" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="146.4" y="497.9" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="52.8" y="504.9" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="60.6" y="503.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="68.4" y="502.6" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="76.2" y="503.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="84.0" y="504.9" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="107.4" y="504.9" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="115.2" y="503.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="123.0" y="502.6" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="130.8" y="503.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="138.6" y="504.9" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="68.4" y="512.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="76.2" y="512.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="84.0" y="512.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="107.4" y="512.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="115.2" y="512.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/>
+<rect x="123.0" y="512.4" width="7.0" height="7.0" rx="1.0" fill="#272B32" stroke="#A93B3E" stroke-width="1.0"/></g>
+<text class="t b sb" x="174" y="501">Molekula</text><text class="m s" x="174" y="520">38-key · 38 keys</text><text class="m s" x="174" y="538">1 layout</text>
+<rect x="28.5" y="568.5" width="375" height="57" rx="10" class="dash"/>
+<use href="#plus" class="icm" x="146" y="588" width="18" height="18"/><text class="m b" x="172" y="602">Keyboard from catalog</text>
+<rect x="28" y="932" width="376" height="1" class="ln"/>
+<use href="#fopen" class="icm" x="36" y="950" width="16" height="16"/><text class="t b" x="60" y="963">Open folder…</text>
+<text class="m s" x="60" y="982">A project or a collection on disk</text>
+<text class="acc s" x="36" y="1016" style="fill:#3B82F6">Change collection location…</text>
+
+<!-- Layouts of the selected keyboard -->
+<rect class="panel bd" x="428" y="80" width="1092" height="960" rx="12"/>
+<text class="t s28 sb" x="456" y="126">Leonardo Keycaprio</text>
+<text class="m b" x="456" y="152">PCB 0.7 (LK7) · 34 keys · split · schematic geometry, not measured</text>
+<rect class="ctl bd" x="1340" y="104" width="156" height="36" rx="8"/><use href="#plus" class="ic" x="1356" y="113" width="18" height="18"/><text class="t b" x="1382" y="127">New layout</text>
+<text class="t h" x="456" y="206">Layouts</text><text class="m s" x="540" y="206">Click a layout to edit it</text>
+<!-- card 1 -->
+<rect x="456.5" y="224.5" width="507" height="317" rx="12" class="panel" stroke="#EF4444" stroke-width="1.5"/>
+<rect class="bg" x="472" y="240" width="476" height="196" rx="8"/><g><rect x="506.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="522.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Q</text>
+<rect x="542.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="558.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">W</text>
+<rect x="578.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="594.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">E</text>
+<rect x="614.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="630.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">R</text>
+<rect x="650.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="666.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">T</text>
+<rect x="758.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="774.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Y</text>
+<rect x="794.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="810.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">U</text>
+<rect x="830.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="846.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">I</text>
+<rect x="866.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="882.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">O</text>
+<rect x="902.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="918.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">P</text>
+<rect x="506.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="522.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">A</text>
+<rect x="542.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="558.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">S</text>
+<rect x="578.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="594.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">D</text>
+<rect x="614.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="630.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">F</text>
+<rect x="650.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="666.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">G</text>
+<rect x="758.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="774.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">H</text>
+<rect x="794.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="810.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">J</text>
+<rect x="830.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="846.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">K</text>
+<rect x="866.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="882.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">L</text>
+<rect x="902.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="918.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">;</text>
+<rect x="506.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="522.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Z</text>
+<rect x="542.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="558.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">X</text>
+<rect x="578.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="594.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">C</text>
+<rect x="614.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="630.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">V</text>
+<rect x="650.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="666.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">B</text>
+<rect x="758.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="774.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">N</text>
+<rect x="794.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="810.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">M</text>
+<rect x="830.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="846.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">,</text>
+<rect x="866.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="882.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">.</text>
+<rect x="902.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="918.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">/</text>
+<rect x="614.0" y="377.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#tab" class="ic" x="622.1" y="385.1" width="16.2" height="16.2"/>
+<rect x="650.0" y="377.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#space" class="ic" x="658.1" y="385.1" width="16.2" height="16.2"/>
+<rect x="758.0" y="377.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#enter" class="ic" x="766.1" y="385.1" width="16.2" height="16.2"/>
+<rect x="794.0" y="377.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#bksp" class="ic" x="802.1" y="385.1" width="16.2" height="16.2"/></g>
+<text class="t s17 sb" x="472" y="472">EurKEY Next Mac</text>
+<text class="m s" x="472" y="494">4 layers · 1 combo · edited 2 min ago</text>
+<rect x="758" y="458" width="84" height="22" rx="11" fill="#212D3F" stroke="#3B82F6"/><text class="s12 c" x="800" y="473">In editor</text>
+<rect x="850" y="458" width="98" height="22" rx="11" fill="#1F3A2E"/><circle class="on" cx="864" cy="469" r="3.5"/><text class="s11 okc" x="873" y="473">On keyboard</text>
+<text class="m s" x="472" y="524">keyboards/eurmac</text>
+<!-- card 2 -->
+<rect x="984.5" y="224.5" width="507" height="317" rx="12" class="panel bd"/>
+<rect class="bg" x="1000" y="240" width="476" height="196" rx="8"/><g><rect x="1034.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1050.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Æ</text>
+<rect x="1070.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1086.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Ø</text>
+<rect x="1106.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1122.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">U</text>
+<rect x="1142.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1158.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">P</text>
+<rect x="1178.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1194.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">V</text>
+<rect x="1286.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1302.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">J</text>
+<rect x="1322.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1338.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">C</text>
+<rect x="1358.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1374.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">H</text>
+<rect x="1394.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1410.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">L</text>
+<rect x="1430.0" y="260.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1446.2" y="281.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Z</text>
+<rect x="1034.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1050.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">A</text>
+<rect x="1070.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1086.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">I</text>
+<rect x="1106.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1122.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">E</text>
+<rect x="1142.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1158.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">O</text>
+<rect x="1178.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1194.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">.</text>
+<rect x="1286.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1302.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">D</text>
+<rect x="1322.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1338.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">T</text>
+<rect x="1358.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1374.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">N</text>
+<rect x="1394.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1410.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">S</text>
+<rect x="1430.0" y="296.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1446.2" y="317.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">R</text>
+<rect x="1034.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1050.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Q</text>
+<rect x="1070.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1086.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Y</text>
+<rect x="1106.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1122.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Å</text>
+<rect x="1142.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1158.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">,</text>
+<rect x="1178.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1194.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">K</text>
+<rect x="1286.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1302.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">B</text>
+<rect x="1322.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1338.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">G</text>
+<rect x="1358.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1374.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">M</text>
+<rect x="1394.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1410.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">F</text>
+<rect x="1430.0" y="332.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="1446.2" y="353.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">W</text>
+<rect x="1142.0" y="377.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#tab" class="ic" x="1150.1" y="385.1" width="16.2" height="16.2"/>
+<rect x="1178.0" y="377.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#space" class="ic" x="1186.1" y="385.1" width="16.2" height="16.2"/>
+<rect x="1286.0" y="377.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#enter" class="ic" x="1294.1" y="385.1" width="16.2" height="16.2"/>
+<rect x="1322.0" y="377.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#bksp" class="ic" x="1330.1" y="385.1" width="16.2" height="16.2"/></g>
+<text class="t s17 sb" x="1000" y="472">Danish Rollercole</text>
+<text class="m s" x="1000" y="494">5 layers · 6 combos · callbacks · edited last week</text>
+<text class="m s" x="1000" y="524">keyboards/rollercole</text>
+<!-- card 3: outside the collection -->
+<rect x="456.5" y="561.5" width="507" height="317" rx="12" class="panel bd"/>
+<rect class="bg" x="472" y="577" width="476" height="196" rx="8"/><g><rect x="506.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="522.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Q</text>
+<rect x="542.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="558.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">W</text>
+<rect x="578.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="594.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">E</text>
+<rect x="614.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="630.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">R</text>
+<rect x="650.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="666.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">T</text>
+<rect x="758.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="774.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Y</text>
+<rect x="794.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="810.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">U</text>
+<rect x="830.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="846.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">I</text>
+<rect x="866.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="882.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">O</text>
+<rect x="902.0" y="597.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="918.2" y="618.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">P</text>
+<rect x="506.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="522.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">A</text>
+<rect x="542.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="558.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">S</text>
+<rect x="578.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="594.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">D</text>
+<rect x="614.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="630.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">F</text>
+<rect x="650.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="666.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">G</text>
+<rect x="758.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="774.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">H</text>
+<rect x="794.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="810.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">J</text>
+<rect x="830.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="846.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">K</text>
+<rect x="866.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="882.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">L</text>
+<rect x="902.0" y="633.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="918.2" y="654.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">;</text>
+<rect x="506.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="522.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">Z</text>
+<rect x="542.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="558.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">X</text>
+<rect x="578.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="594.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">C</text>
+<rect x="614.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="630.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">V</text>
+<rect x="650.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="666.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">B</text>
+<rect x="758.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="774.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">N</text>
+<rect x="794.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="810.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">M</text>
+<rect x="830.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="846.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">,</text>
+<rect x="866.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="882.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">.</text>
+<rect x="902.0" y="669.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><text x="918.2" y="690.6" font-size="15.1" text-anchor="middle" fill="#EDEFF2">/</text>
+<rect x="614.0" y="714.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#tab" class="ic" x="622.1" y="722.1" width="16.2" height="16.2"/>
+<rect x="650.0" y="714.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#space" class="ic" x="658.1" y="722.1" width="16.2" height="16.2"/>
+<rect x="758.0" y="714.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#enter" class="ic" x="766.1" y="722.1" width="16.2" height="16.2"/>
+<rect x="794.0" y="714.0" width="32.4" height="32.4" rx="4.5" fill="#272B32" stroke="#A93B3E" stroke-width="1.2"/><use href="#bksp" class="ic" x="802.1" y="722.1" width="16.2" height="16.2"/></g>
+<text class="t s17 sb" x="472" y="809">EurKEY draft</text>
+<text class="m s" x="472" y="831">6 layers · 1 combo · edited 3 weeks ago</text>
+<rect x="836" y="795" width="112" height="22" rx="11" fill="#2A2E35" stroke="#383D46"/><text class="s11 m c" x="892" y="810">Outside collection</text>
+<text class="m s" x="472" y="861">~/Library/Application Support/zigmkay/data/projects/eurkey</text>
+<!-- new layout card -->
+<rect x="984.5" y="561.5" width="507" height="317" rx="12" class="dash"/>
+<rect class="ctl bd" x="1214" y="664" width="48" height="48" rx="24"/><use href="#plus" class="ic" x="1226" y="676" width="24" height="24"/>
+<text class="t s17 sb c" x="1238" y="748">New layout</text>
+<text class="m s c" x="1238" y="770">Template · duplicate · blank · import from Git</text>
+<text class="m s" x="456" y="1016">Each layout is its own project in the collection. Opening, grouping and duplicating never move or rewrite existing projects.</text>
+<text class="m xs" x="16" y="1053">Design mockup · illustrative data · not a DVUI screenshot</text>
+</svg>

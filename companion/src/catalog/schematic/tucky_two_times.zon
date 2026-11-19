@@ -1,0 +1,37 @@
+// Tucky Two Times. Drawn from kicad/YetAnotherKeyboard.kicad_pcb of
+// https://github.com/StephanMoeller/Tucky-Two-Times at
+// 29dedf9afcf6e31b8acdb5b81f61ca2b420d8c49, the reversible PCB of the left
+// half; the right half mirrors it. Key indexes follow the keymap of this
+// board: rows left to right, then the thumbs.
+.{
+    .{ .key_index = 0, .x = 0, .y = 1, .hand = .left },
+    .{ .key_index = 1, .x = 1, .y = 0.25, .hand = .left },
+    .{ .key_index = 2, .x = 2, .y = 0, .hand = .left },
+    .{ .key_index = 3, .x = 3, .y = 0.25, .hand = .left },
+    .{ .key_index = 4, .x = 4, .y = 0.25, .hand = .left },
+    .{ .key_index = 5, .x = 6, .y = 0.25, .hand = .right },
+    .{ .key_index = 6, .x = 7, .y = 0.25, .hand = .right },
+    .{ .key_index = 7, .x = 8, .y = 0, .hand = .right },
+    .{ .key_index = 8, .x = 9, .y = 0.25, .hand = .right },
+    .{ .key_index = 9, .x = 10, .y = 1, .hand = .right },
+    .{ .key_index = 10, .x = 0, .y = 2, .hand = .left, .home_row = true },
+    .{ .key_index = 11, .x = 1, .y = 1.25, .hand = .left, .home_row = true },
+    .{ .key_index = 12, .x = 2, .y = 1, .hand = .left, .home_row = true },
+    .{ .key_index = 13, .x = 3, .y = 1.25, .hand = .left, .home_row = true },
+    .{ .key_index = 14, .x = 4, .y = 1.25, .hand = .left, .home_row = true },
+    .{ .key_index = 15, .x = 6, .y = 1.25, .hand = .right, .home_row = true },
+    .{ .key_index = 16, .x = 7, .y = 1.25, .hand = .right, .home_row = true },
+    .{ .key_index = 17, .x = 8, .y = 1, .hand = .right, .home_row = true },
+    .{ .key_index = 18, .x = 9, .y = 1.25, .hand = .right, .home_row = true },
+    .{ .key_index = 19, .x = 10, .y = 2, .hand = .right, .home_row = true },
+    .{ .key_index = 20, .x = 1, .y = 2.25, .hand = .left },
+    .{ .key_index = 21, .x = 2, .y = 2, .hand = .left },
+    .{ .key_index = 22, .x = 3, .y = 2.25, .hand = .left },
+    .{ .key_index = 23, .x = 4, .y = 2.25, .hand = .left },
+    .{ .key_index = 24, .x = 6, .y = 2.25, .hand = .right },
+    .{ .key_index = 25, .x = 7, .y = 2.25, .hand = .right },
+    .{ .key_index = 26, .x = 8, .y = 2, .hand = .right },
+    .{ .key_index = 27, .x = 9, .y = 2.25, .hand = .right },
+    .{ .key_index = 28, .x = 4.14, .y = 3.72, .hand = .left, .group = .thumb },
+    .{ .key_index = 29, .x = 5.86, .y = 3.72, .hand = .right, .group = .thumb },
+}

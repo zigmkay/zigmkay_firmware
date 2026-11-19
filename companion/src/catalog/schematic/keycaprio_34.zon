@@ -1,0 +1,42 @@
+// Leonardo Keycaprio with 34 keys (PCB 0.6, 0.7 and 0.8). Drawn from the 0.6
+// switch positions in v0.6/output_Choc1and2_v0.6.kicad_pcb of
+// https://github.com/StephanMoeller/Leonardo-KeycapRio at
+// 473f41f04780db9cb6aa63bc789ff6610806d943; later revisions keep the finger
+// keys. Key indexes follow the keymaps of these boards: rows left to right,
+// then the thumbs.
+.{
+    .{ .key_index = 0, .x = 0, .y = 1, .hand = .left },
+    .{ .key_index = 1, .x = 1, .y = 0.25, .hand = .left },
+    .{ .key_index = 2, .x = 2, .y = 0, .hand = .left },
+    .{ .key_index = 3, .x = 3, .y = 0.25, .hand = .left },
+    .{ .key_index = 4, .x = 4, .y = 0.5, .hand = .left },
+    .{ .key_index = 5, .x = 6.25, .y = 0.5, .hand = .right },
+    .{ .key_index = 6, .x = 7.25, .y = 0.25, .hand = .right },
+    .{ .key_index = 7, .x = 8.25, .y = 0, .hand = .right },
+    .{ .key_index = 8, .x = 9.25, .y = 0.25, .hand = .right },
+    .{ .key_index = 9, .x = 10.25, .y = 1, .hand = .right },
+    .{ .key_index = 10, .x = 0, .y = 2, .hand = .left, .home_row = true },
+    .{ .key_index = 11, .x = 1, .y = 1.25, .hand = .left, .home_row = true },
+    .{ .key_index = 12, .x = 2, .y = 1, .hand = .left, .home_row = true },
+    .{ .key_index = 13, .x = 3, .y = 1.25, .hand = .left, .home_row = true },
+    .{ .key_index = 14, .x = 4, .y = 1.5, .hand = .left, .home_row = true },
+    .{ .key_index = 15, .x = 6.25, .y = 1.5, .hand = .right, .home_row = true },
+    .{ .key_index = 16, .x = 7.25, .y = 1.25, .hand = .right, .home_row = true },
+    .{ .key_index = 17, .x = 8.25, .y = 1, .hand = .right, .home_row = true },
+    .{ .key_index = 18, .x = 9.25, .y = 1.25, .hand = .right, .home_row = true },
+    .{ .key_index = 19, .x = 10.25, .y = 2, .hand = .right, .home_row = true },
+    .{ .key_index = 20, .x = 0, .y = 3, .hand = .left },
+    .{ .key_index = 21, .x = 1, .y = 2.25, .hand = .left },
+    .{ .key_index = 22, .x = 2, .y = 2, .hand = .left },
+    .{ .key_index = 23, .x = 3, .y = 2.25, .hand = .left },
+    .{ .key_index = 24, .x = 4, .y = 2.5, .hand = .left },
+    .{ .key_index = 25, .x = 6.25, .y = 2.5, .hand = .right },
+    .{ .key_index = 26, .x = 7.25, .y = 2.25, .hand = .right },
+    .{ .key_index = 27, .x = 8.25, .y = 2, .hand = .right },
+    .{ .key_index = 28, .x = 9.25, .y = 2.25, .hand = .right },
+    .{ .key_index = 29, .x = 10.25, .y = 3, .hand = .right },
+    .{ .key_index = 30, .x = 3.26, .y = 3.97, .hand = .left, .group = .thumb },
+    .{ .key_index = 31, .x = 4.35, .y = 4.06, .rotation = 10, .hand = .left, .group = .thumb },
+    .{ .key_index = 32, .x = 5.9, .y = 4.06, .rotation = -10, .hand = .right, .group = .thumb },
+    .{ .key_index = 33, .x = 6.99, .y = 3.97, .hand = .right, .group = .thumb },
+}

@@ -1,0 +1,156 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1536" height="1056" viewBox="0 0 1536 1056">
+<style>
+.bg{fill:#15171B}.panel{fill:#1E2126}.ctl{fill:#2A2E35}.raised{fill:#3A3F48}.key{fill:#272B32}
+.bd{stroke:#383D46;stroke-width:1}.t{fill:#EDEFF2}.m{fill:#9AA3B0}.acc{fill:#3B82F6}.w{fill:#FFFFFF}
+.ic{color:#EDEFF2}.icm{color:#9AA3B0}.icw{color:#FFFFFF}
+.kb{stroke:#A93B3E;stroke-width:1.5}.ksel{fill:#533036;stroke:#EF4444;stroke-width:2.5}
+.rowsel{fill:#4C292D;stroke:#EF4444;stroke-width:1.5}
+.l0{color:#EF4444;fill:#EF4444}.l1{color:#3B82F6;fill:#3B82F6}.l2{color:#F59E0B;fill:#F59E0B}
+.l3{color:#22C55E;fill:#22C55E}.l4{color:#A855F7;fill:#A855F7}.l5{color:#14B8A6;fill:#14B8A6}
+.on{fill:#22C55E}.sw{fill:#3A3F48}.knob{fill:#EDEFF2}
+text{font-family:Inter,Helvetica,Arial,sans-serif}
+.h{font-size:19px;font-weight:600}.b{font-size:14px}.s{font-size:12px}.xs{font-size:9px}
+.lg{font-size:24px;text-anchor:middle}.lt{font-size:21px;text-anchor:middle}.ok{font-size:15px;text-anchor:middle}
+.c{text-anchor:middle}.e{text-anchor:end}.sb{font-weight:600}
+</style>
+<defs>
+<symbol id="shift" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18v-6H5l7-7 7 7h-4v6H9z"/></symbol>
+<symbol id="caps" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19h6"/><path d="M9 15v-3H5l7-7 7 7h-4v3H9z"/></symbol>
+<symbol id="ctrl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m18 15-6-6-6 6"/></symbol>
+<symbol id="opt" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h6l6 18h6"/><path d="M14 3h7"/></symbol>
+<symbol id="cmd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3"/></symbol>
+<symbol id="bksp" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 5a2 2 0 0 0-1.344.519l-6.328 5.74a1 1 0 0 0 0 1.481l6.328 5.741A2 2 0 0 0 10 19h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"/><path d="m12 9 6 6"/><path d="m18 9-6 6"/></symbol>
+<symbol id="del" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 5a2 2 0 0 1 1.344.519l6.328 5.74a1 1 0 0 1 0 1.481l-6.328 5.741A2 2 0 0 1 14 19H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z"/><path d="m12 9-6 6"/><path d="m6 9 6 6"/></symbol>
+<symbol id="enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 4v7a4 4 0 0 1-4 4H4"/><path d="m9 10-5 5 5 5"/></symbol>
+<symbol id="tab" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 12H3"/><path d="m11 18 6-6-6-6"/><path d="M21 5v14"/></symbol>
+<symbol id="space" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/></symbol>
+<symbol id="esc" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12a10 10 0 1 1 10 10"/><path d="m2 22 10-10"/><path d="M8 22H2v-6"/></symbol>
+<symbol id="layers" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></symbol>
+<symbol id="left" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></symbol>
+<symbol id="right" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></symbol>
+<symbol id="up" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></symbol>
+<symbol id="down" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></symbol>
+<symbol id="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="chevr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="kbd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></symbol>
+<symbol id="folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+<symbol id="build" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></symbol>
+<symbol id="zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+<symbol id="undo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+<symbol id="redo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
+<symbol id="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+<symbol id="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+<symbol id="dup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+<symbol id="paste" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></symbol>
+<symbol id="search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+</defs>
+<defs>
+<symbol id="scan" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></symbol>
+<symbol id="pause" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/></symbol>
+<symbol id="menu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16M4 6h16M4 18h16"/></symbol>
+<symbol id="power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></symbol>
+<symbol id="spk" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4.702a.705.705 0 0 0-1.203-.498L6.413 7.587A1.4 1.4 0 0 1 5.416 8H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.416a1.4 1.4 0 0 1 .997.413l3.383 3.384A.705.705 0 0 0 11 19.298z"/></symbol>
+<symbol id="volup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#spk"/><path d="M16 9a5 5 0 0 1 0 6"/><path d="M19.364 18.364a9 9 0 0 0 0-12.728"/></symbol>
+<symbol id="voldn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#spk"/><path d="M16 9a5 5 0 0 1 0 6"/></symbol>
+<symbol id="mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#spk"/><path d="m22 9-6 6M16 9l6 6"/></symbol>
+<symbol id="next" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4l10 8-10 8z"/><path d="M19 5v14"/></symbol>
+<symbol id="prev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 20 9 12l10-8z"/><path d="M5 19V5"/></symbol>
+<symbol id="mouse" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="7"/></symbol>
+<symbol id="ml" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><path d="M12 2.5V10H5.5V9A6.5 6.5 0 0 1 12 2.5z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="mr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><path d="M12 2.5V10H18.5V9A6.5 6.5 0 0 0 12 2.5z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="mm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><rect x="10.25" y="5" width="3.5" height="6" rx="1.75" fill="currentColor" stroke="none"/></symbol>
+<symbol id="wu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><path d="m9 10 3-3 3 3"/></symbol>
+<symbol id="wd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><path d="m9 12 3 3 3-3"/></symbol>
+<symbol id="wl" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><path d="m13.5 8-3 3 3 3"/></symbol>
+<symbol id="wr" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><use href="#mouse"/><path d="m10.5 8 3 3-3 3"/></symbol>
+<symbol id="cleft" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M16 12H8"/><path d="m12 8-4 4 4 4"/></symbol>
+<symbol id="cright" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 12h8"/><path d="m12 16 4-4-4-4"/></symbol>
+<symbol id="eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="log" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 12h-5"/><path d="M15 8h-5"/><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"/></symbol>
+<symbol id="pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></symbol>
+<symbol id="dead" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" stroke-dasharray="3.2 3"/></symbol>
+<symbol id="win" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 12h18"/><path d="M12 3v18"/></symbol>
+<symbol id="home" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17V7h10"/><path d="M17 17 7 7"/></symbol>
+<symbol id="end" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10"/><path d="M17 7v10H7"/></symbol>
+<symbol id="pgup" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 11-5-5-5 5"/><path d="m17 18-5-5-5 5"/></symbol>
+<symbol id="pgdn" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 6 5 5 5-5"/><path d="m7 13 5 5 5-5"/></symbol>
+</defs>
+<rect class="bg" width="1536" height="1056"/>
+<text class="t" x="48" y="58" font-size="26" font-weight="600">Keycaps, symbols and layer colors</text>
+<text class="m b" x="48" y="84">One keycap language for the editor canvas, the OS keyboard, the inspector, the companion and the tutor.</text>
+
+<rect class="panel bd" x="32" y="104" width="1472" height="300" rx="12"/>
+<text class="t h" x="48" y="138">Keycap states</text>
+<g transform="translate(48,160)"><rect class="key kb" width="120" height="120" rx="14"/><text class="t c" x="60" y="62" font-size="38">A</text><use href="#ctrl" class="icm" x="46" y="74" width="28" height="28"/></g>
+<text class="t b sb" x="48" y="308">Tap and hold</text><text class="m s" x="48" y="328">Tap legend large; hold legend</text><text class="m s" x="48" y="344">below in muted, no "Hold" word</text>
+<g transform="translate(288,160)"><rect class="key ksel" width="120" height="120" rx="14"/><text class="t c" x="60" y="62" font-size="38">K</text><use href="#cmd" class="icm" x="46" y="74" width="28" height="28"/></g>
+<text class="t b sb" x="288" y="308">Selected</text><text class="m s" x="288" y="328">Full layer color, 2.5 border,</text><text class="m s" x="288" y="344">face tinted toward it</text>
+<g transform="translate(528,160)"><rect width="120" height="120" rx="14" fill="#1E2126" stroke="#5A3034" stroke-width="1.5"/><text class="m c" x="60" y="62" font-size="38">K</text><use href="#cmd" class="icm" x="46" y="74" width="28" height="28"/></g>
+<text class="t b sb" x="528" y="308">Transparent</text><text class="m s" x="528" y="328">Shows the legend it falls</text><text class="m s" x="528" y="344">through to, dimmed</text>
+<g transform="translate(768,160)"><rect class="key kb" width="120" height="120" rx="14"/><use href="#space" class="ic" x="40" y="22" width="40" height="40"/><use href="#layers" class="l2" x="38" y="76" width="22" height="22"/><text class="l2" x="64" y="96" font-size="20">2</text></g>
+<text class="t b sb" x="768" y="308">Layer hold</text><text class="m s" x="768" y="328">Layers icon and number in</text><text class="m s" x="768" y="344">the held layer's color</text>
+<g transform="translate(1008,160)"><rect width="120" height="120" rx="14" class="l0" stroke="#EF4444" stroke-width="2.5"/><text class="w c" x="60" y="62" font-size="38">F</text><use href="#shift" class="icw" x="46" y="74" width="28" height="28"/></g>
+<text class="t b sb" x="1008" y="308">Pressed (companion)</text><text class="m s" x="1008" y="328">Fills with the shown layer's</text><text class="m s" x="1008" y="344">color, white legends</text>
+<text class="t b sb" x="1240" y="176">Modifier order</text>
+<text class="m s" x="1240" y="206">macOS</text>
+<g transform="translate(1240,216)"><rect class="key kb" width="200" height="44" rx="8"/><use href="#ctrl" class="ic" x="44" y="11" width="22" height="22"/><use href="#opt" class="ic" x="74" y="11" width="22" height="22"/><use href="#shift" class="ic" x="104" y="11" width="22" height="22"/><use href="#cmd" class="ic" x="134" y="11" width="22" height="22"/></g>
+<text class="m s" x="1240" y="290">Windows and Linux</text>
+<g transform="translate(1240,300)"><rect class="key kb" width="200" height="44" rx="8"/><text class="t b" x="30" y="28">Ctrl+</text><use href="#shift" class="ic" x="70" y="12" width="20" height="20"/><text class="t b" x="92" y="28">+Alt+</text><use href="#win" class="ic" x="140" y="12" width="20" height="20"/></g>
+<text class="m s" x="1240" y="372">Letters stay uppercase; other</text><text class="m s" x="1240" y="388">output follows the host layout.</text>
+
+<rect class="panel bd" x="32" y="420" width="1472" height="452" rx="12"/>
+<text class="t h" x="48" y="454">Symbols</text>
+<text class="m s e" x="1488" y="454">Icons, never font glyphs. The inspector and search spell every symbol out.</text>
+<g class="key">
+<rect x="48" y="474" width="52" height="52" rx="8"/><rect x="228" y="474" width="52" height="52" rx="8"/><rect x="408" y="474" width="52" height="52" rx="8"/><rect x="588" y="474" width="52" height="52" rx="8"/><rect x="768" y="474" width="52" height="52" rx="8"/><rect x="948" y="474" width="52" height="52" rx="8"/><rect x="1128" y="474" width="52" height="52" rx="8"/><rect x="1308" y="474" width="52" height="52" rx="8"/>
+<rect x="48" y="540" width="52" height="52" rx="8"/><rect x="228" y="540" width="52" height="52" rx="8"/><rect x="408" y="540" width="52" height="52" rx="8"/><rect x="588" y="540" width="52" height="52" rx="8"/><rect x="768" y="540" width="52" height="52" rx="8"/><rect x="948" y="540" width="52" height="52" rx="8"/><rect x="1128" y="540" width="52" height="52" rx="8"/><rect x="1308" y="540" width="52" height="52" rx="8"/>
+<rect x="48" y="606" width="52" height="52" rx="8"/><rect x="228" y="606" width="52" height="52" rx="8"/><rect x="408" y="606" width="52" height="52" rx="8"/><rect x="588" y="606" width="52" height="52" rx="8"/><rect x="768" y="606" width="52" height="52" rx="8"/><rect x="948" y="606" width="52" height="52" rx="8"/><rect x="1128" y="606" width="52" height="52" rx="8"/><rect x="1308" y="606" width="52" height="52" rx="8"/>
+<rect x="48" y="672" width="52" height="52" rx="8"/><rect x="228" y="672" width="52" height="52" rx="8"/><rect x="408" y="672" width="52" height="52" rx="8"/><rect x="588" y="672" width="52" height="52" rx="8"/><rect x="768" y="672" width="52" height="52" rx="8"/><rect x="948" y="672" width="52" height="52" rx="8"/><rect x="1128" y="672" width="52" height="52" rx="8"/><rect x="1308" y="672" width="52" height="52" rx="8"/>
+<rect x="48" y="738" width="52" height="52" rx="8"/><rect x="228" y="738" width="52" height="52" rx="8"/><rect x="408" y="738" width="52" height="52" rx="8"/><rect x="588" y="738" width="52" height="52" rx="8"/><rect x="768" y="738" width="52" height="52" rx="8"/><rect x="948" y="738" width="52" height="52" rx="8"/><rect x="1128" y="738" width="52" height="52" rx="8"/><rect x="1308" y="738" width="52" height="52" rx="8"/>
+<rect x="48" y="804" width="52" height="52" rx="8"/><rect x="228" y="804" width="52" height="52" rx="8"/><rect x="408" y="804" width="52" height="52" rx="8"/><rect x="588" y="804" width="52" height="52" rx="8"/><rect x="768" y="804" width="52" height="52" rx="8"/><rect x="948" y="804" width="52" height="52" rx="8"/><rect x="1128" y="804" width="52" height="52" rx="8"/>
+</g>
+<g class="ic">
+<use href="#bksp" x="61" y="487" width="26" height="26"/><use href="#del" x="241" y="487" width="26" height="26"/><use href="#esc" x="421" y="487" width="26" height="26"/><use href="#tab" x="601" y="487" width="26" height="26"/><use href="#caps" x="781" y="487" width="26" height="26"/><use href="#enter" x="961" y="487" width="26" height="26"/><use href="#space" x="1141" y="487" width="26" height="26"/><use href="#shift" x="1321" y="487" width="26" height="26"/>
+<use href="#ctrl" x="61" y="553" width="26" height="26"/><use href="#opt" x="241" y="553" width="26" height="26"/><use href="#cmd" x="421" y="553" width="26" height="26"/><use href="#win" x="601" y="553" width="26" height="26"/><use href="#left" x="781" y="553" width="26" height="26"/><use href="#right" x="961" y="553" width="26" height="26"/><use href="#up" x="1141" y="553" width="26" height="26"/><use href="#down" x="1321" y="553" width="26" height="26"/>
+<use href="#home" x="61" y="619" width="26" height="26"/><use href="#end" x="241" y="619" width="26" height="26"/><use href="#pgup" x="421" y="619" width="26" height="26"/><use href="#pgdn" x="601" y="619" width="26" height="26"/><use href="#scan" x="961" y="619" width="26" height="26"/><use href="#pause" x="1321" y="619" width="26" height="26"/>
+<use href="#menu" x="61" y="685" width="26" height="26"/><use href="#power" x="241" y="685" width="26" height="26"/><use href="#volup" x="421" y="685" width="26" height="26"/><use href="#voldn" x="601" y="685" width="26" height="26"/><use href="#mute" x="781" y="685" width="26" height="26"/><use href="#next" x="961" y="685" width="26" height="26"/><use href="#prev" x="1141" y="685" width="26" height="26"/><use href="#ml" x="1321" y="685" width="26" height="26"/>
+<use href="#mr" x="61" y="751" width="26" height="26"/><use href="#mm" x="241" y="751" width="26" height="26"/><use href="#cleft" x="421" y="751" width="26" height="26"/><use href="#cright" x="601" y="751" width="26" height="26"/><use href="#wu" x="781" y="751" width="26" height="26"/><use href="#wd" x="961" y="751" width="26" height="26"/><use href="#wl" x="1141" y="751" width="26" height="26"/><use href="#wr" x="1321" y="751" width="26" height="26"/>
+<use href="#eye" x="61" y="817" width="26" height="26"/><use href="#x" x="241" y="817" width="26" height="26"/><use href="#log" x="421" y="817" width="26" height="26"/><use href="#pin" x="961" y="817" width="26" height="26"/><use href="#dead" x="1141" y="817" width="26" height="26"/>
+</g>
+<use href="#layers" class="l1" x="595" y="819" width="22" height="22"/><text class="l1 b" x="620" y="837">1</text>
+<text class="t c" x="794" y="639" font-size="17">ins</text><text class="t c" x="1154" y="639" font-size="17">scr</text><text class="t c" x="794" y="838" font-size="24">ƒ</text>
+<g class="t b">
+<text x="112" y="505">Backspace</text><text x="292" y="505">Delete</text><text x="472" y="505">Escape</text><text x="652" y="505">Tab</text><text x="832" y="505">Caps Lock</text><text x="1012" y="505">Return</text><text x="1192" y="505">Space</text><text x="1372" y="505">Shift</text>
+<text x="112" y="571">Control</text><text x="292" y="571">Option</text><text x="472" y="571">Command</text><text x="652" y="571">Windows</text><text x="832" y="571">Left</text><text x="1012" y="571">Right</text><text x="1192" y="571">Up</text><text x="1372" y="571">Down</text>
+<text x="112" y="637">Home</text><text x="292" y="637">End</text><text x="472" y="637">Page Up</text><text x="652" y="637">Page Down</text><text x="832" y="637">Insert</text><text x="1012" y="637">Print Screen</text><text x="1192" y="637">Scroll Lock</text><text x="1372" y="637">Pause</text>
+<text x="112" y="703">Menu</text><text x="292" y="703">Power</text><text x="472" y="703">Volume Up</text><text x="652" y="703">Volume Down</text><text x="832" y="703">Mute</text><text x="1012" y="703">Next Track</text><text x="1192" y="703">Previous Track</text><text x="1372" y="703">Left Click</text>
+<text x="112" y="769">Right Click</text><text x="292" y="769">Middle Click</text><text x="472" y="769">Mouse Back</text><text x="652" y="769">Mouse Forward</text><text x="832" y="769">Scroll Up</text><text x="1012" y="769">Scroll Down</text><text x="1192" y="769">Scroll Left</text><text x="1372" y="769">Scroll Right</text>
+<text x="112" y="835">Companion</text><text x="292" y="835">Quit companion</text><text x="472" y="835">Companion log</text><text x="652" y="835">Layer hold</text><text x="832" y="835">Callback</text><text x="1012" y="835">One-shot</text><text x="1192" y="835">Dead key</text>
+</g>
+
+<rect class="panel bd" x="32" y="888" width="1472" height="152" rx="12"/>
+<text class="t h" x="48" y="922">Layer palette</text>
+<text class="m s e" x="1488" y="922">Dark surfaces above, light surfaces below. Borders keep ~3:1 contrast; any two colors differ by ΔE ≥ 30.</text>
+<g font-size="12" class="w">
+<rect x="48" y="938" width="150" height="40" rx="8" fill="#EF4444"/><text x="60" y="963">0 · #EF4444</text>
+<rect x="208" y="938" width="150" height="40" rx="8" fill="#3B82F6"/><text x="220" y="963">1 · #3B82F6</text>
+<rect x="368" y="938" width="150" height="40" rx="8" fill="#F59E0B"/><text x="380" y="963">2 · #F59E0B</text>
+<rect x="528" y="938" width="150" height="40" rx="8" fill="#22C55E"/><text x="540" y="963">3 · #22C55E</text>
+<rect x="688" y="938" width="150" height="40" rx="8" fill="#A855F7"/><text x="700" y="963">4 · #A855F7</text>
+<rect x="848" y="938" width="150" height="40" rx="8" fill="#14B8A6"/><text x="860" y="963">5 · #14B8A6</text>
+<rect x="1008" y="938" width="150" height="40" rx="8" fill="#EC4899"/><text x="1020" y="963">6 · #EC4899</text>
+<rect x="1168" y="938" width="150" height="40" rx="8" fill="#A16207"/><text x="1180" y="963">7 · #A16207</text>
+<rect x="1328" y="938" width="150" height="40" rx="8" fill="#94A3B8"/><text x="1340" y="963">8 · #94A3B8</text>
+<rect x="48" y="986" width="150" height="40" rx="8" fill="#DC2626"/><text x="60" y="1011">0 · #DC2626</text>
+<rect x="208" y="986" width="150" height="40" rx="8" fill="#2563EB"/><text x="220" y="1011">1 · #2563EB</text>
+<rect x="368" y="986" width="150" height="40" rx="8" fill="#D97706"/><text x="380" y="1011">2 · #D97706</text>
+<rect x="528" y="986" width="150" height="40" rx="8" fill="#16A34A"/><text x="540" y="1011">3 · #16A34A</text>
+<rect x="688" y="986" width="150" height="40" rx="8" fill="#9333EA"/><text x="700" y="1011">4 · #9333EA</text>
+<rect x="848" y="986" width="150" height="40" rx="8" fill="#0D9488"/><text x="860" y="1011">5 · #0D9488</text>
+<rect x="1008" y="986" width="150" height="40" rx="8" fill="#DB2777"/><text x="1020" y="1011">6 · #DB2777</text>
+<rect x="1168" y="986" width="150" height="40" rx="8" fill="#854D0E"/><text x="1180" y="1011">7 · #854D0E</text>
+<rect x="1328" y="986" width="150" height="40" rx="8" fill="#475569"/><text x="1340" y="1011">8 · #475569</text>
+</g>
+<text class="m xs" x="16" y="1053">Design mockup · illustrative data · not a DVUI screenshot</text>
+</svg>
