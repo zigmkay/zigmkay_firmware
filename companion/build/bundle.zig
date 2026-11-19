@@ -48,7 +48,7 @@ pub fn add(s: *tests.Suite, deps: Deps, app: *Compile, bootsel: ?*Compile) void 
     } else {
         const picotool = deps.picotool.?.artifact("picotool");
         if (cfg.macos_sdk) |sdk| native.sdkPaths(b, picotool.root_module, sdk);
-        assemble.addArtifactArg(b.addExecutable(.{ .name = "picotool_flash", .root_module = s.mods.root("src/jobs/picotool_flash.zig", &.{}) }));
+        assemble.addArtifactArg(b.addExecutable(.{ .name = "picotool_flash", .root_module = tests.flashPicotool(b, cfg) }));
         assemble.addArtifactArg(picotool);
     }
     if (os == .linux)

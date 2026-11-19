@@ -189,9 +189,10 @@ pub fn addCore(s: *Suite) Fixtures {
     // POSIX only: the cancellation tests use PIDs, and Windows flashes
     // through the BOOTSEL helper instead of picotool.
     if (s.cfg.target.result.os.tag != .windows) {
-        picotool.addOptionPath("wrapper", s.exe("picotool-flash-offline", "src/jobs/picotool_flash.zig", &.{}).getEmittedBin());
+        const flash = flashPicotool(b, s.cfg);
+        picotool.addOptionPath("wrapper", b.addExecutable(.{ .name = "picotool-flash-offline", .root_module = flash }).getEmittedBin());
         picotool.addOptionPath("picotool_fixture", s.exe("fake-picotool", "src/jobs/fake_picotool.zig", &.{}).getEmittedBin());
-        const wrapper = s.mods.root("src/jobs/test_picotool_flash.zig", &.{});
+        const wrapper = s.mods.root("src/jobs/test_picotool_flash.zig", &.{.{ .name = "flash-picotool", .module = flash }});
         wrapper.addOptions("options", picotool);
         _ = s.add(steps.test_jobs, .core, wrapper);
     }
@@ -414,4 +415,14 @@ pub fn host(b: *std.Build, name: []const u8, path: []const u8, imports: []const 
         .target = b.graph.host,
         .imports = imports,
     }) });
+}
+
+/// The firmware's picotool flash wrapper, which the bundle ships as
+/// `tools/picotool_flash`, built for the application target.
+pub fn flashPicotool(b: *std.Build, cfg: Config) *std.Build.Module {
+    return b.createModule(.{
+        .root_source_file = b.dependency("zigmkay_firmware", .{}).path("zigmkay/tools/flash_picotool.zig"),
+        .target = cfg.target,
+        .optimize = cfg.optimize,
+    });
 }

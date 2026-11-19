@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Offline wrapper checks against the fake picotool. No USB access.
 const std = @import("std");
-const flash = @import("picotool_flash.zig");
+const flash = @import("flash-picotool");
 const options = @import("options");
 const t = std.testing;
 const io = t.io;
 
 test "CLI validates bounded waits, digests and complete selection options" {
-    _ = try flash.parse(&.{ "tool", "file" });
     try t.expectError(error.InvalidArguments, flash.parse(&.{ "tool", "file", "--bus", "1" }));
     try t.expectError(error.InvalidArguments, flash.parse(&.{ "tool", "file", "--command-ms", "0" }));
     try t.expectError(error.InvalidArguments, flash.parse(&.{ "tool", "file", "--discovery-ms", "3600001" }));
@@ -32,6 +31,11 @@ test "CLI validates bounded waits, digests and complete selection options" {
     }));
     const config = try flash.parse(&.{ "tool", "file", "--bus", "0", "--address", "127", "--cancel-stdin" });
     try t.expect(config.cancel_stdin);
+    try t.expect(!config.interactive);
+    try t.expectEqual(@as(?u32, 30_000), config.discovery_ms);
+    const plain = try flash.parse(&.{ "tool", "file" });
+    try t.expect(plain.interactive);
+    try t.expectEqual(@as(?u32, null), plain.discovery_ms);
 }
 
 fn uf2() [512]u8 {
@@ -51,10 +55,16 @@ fn path(tmp: std.testing.TmpDir, basename: []const u8) ![]u8 {
 test "UF2 blocks require magic, complete inventory and RP2040 flash payload" {
     const valid = uf2();
     try flash.validateUf2(&valid);
-    for ([_]usize{ 0, 4, 8, 16, 20, 24, 28, 508 }) |offset| {
+    for ([_]usize{ 0, 4, 8, 16, 20, 24, 508 }) |offset| {
         var invalid = valid;
         invalid[offset] ^= 1;
         try t.expectError(error.InvalidUf2, flash.validateUf2(&invalid));
+    }
+    // Clear the family-ID-present flag, then corrupt the family ID.
+    for ([_]usize{ 9, 28 }, [_]u8{ 0x20, 1 }) |offset, bit| {
+        var invalid = valid;
+        invalid[offset] ^= bit;
+        try t.expectError(error.MissingRp2040FamilyId, flash.validateUf2(&invalid));
     }
     try t.expectError(error.InvalidUf2, flash.validateUf2(""));
     try t.expectError(error.InvalidUf2, flash.validateUf2(valid[0..511]));
@@ -195,4 +205,45 @@ test "stdin cancellation during discovery and load reaps picotool before wrapper
         try t.expect(!term.success());
         try expectReaped(pid);
     }
+}
+
+test "UF2 without the RP2040 family ID is rejected before picotool runs" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const file = try path(tmp, "firmware.uf2");
+    defer t.allocator.free(file);
+    var block = uf2();
+    std.mem.writeInt(u32, block[28..32], 0, .little);
+    try tmp.dir.writeFile(io, .{ .sub_path = "firmware.uf2", .data = &block });
+    for ([_]bool{ false, true }) |interactive| {
+        const config: flash.Config = .{
+            .picotool = "/nonexistent-picotool-must-not-spawn",
+            .firmware = file,
+            .discovery_ms = if (interactive) null else 100,
+            .interactive = interactive,
+        };
+        try t.expectError(error.MissingRp2040FamilyId, flash.execute(t.allocator, io, config));
+    }
+}
+
+test "CLI without options flashes interactively with inherited picotool output" {
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const file = try path(tmp, "firmware.uf2");
+    defer t.allocator.free(file);
+    const block = uf2();
+    try tmp.dir.writeFile(io, .{ .sub_path = "firmware.uf2", .data = &block });
+    const result = try std.process.run(t.allocator, io, .{
+        .argv = &.{ options.wrapper, options.picotool_fixture, file },
+        .stdout_limit = .limited(64 * 1024),
+        .stderr_limit = .limited(64 * 1024),
+    });
+    defer t.allocator.free(result.stdout);
+    defer t.allocator.free(result.stderr);
+    try t.expect(result.term.success());
+    // The fake echoes its arguments; only inherited writes reach this stdout.
+    const expected = try std.fmt.allocPrint(t.allocator, "load\n--verify\n{s}\nreboot\n--application\n", .{file});
+    defer t.allocator.free(expected);
+    try t.expectEqualStrings(expected, result.stdout);
+    try t.expect(std.mem.indexOf(u8, result.stderr, "Waiting for an RP-series device in BOOTSEL mode") != null);
 }
