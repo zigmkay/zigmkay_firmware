@@ -93,7 +93,7 @@ the backend and the executable hashes (the wrapper hash identifies the helper).
 
 ## CI and publishing
 
-The [application workflow](../.github/workflows/application-bundle.yml) preserves
+The [application workflow](../../.github/workflows/companion-application-bundle.yml) preserves
 the focused Windows diagnostic/GUI modes and builds four native release targets
 on `main`, uploading downloadable packages without publishing. Linux runtime jobs
 exercise mounted and extracted AppImages on Ubuntu 22.04 and 24.04.
@@ -105,8 +105,9 @@ and system Zig/SDK access, use read-only resources and empty compiler caches, an
 build firmware/native runners for all 14 catalog selectors twice. Windows uses
 filesystem ACLs and firewall policy in addition to PATH isolation.
 
-Only `vMAJOR.MINOR.PATCH-preview.N` tags are publishable. They must exactly match
-`build.zig.zon` and point to a commit belonging to `main`. Source, storage, native
+Only `companion-vMAJOR.MINOR.PATCH-preview.N` tags are publishable; releases are
+named "Zigmkay companion". The version after the `companion-` prefix must exactly
+match `companion/build.zig.zon` and point to a commit belonging to `main`. Source, storage, native
 desktop and packaged-runtime jobs run against that commit. Only the final job
 has `contents: write`; it waits for all required jobs, validates four downloads
 and their metadata/hashes, prepares corresponding sources and `SHA256SUMS`, then

@@ -137,7 +137,7 @@ layout opens in the editor.
    is resolved to an immutable commit before downloading. Authentication and
    private repositories are unsupported.
 2. Select a keymap module; `src/keymap.zig` is suggested. **Analyze keymap**
-   evaluates its typed data against the application's pinned firmware with Zig
+   evaluates its typed data against the application's bundled firmware with Zig
    0.17.0. Repository build scripts and callback handlers are never executed.
 3. The found keymap appears next to the chosen keyboard. It is drawn on the
    catalog board with its key count; keys without a counterpart on your
@@ -173,7 +173,7 @@ Every import, including a callback-free map, retains `.import/source` and
 and firmware pins, repository/ref/commit when available, selected target,
 processing contract and converter version. Git history, repository build
 scripts, firmware engines, scanning/GPIO implementations and UF2s are not
-project inputs. Exports use the application's existing immutable firmware pin.
+project inputs. Exports use the firmware revision bundled with the application.
 Downloads, decompression, archive entries, captured files and subprocess output
 are bounded. Archive links and escaping paths are rejected. Network failures
 retain the wizard for retry or local-folder import. Git and a separately

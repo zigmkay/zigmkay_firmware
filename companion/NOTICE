@@ -27,18 +27,18 @@ authored, offers them under GPL version 2 or (at your option) any later version
 provenance. Exceptions: the historical fixture
 tests/fixtures/historical/rollercole-0.16.zig.txt contains third-party work and
 stays GPL version 2 only, and imported dependencies keep their own licenses.
-The pinned zigmkay firmware is GPL version 2 only, so distributed builds that
-compile it in are distributed under GPL version 2.
+The companion now lives in the zigmkay firmware repository, which is licensed
+under GPL-2.0-or-later; builds compile in that in-tree firmware.
 No host implementation has been imported at bootstrap. Preserve existing
 copyright/license notices when importing source. Dependency notices and asset
 licenses must accompany their eventual imports; this file is not a complete
 release attribution inventory.
 
-The selected firmware dependency is mainline zigmkay/zigmkay_firmware with the
+Historical (superseded by the in-tree integration): the selected firmware
+dependency was mainline zigmkay/zigmkay_firmware with the
 Raw HID companion session of zigmkay/zigmkay_firmware PR #60, pinned to that
 PR head on conlorz/zigmkay_firmware at 83b689262ae4a6f814ba9c7aa9fa868bf734350f
-with an immutable package hash in build.zig.zon until the PR merges. The
-companion builds its 14 board selectors (src/firmware/boards.zig) from that
+with an immutable package hash in build.zig.zon. The companion built its 14 board selectors (src/firmware/boards.zig) from that
 source; this is not a native release or an accepted stable contract.
 
 First portable imports (2026-10-10):

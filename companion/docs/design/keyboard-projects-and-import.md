@@ -338,7 +338,7 @@ before that hardware step.
    Report unsupported input rather than producing a silently incomplete project.
 7. **Continue in the editor.** The converted project becomes authoritative.
    Reimport creates another project or an explicit reviewed replacement. Source
-   refresh remains explicit. Fresh editor exports use current pinned firmware;
+   refresh remains explicit. Fresh editor exports use the current bundled firmware;
    existing flashed firmware is not automatically compatible with that identity.
 
 Existing source validation allows only literal imports and a small known-module

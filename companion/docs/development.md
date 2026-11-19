@@ -70,7 +70,7 @@ in caches, and preserve personal projects and attached source bundles.
 | [src/project](../src/project) | Project schema, validation, source preservation and export |
 | [src/session](../src/session) | Device sessions and verified live state |
 | [src/jobs](../src/jobs) | Build environments, managed jobs and Flash tooling |
-| [src/catalog](../src/catalog) | Pinned firmware board/default-profile inventory |
+| [src/catalog](../src/catalog) | Firmware board/default-profile inventory |
 | [src/platform](../src/platform) | Desktop integration, user paths and native window support |
 | [tools](../tools) / [tests](../tests) | Zig utilities and integration contracts |
 | [build.zig](../build.zig) / [build](../build) | Build options, steps, module graph and test wiring |
@@ -97,9 +97,8 @@ acquisition.
 zig build check test
 ```
 
-No step accesses devices. An explicit `--fork <firmware-checkout>` override is
-available for local firmware development, but is not required for normal builds
-and is not a release dependency. Zig configures the whole build graph for every
+No step accesses devices. The firmware comes from the enclosing repository, so
+firmware changes are tested from the same checkout. Zig configures the whole build graph for every
 step, so the options below decide which lazy dependencies are fetched; a step
 whose option is missing fails with a message that names it.
 

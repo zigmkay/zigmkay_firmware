@@ -1,11 +1,21 @@
-name: Self-contained application
+name: Companion application bundle
 
 on:
   push:
     branches: [main]
-    tags: ['v*-preview.*']
+    # Companion previews are tagged companion-v<version>-preview.<n>. Tag pushes
+    # carry no path filter so a release tag always builds.
+    tags: ['companion-v*-preview.*']
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "companion/**"
+      - "zigmkay/**"
+      - "keyboards/**"
+      - "zkeycodes/**"
+      - build.zig
+      - build.zig.zon
+      - .github/workflows/companion-application-bundle.yml
   workflow_dispatch:
     inputs:
       mode:
@@ -28,6 +38,10 @@ concurrency:
 # Windows verification, a second Linux runtime and the ReleaseSafe source job.
 env:
   FULL_CI: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+
+defaults:
+  run:
+    working-directory: companion
 
 jobs:
   windows-finalization:
@@ -54,8 +68,8 @@ jobs:
           name: windows-finalization-${{ github.sha }}
           retention-days: 3
           path: |
-            zig-out/bin/diagnose-build-finalization*
-            finalization.log
+            companion/zig-out/bin/diagnose-build-finalization*
+            companion/finalization.log
             ${{ runner.temp }}/finalization ü
   # Linux has its own job so linux-runtime starts as soon as its package exists.
   bundle-linux:
@@ -92,7 +106,7 @@ jobs:
         shell: bash
         env:
           PREVIEW_TAG: ${{ github.ref_name }}
-        run: zig-out/bin/release validate-tag "$PREVIEW_TAG" "$GITHUB_SHA"
+        run: zig-out/bin/release validate-tag "${PREVIEW_TAG#companion-}" "$GITHUB_SHA"
       - name: Verify native desktop behavior offline
         if: inputs.mode != 'gui'
         shell: bash
@@ -104,11 +118,11 @@ jobs:
         run: |
           set -eu
           case "$RUNNER_OS" in
-            macOS) root="$GITHUB_WORKSPACE/zig-out/Zigmkay.app" ;;
-            Windows) root="$GITHUB_WORKSPACE/zig-out/Zigmkay.exe" ;;
-            Linux) root="$GITHUB_WORKSPACE/zig-out/Zigmkay.AppDir" ;;
+            macOS) root="$GITHUB_WORKSPACE/companion/zig-out/Zigmkay.app" ;;
+            Windows) root="$GITHUB_WORKSPACE/companion/zig-out/Zigmkay.exe" ;;
+            Linux) root="$GITHUB_WORKSPACE/companion/zig-out/Zigmkay.AppDir" ;;
           esac
-          zig-out/bin/release package "$root" "$GITHUB_WORKSPACE/release-assets" "$GITHUB_SHA"
+          zig-out/bin/release package "$root" "$GITHUB_WORKSPACE/companion/release-assets" "$GITHUB_SHA"
       - name: Relocated macOS offline builds and practice
         if: runner.os == 'macOS'
         shell: bash
@@ -212,7 +226,7 @@ jobs:
               }
               if ($deniedSync) { throw "Read-only isolation denies SYNCHRONIZE: $path" }
             }
-            Invoke-Isolated -Phase preflight -Executable "$target/isolation.exe" -Arguments @("$target/install/Zigmkay.exe", "$env:GITHUB_WORKSPACE/build.zig") -TimeoutSeconds 30
+            Invoke-Isolated -Phase preflight -Executable "$target/isolation.exe" -Arguments @("$target/install/Zigmkay.exe", "$env:GITHUB_WORKSPACE/companion/build.zig") -TimeoutSeconds 30
             if ('${{ inputs.mode }}' -ne 'gui') {
               Invoke-Isolated -Phase cold -Executable "$target/check.exe" -Arguments @("$target/install/Zigmkay.exe", "$target/cache/zigmkay/cache", 'all') -TimeoutSeconds 720
               Invoke-Isolated -Phase warm -Executable "$target/check.exe" -Arguments @("$target/install/Zigmkay.exe", "$target/cache/zigmkay/cache", 'all') -TimeoutSeconds 300
@@ -244,20 +258,20 @@ jobs:
         with:
           name: preview-${{ matrix.platform }}
           if-no-files-found: error
-          path: release-assets/*
+          path: companion/release-assets/*
       - name: Archive selected dependency sources
         shell: bash
         run: tar -czf dependency-sources-${{ matrix.platform }}.tar.gz -C zig-out/corresponding-source .
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: sources-${{ matrix.platform }}
-          path: dependency-sources-*.tar.gz
+          path: companion/dependency-sources-*.tar.gz
       - name: Preserve Linux runtime verifier
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: linux-runtime-verifier
-          path: zig-out/bin/check-application-bundle
+          path: companion/zig-out/bin/check-application-bundle
 
   bundle:
     if: (github.event_name != 'workflow_dispatch' || inputs.mode == 'full' || inputs.mode == 'gui') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
@@ -279,6 +293,10 @@ jobs:
         os: ${{ fromJSON((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && '["ubuntu-22.04","ubuntu-24.04"]' || '["ubuntu-24.04"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
+    # No checkout: artifacts download into the workspace root.
+    defaults:
+      run:
+        working-directory: ${{ github.workspace }}
     steps:
       - name: Install runtime isolation and FUSE support
         run: |
@@ -380,24 +398,25 @@ jobs:
         with:
           pattern: preview-*
           merge-multiple: true
-          path: release-assets
+          path: companion/release-assets
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: sources-*
           merge-multiple: true
-          path: dependency-sources
+          path: companion/dependency-sources
       - name: Assemble source archive and validate the complete release inventory
         env:
           PREVIEW_TAG: ${{ github.ref_name }}
         run: |
           set -eu
           zig build tools test-jobs -Donly=practice -Doptimize=safe -j2
-          zig-out/bin/release validate-tag "$PREVIEW_TAG" "$GITHUB_SHA"
+          zig-out/bin/release validate-tag "${PREVIEW_TAG#companion-}" "$GITHUB_SHA"
           mkdir -p source/application source/dependencies
-          git archive "$GITHUB_SHA" | tar -xf - -C source/application
+          # The companion builds on the enclosing firmware tree; archive all of it.
+          git -C "$GITHUB_WORKSPACE" archive "$GITHUB_SHA" | tar -xf - -C source/application
           cp dependency-sources/*.tar.gz source/dependencies/
           tar -czf release-assets/corresponding-source.tar.gz -C source .
-          zig-out/bin/release finalize "$GITHUB_WORKSPACE/release-assets" "$GITHUB_SHA"
+          zig-out/bin/release finalize "$GITHUB_WORKSPACE/companion/release-assets" "$GITHUB_SHA"
       - name: Create or resume a draft, upload assets, then publish a prerelease
         env:
           GH_TOKEN: ${{ github.token }}
@@ -408,7 +427,9 @@ jobs:
           if gh release view "$PREVIEW_TAG" --json isDraft > "$RUNNER_TEMP/existing-release.json"; then
             zig-out/bin/release validate-existing-release "$RUNNER_TEMP/existing-release.json"
           else
-            gh release create "$PREVIEW_TAG" --verify-tag --draft --prerelease --title "Zigmkay $PREVIEW_TAG — unsigned preview" --notes-file packaging/preview-notes.md
+            version="${PREVIEW_TAG#companion-}"
+            { printf '# Zigmkay companion %s\n\n' "$version"; cat packaging/preview-notes.md; } > "$RUNNER_TEMP/release-notes.md"
+            gh release create "$PREVIEW_TAG" --verify-tag --draft --prerelease --title "Zigmkay companion $version — unsigned preview" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
           gh release upload "$PREVIEW_TAG" release-assets/* --clobber
           gh release edit "$PREVIEW_TAG" --draft=false --prerelease

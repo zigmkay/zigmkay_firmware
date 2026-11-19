@@ -3,11 +3,24 @@ name: Native desktop contracts
 on:
   push:
     branches: [main]
+    paths: &paths
+      - "companion/**"
+      - "zigmkay/**"
+      - "keyboards/**"
+      - "zkeycodes/**"
+      - build.zig
+      - build.zig.zon
+      - .github/workflows/companion-desktop-checks.yml
   pull_request:
+    paths: *paths
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: companion
 
 jobs:
   desktop:

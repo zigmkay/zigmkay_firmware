@@ -46,6 +46,18 @@ zig build install-udev-rules
 
 Unplug the keyboard and plug it back in afterwards.
 
+## Companion
+
+The [`companion/`](companion/) folder contains the Zigmkay companion: a native visual
+keymap editor, an on-demand keyboard companion that shows the live layer, and a
+typing tutor. It builds on the firmware in this repository. To run it from source:
+
+```bash
+cd companion && zig build run -Dbundle
+```
+
+See [companion/README.md](companion/README.md) for details.
+
 ## Only modify files in my_keyboards/
 
 Do only modify things inside my_keyboards. If you stick to this rule, future git fetches should be painless most of the time as we will keep changes inside the my_keyboards to an absolute minimum.
@@ -245,7 +257,7 @@ I was curious to what it would take to do this and then there was some things th
 - Please let me know. You can write me here in the repo or contact me on the "zig" or the "microzig" discord servers. My username is "Rollercole".
 
 # License 
-This project is licensed under GPL2
+This project is licensed under the GNU General Public License, version 2 or (at your option) any later version (`GPL-2.0-or-later`). See [LICENSE](LICENSE) for the version 2 text.
  
 # AI-Assisted Development
 Parts of this firmware were developed with AI assistance. All AI-generated code, features, and changes were reviewed and tested by human developers before inclusion.

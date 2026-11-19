@@ -33,8 +33,8 @@ device acceptance remains separate. See [compatibility status](docs/compatibilit
 Install [mise](https://mise.jdx.dev/installing-mise.html) and Git, then:
 
 ```sh
-git clone https://github.com/conlorz/zigmkay_companion.git
-cd zigmkay_companion
+git clone https://github.com/zigmkay/zigmkay_firmware.git
+cd zigmkay_firmware/companion
 mise trust
 mise install
 mise exec -- zig version    # must print 0.17.0
@@ -140,8 +140,9 @@ cannot prove which finger or physical route you used.
 
 ## Development
 
-Use this checkout and the pinned compiler; no private plans or sibling
-repositories are required. Start with the offline checks:
+The companion lives in the `companion/` folder of the firmware repository and
+builds on the firmware in the same checkout. Use the pinned compiler; no private
+plans or other repositories are required. Start with the offline checks:
 
 ```sh
 mise run check
@@ -162,7 +163,6 @@ Software Foundation, either version 2 of the License, or (at your option) any
 later version** (`GPL-2.0-or-later`). See [LICENSE](LICENSE) for the version 2
 text.
 
-The application compiles in the zigmkay firmware, which is licensed under GPL
-version 2 only. Builds that include it are therefore distributed under GPL
-version 2. Imported dependencies retain their own license notices; see
+The application compiles in the zigmkay firmware from the enclosing repository,
+which is also licensed under `GPL-2.0-or-later`. Imported dependencies retain their own license notices; see
 [NOTICE](NOTICE).
