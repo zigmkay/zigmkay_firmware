@@ -2,11 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const zigmkay_build = @import("zigmkay");
-pub const microzig = @import("microzig");
-
-const MicroBuild = microzig.MicroBuild(.{
-    .rp2xxx = true,
-});
 
 pub const FlashSteps = zigmkay_build.FlashSteps;
 
@@ -37,4 +32,3 @@ pub fn build(b: *std.Build) void {
         rawhid_monitor_step.dependOn(&run_rawhid_monitor.step);
     }
 }
-
