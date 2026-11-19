@@ -1,5 +1,5 @@
-[tools]
-zig = "0.17.0"
+# Companion tasks; from the repository root run them as `mise run //companion:<task>`.
+# Zig comes from the root mise.toml.
 
 [tasks.test]
 description = "Run all offline companion tests"
@@ -8,6 +8,14 @@ run = "zig build test"
 [tasks.check]
 description = "Compile every source, tool and test without device access"
 run = "zig build check"
+
+[tasks."firmware:check"]
+description = "Compile every board with synthetic, default and imported companion keymaps; never flashes"
+run = "zig build check-firmware check-firmware-defaults -Dfirmware -j4"
+
+[tasks."jobs:test"]
+description = "Run subprocess, flash-job, traversal and release tooling tests without devices"
+run = "zig build test-jobs -j4"
 
 [tasks."desktop:check"]
 description = "Compile the native editor, GUI dependencies and smoke probes without launching or accessing devices"

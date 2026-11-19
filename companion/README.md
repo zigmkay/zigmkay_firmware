@@ -34,11 +34,11 @@ Install [mise](https://mise.jdx.dev/installing-mise.html) and Git, then:
 
 ```sh
 git clone https://github.com/zigmkay/zigmkay_firmware.git
-cd zigmkay_firmware/companion
-mise trust
+cd zigmkay_firmware
+mise trust --all
 mise install
 mise exec -- zig version    # must print 0.17.0
-mise run editor
+mise run //companion:editor
 ```
 
 Mise selects exactly **Zig 0.17.0** and assembles the complete application.
@@ -50,7 +50,7 @@ application from source needs Xcode Command Line Tools (`xcode-select --install`
 For the companion in the background, start this instead:
 
 ```sh
-mise run companion
+mise run //companion:companion
 ```
 
 It starts with its windows hidden. Use the tray icon to open the editor or show
@@ -145,9 +145,11 @@ builds on the firmware in the same checkout. Use the pinned compiler; no private
 plans or other repositories are required. Start with the offline checks:
 
 ```sh
-mise run check
-mise run test
+mise run //companion:check
+mise run //companion:test
 ```
+
+`mise run test` at the repository root runs the firmware tests too.
 
 The [development guide](docs/development.md) covers the package map, native GUI
 builds, explicit offline startup, test tasks, application assembly and further

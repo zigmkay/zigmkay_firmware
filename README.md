@@ -8,6 +8,23 @@ ZigMkay is a keyboard firmware made in zig. You also configure your own keymaps 
 
 3. TODO: Describe how to copy an example and built it to the keyboard. 
 
+## Tasks with mise
+
+The repository root is a [mise](https://mise.jdx.dev/) monorepo, so every task
+runs from the root without changing folders. It also selects Zig 0.17.0:
+
+```bash
+mise trust --all && mise install
+mise tasks --all                      # list every task
+mise run //keyboards:flash lk8        # build and flash one keyboard
+mise run //keyboards:build lk8        # build only, into keyboards/zig-out
+mise run //companion:editor           # start the companion editor
+mise run test                         # every offline firmware and companion test
+```
+
+`flash:picotool`, `flash:mount` (with `--mount <path|label>`) and `udev` map to
+the `zig build` steps below.
+
 ## Flashing
 
 Run these from the `keyboards/` folder. `-Dkeyboard=<name>` picks the keyboard; `zig build --help` lists the available names.

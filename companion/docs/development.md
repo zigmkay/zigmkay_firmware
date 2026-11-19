@@ -32,19 +32,22 @@ default permissions rather than the actual read-only attribute.
 
 ## Everyday commands
 
-Run commands from the repository root. `mise run` selects the pinned tools;
-shell activation is optional.
+Run commands from the repository root: the root `mise.toml` is a mise
+monorepo, so `//companion:<task>` names a task of this folder. Inside
+`companion/`, the short names work too. `mise run` selects the pinned tools;
+shell activation is optional. `mise tasks --all` lists the firmware tasks as
+well.
 
 | Command | Purpose |
 | --- | --- |
-| `mise run check` | Compile every source, tool and test without devices |
-| `mise run test` | Run all offline tests |
-| `mise run desktop:check` | Compile the native editor and GUI dependencies without launching |
-| `mise run editor:build` | Assemble the complete application without launching |
-| `mise run editor:test` | Run offline GUI launch, onboarding, tutor, draft, source-refresh and companion fixtures |
-| `mise run typing-practice:test` | Check typing test generation, scoring and application paths |
-| `mise run editor` | Launch the editor with automatic keyboard monitoring |
-| `mise run companion` | Launch the tray resident with windows hidden and automatic monitoring |
+| `mise run //companion:check` | Compile every source, tool and test without devices |
+| `mise run //companion:test` | Run all offline tests |
+| `mise run //companion:desktop:check` | Compile the native editor and GUI dependencies without launching |
+| `mise run //companion:editor:build` | Assemble the complete application without launching |
+| `mise run //companion:editor:test` | Run offline GUI launch, onboarding, tutor, draft, source-refresh and companion fixtures |
+| `mise run //companion:typing-practice:test` | Check typing test generation, scoring and application paths |
+| `mise run //companion:editor` | Launch the editor with automatic keyboard monitoring |
+| `mise run //companion:companion` | Launch the tray resident with windows hidden and automatic monitoring |
 
 For a GUI session without keyboard monitoring:
 
