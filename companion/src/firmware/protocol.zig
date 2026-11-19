@@ -24,31 +24,30 @@
 //! for example the legacy 0x03 trace, are ignored. Bytes after a message's
 //! fields are not interpreted.
 const std = @import("std");
-const core = @import("zigmkay").core;
+pub const core = @import("zigmkay").core;
 pub const identity = @import("identity.zig");
+/// The keyboard side of this protocol. Ids, sizes and the version below are
+/// taken from it; byte offsets are not named there and stay spelled out here.
+pub const firmware = @import("zigmkay").companion;
 
-pub const protocol_version: u8 = 1;
-pub const report_size = 32;
-pub const Report = [report_size]u8;
-pub const KeymapId = [16]u8;
+pub const protocol_version: u8 = firmware.protocol_version;
+pub const report_size = @sizeOf(firmware.Report);
+pub const Report = firmware.Report;
+pub const KeymapId = @FieldType(firmware.Info, "keymap_id");
 /// Firmware reports all zeros when its keymap was not generated with an id.
 pub const unknown_keymap_id: KeymapId = @splat(0);
 
+/// Exhaustive, unlike the firmware's: the host only sends commands it knows.
 pub const Command = enum(u8) {
-    connect = 0x10,
-    disconnect = 0x11,
-    enter_bootloader = 0x12,
+    connect = @backingInt(firmware.Command.connect),
+    disconnect = @backingInt(firmware.Command.disconnect),
+    enter_bootloader = @backingInt(firmware.Command.enter_bootloader),
 };
 
-pub const MessageId = enum(u8) {
-    hello = 0x20,
-    state = 0x21,
-    key = 0x22,
-    signal = 0x23,
-};
+pub const MessageId = firmware.MessageId;
 
 /// Companion keys on the keyboard, reported after its tap/hold decision.
-pub const SignalKind = enum(u8) { log_toggle = 1, overlay_toggle = 2, shutdown = 3 };
+pub const SignalKind = firmware.Signal;
 pub const SignalEvent = struct { kind: SignalKind, pressed: bool };
 
 pub const KeyEvent = struct {
@@ -381,4 +380,103 @@ test "commands encode as zero padded reports and decode like the keyboard" {
     }
     try std.testing.expectEqual(@as(?Command, null), try decodeCommand(&literal(&.{0x7F})));
     try std.testing.expectError(error.InvalidLength, decodeCommand(&.{0x10}));
+}
+
+test "host and firmware agree on every shared constant" {
+    const t = std.testing;
+    // Golden: the wire itself, independent of either side.
+    try t.expectEqual(32, report_size);
+    try t.expectEqual(1, protocol_version);
+    try t.expectEqual(16, @sizeOf(KeymapId));
+    try t.expectEqual(@sizeOf(KeymapId), @sizeOf(@FieldType(identity.Identity, "digest")));
+    // Every firmware command is known to the host under the same name and id.
+    const firmware_commands = @typeInfo(firmware.Command).@"enum";
+    const host_commands = @typeInfo(Command).@"enum";
+    try t.expectEqual(firmware_commands.field_names.len, host_commands.field_names.len);
+    inline for (firmware_commands.field_names, host_commands.field_names) |fw, host| try t.expectEqualStrings(fw, host);
+    inline for (firmware_commands.field_values, host_commands.field_values) |fw, host| try t.expectEqual(fw, host);
+}
+
+/// Takes the firmware session's next report as the USB endpoint would.
+fn takeFirmware(session: *firmware.Session) ?Report {
+    const report = session.next_report() orelse return null;
+    session.sent();
+    return report;
+}
+
+test "firmware reports decode to the events that produced them" {
+    const t = std.testing;
+    var session = firmware.Session.init(.{ .key_count = 36, .layer_count = 4, .keymap_id = @splat(0xAB) });
+    session.key_event(true, 9, 0, .{});
+    var layers = core.LayerActivations{};
+    layers.activate(1);
+    layers.activate(2);
+    session.update_state(&layers, .{ .left_shift = true });
+    try t.expectEqual(firmware.Action.none, session.receive(&encodeCommand(.connect)));
+    const hello = (try decode(&takeFirmware(&session).?, test_dimensions)).?;
+    try t.expectEqualDeep(Message{ .hello = .{ .dimensions = test_dimensions, .keymap_id = @splat(0xAB) } }, hello);
+    const state = (try decode(&takeFirmware(&session).?, test_dimensions)).?.state;
+    try t.expectEqualDeep(State{
+        .sequence = 0,
+        .highest_layer = 2,
+        .active_layers = 0b0111,
+        .modifiers = .{ .left_shift = true },
+        .pressed = blk: {
+            var pressed: [16]u8 = @splat(0);
+            pressed[1] = 0b10;
+            break :blk pressed;
+        },
+    }, state);
+
+    const modifiers = core.Modifiers{ .left_ctrl = true, .right_gui = true };
+    session.key_event(true, 5, 1, modifiers);
+    session.processor_event(.{ .OnHoldEnterAfter = .{ .hold = .{ .custom = core.CUSTOM_ID_COMPANION_TOGGLE } } });
+    session.processor_event(.{ .OnTapExitBefore = .{ .tap = .{ .custom = core.CUSTOM_ID_COMPANION_LOG_TOGGLE } } });
+    session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .key_press = core.KC_SHUTDOWN_COMPANION } } });
+    for ([_]Message{
+        .{ .key = .{ .sequence = 1, .event = .{ .pressed = true, .key_index = 5, .layer = 1, .modifiers = modifiers } } },
+        .{ .signal = .{ .sequence = 2, .event = .{ .kind = .overlay_toggle, .pressed = true } } },
+        .{ .signal = .{ .sequence = 3, .event = .{ .kind = .log_toggle, .pressed = false } } },
+        .{ .signal = .{ .sequence = 4, .event = .{ .kind = .shutdown, .pressed = true } } },
+    }) |expected| {
+        const report = takeFirmware(&session).?;
+        try t.expectEqualDeep(expected, (try decode(&report, test_dimensions)).?);
+        // The host fake encodes exactly what the firmware sends.
+        try t.expectEqual(report, try encode(expected, test_dimensions));
+    }
+    try t.expectEqual(@as(?Report, null), takeFirmware(&session));
+}
+
+test "a firmware session built with a computed keymap id reports it in hello" {
+    const t = std.testing;
+    const keys = [_]?core.KeyDef{ .{ .tap_only = .{ .key_press = .{ .tap_keycode = 4 } } }, null };
+    const computed = try computeIdentity(.{
+        .board_id = .{ 'b', 'o', 'a', 'r', 'd', 0, 0, 0 },
+        .profile_id = .{ 'm', 'a', 'i', 'n', 0, 0, 0, 0 },
+        .dimensions = .{ .key_count = 2, .layer_count = 1 },
+        .keys = &keys,
+        .sides = &.{ .L, .R },
+        .combos = &.{},
+        .encoders = &.{},
+        .callbacks = &.{},
+    });
+    // Exports write the id into the keymap's custom functions; the firmware
+    // main loop builds its session from them.
+    const custom_functions = core.CustomFunctions{ .companion_keymap_id = keymapId(computed) };
+    var session = firmware.Session.init(.{
+        .key_count = computed.dimensions.key_count,
+        .layer_count = computed.dimensions.layer_count,
+        .keymap_id = custom_functions.companion_keymap_id,
+    });
+    _ = session.receive(&encodeCommand(.connect));
+    const report = takeFirmware(&session).?;
+    try t.expectEqualSlices(u8, &computed.digest, report[4..20]);
+    const hello = (try decode(&report, computed.dimensions)).?.hello;
+    try t.expectEqual(computed.digest, hello.keymap_id);
+    try t.expectEqual(computed.dimensions, hello.dimensions);
+    try t.expect(!isUnknownKeymap(hello.keymap_id));
+    // Without an id the firmware reports the unknown keymap.
+    var unnamed = firmware.Session.init(.{ .key_count = 2, .layer_count = 1, .keymap_id = (core.CustomFunctions{}).companion_keymap_id });
+    _ = unnamed.receive(&encodeCommand(.connect));
+    try t.expect(isUnknownKeymap((try decode(&takeFirmware(&unnamed).?, computed.dimensions)).?.hello.keymap_id));
 }
