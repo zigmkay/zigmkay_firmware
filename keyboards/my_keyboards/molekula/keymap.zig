@@ -286,7 +286,6 @@ pub const sides = [key_count]core.Side{
  .L,.L,.L,.L,.L,.L,       .R,.R,.R,.R,.R,.R,
     .L,.L,.L,.L,.L,       .R,.R,.R,.R,.R,
             .X,.X,.X,   .X,.X,.X,
-                    // .E,.E TODO Encoders not supported right now
 };
 // zig fmt: on
 
@@ -352,7 +351,7 @@ pub const keymap = [_][key_count]?core.KeyDef{
     //   - Index 37: Enter (right thumb, duplicate for symmetry)
     //   - Index 38: LT(L_RIGHT, SPC) - Right thumb: tap=Space, hold=ARROWS layer
     //   - Index 39: COM_TOG (toggle companion overlay)
-    //   - Index 45,46: Media volume up/down (left side encoders)
+    //   - Encoder: Media volume up/down (encoder_actions, on every layer)
     .{
                  T(us.Q),   T(us.W),   T(us.E),   T(us.R), T(us.T),                  T(us.Y),   T(us.U), T(us.I),     T(us.O),    T(us.P),
     T(kc.TAB), H_.S(us.A), H_.A(us.S), H_.G(us.D), H_.C(us.F), T(us.G),                  T(us.H), H_.C(us.J), H_.G(us.K), H_.A(us.L),  H_.S(us.SCLN),  T(us.ACUT),
@@ -437,6 +436,17 @@ pub const keymap = [_][key_count]?core.KeyDef{
     },
 };
 // zig fmt: on
+
+// =============================================================================
+// ENCODER ACTIONS
+// =============================================================================
+// The rotary encoder between the halves. Index 0 fires on a clockwise detent,
+// index 1 on a counter-clockwise one (see encoder_pin_configs in main.zig).
+// Encoder actions apply on every layer: zigmkay has no per-layer encoders.
+pub const encoder_actions = [_]core.EncoderAction{
+    .{ .tap = .{ .media_key = .VolumeUp } },
+    .{ .tap = .{ .media_key = .VolumeDown } },
+};
 
 // =============================================================================
 // DIMENSIONS

@@ -47,6 +47,49 @@ pub fn fit(items: []const model.physical_layout.Key, bounds: Rect) Fit {
     };
 }
 
+/// Where a board's encoder is drawn: a square centred horizontally in the gap
+/// between the left and right finger keys and vertically on those keys, sized
+/// to the gap but at most one key. Null when the geometry has no such gap.
+pub fn encoderSlot(items: []const model.physical_layout.Key, fitted: Fit) ?Rect {
+    var left: f32 = -std.math.inf(f32);
+    var right: f32 = std.math.inf(f32);
+    var top: f32 = std.math.inf(f32);
+    var bottom: f32 = -std.math.inf(f32);
+    for (items) |item| {
+        if (item.group != .finger) continue;
+        switch (item.hand) {
+            .left => left = @max(left, item.x + item.width),
+            .right => right = @min(right, item.x),
+            else => continue,
+        }
+        top = @min(top, item.y);
+        bottom = @max(bottom, item.y + item.height);
+    }
+    if (!std.math.isFinite(left) or !std.math.isFinite(right) or right <= left) return null;
+    const size = @min(1, (right - left) * 0.8) * fitted.scale;
+    return .{
+        .x = fitted.offset_x + (left + right) / 2 * fitted.scale - size / 2,
+        .y = fitted.offset_y + (top + bottom) / 2 * fitted.scale - size / 2,
+        .w = size,
+        .h = size,
+    };
+}
+
+test "encoder slot sits in the middle between the halves" {
+    const geometry = [_]model.physical_layout.Key{
+        .{ .id = 0, .key_index = 0, .x = 0, .y = 0, .hand = .left },
+        .{ .id = 1, .key_index = 1, .x = 1, .y = 2, .hand = .left },
+        .{ .id = 2, .key_index = 2, .x = 4, .y = 0, .hand = .right },
+        .{ .id = 3, .key_index = 3, .x = 1.5, .y = 3, .hand = .right, .group = .thumb },
+    };
+    const slot = encoderSlot(&geometry, .{ .scale = 10, .offset_x = 5, .offset_y = 0 }).?;
+    try std.testing.expectApproxEqAbs(@as(f32, 5 + 30), slot.x + slot.w / 2, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 15), slot.y + slot.h / 2, 0.001);
+    try std.testing.expectApproxEqAbs(@as(f32, 10), slot.w, 0.001);
+    const unsplit = [_]model.physical_layout.Key{.{ .id = 0, .key_index = 0, .x = 0, .y = 0, .hand = .neutral }};
+    try std.testing.expect(encoderSlot(&unsplit, .{ .scale = 10, .offset_x = 0, .offset_y = 0 }) == null);
+}
+
 pub const Guidance = struct {
     pressed: []const bool,
     targets: ?[]const bool = null,

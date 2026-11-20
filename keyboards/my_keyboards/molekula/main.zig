@@ -102,8 +102,8 @@ pub const pin_config = rp2xxx.pins.GlobalConfiguration{
     // TODO: mag keys again after
     // Rotary encoder pins - quadrature encoder for volume knob
     // Encoder has 2 pins (A and B) that produce different patterns when rotated
-    // .GPIO4 = .{ .name = "enc_a", .direction = .in }, // Encoder pin A
-    // .GPIO5 = .{ .name = "enc_b", .direction = .in }, // Encoder pin B
+    .GPIO4 = .{ .name = "enc_a", .direction = .in, .pull = .up, .function = .SIO }, // Encoder pin A
+    .GPIO5 = .{ .name = "enc_b", .direction = .in, .pull = .up, .function = .SIO }, // Encoder pin B
 };
 
 // Generate pin accessors from the configuration
@@ -123,7 +123,7 @@ pub const pin_mappings = [keymap.key_count]?[2]usize{
 
                                      .{ 2, 3 }, .{ 3, 3 }, .{ 4, 3 },          .{ 0, 7 }, .{ 1, 7 }, .{ 2, 7 },
 
-    // null,  null, TODO: encoder functionality not implemented in zigmkay again
+    // The encoder is not a matrix key; see encoder_pin_configs below.
 };
 // zig fmt: on
 
@@ -141,8 +141,16 @@ pub const pin_mappings = [keymap.key_count]?[2]usize{
 pub const molekula_pin_cols = [_]rp2xxx.gpio.Pin{ p.c0, p.c1, p.c2, p.c3, p.c4 };
 pub const molekula_pin_rows = [_]rp2xxx.gpio.Pin{ p.r0, p.r1, p.r2, p.r3, p.r4, p.r5, p.r6, p.r7 };
 
-// Encoder pins: A and B phases for quadrature encoder
-pub const encoder_pins = [2]rp2xxx.gpio.Pin{ p.enc_a, p.enc_b };
+// Encoder pins: A and B phases for quadrature encoder. Clockwise fires
+// keymap.encoder_actions[0], counter-clockwise keymap.encoder_actions[1].
+var encoder_actions = keymap.encoder_actions;
+var encoder_pin_configs = [_]zigmkay.encoder_scanning.EncoderPinConfig{.{
+    .pin_a = p.enc_a,
+    .pin_b = p.enc_b,
+    .sensitivity = 4,
+    .action_index_cw = 0,
+    .action_index_ccw = 1,
+}};
 
 // =============================================================================
 // MAIN FUNCTION - Firmware Entry Point
@@ -183,6 +191,8 @@ pub fn main() !void {
             .combos = keymap.combos[0..],
             .custom_functions = &keymap.custom_functions,
             .side_definition = &keymap.sides,
+            .encoder_pin_configs = encoder_pin_configs[0..],
+            .encoder_actions = encoder_actions[0..],
         },
     };
 

@@ -87,7 +87,43 @@ pub fn draw(view: *View, model: *const desktop.model.Model, frame: Frame, theme:
         if (dvui.dragName("key_chord")) dvui.dragEnd();
     };
     for (plan) |item| try drawKey(view, model, frame, item, theme, &result);
+    // A board with encoder actions shows its encoder between the halves; a
+    // click opens the encoder editor like the Encoders segment.
+    if (doc.encoders.len != 0) if (desktop.physical_view.encoderSlot(frame.geometry, desktop.physical_view.fit(frame.geometry, area))) |slot| {
+        if (drawEncoder(theme, ui.rect(slot), model.layer) and result == null)
+            result = .{ .encoders = try desktop.key_selection.Action.capture(model, model.primary, false) };
+    };
     return result;
+}
+
+/// A round encoder knob with a notch at the top. Returns true when clicked.
+fn drawEncoder(theme: ui.Theme, rect: dvui.Rect, layer: usize) bool {
+    const layer_color = ui.layerColor(theme, layer);
+    const radius = rect.w / 2;
+    const clicked = dvui.button(@src(), "", .{}, .{
+        .rect = rect,
+        .tag = "keyboard.encoder",
+        .background = true,
+        .color_fill = .{ .color = theme.keycap },
+        .color_fill_hover = .{ .color = ui.mix(theme.keycap, theme.text, 0.07) },
+        .color_fill_press = .{ .color = ui.mix(theme.keycap, theme.text, 0.12) },
+        .color_border = .{ .color = ui.mix(theme.keycap, layer_color, 0.65) },
+        .border = .all(1.5),
+        .corners = .all(radius),
+        .padding = .{},
+        .margin = .{},
+    });
+    const notch_w = @max(2, rect.w * 0.08);
+    const notch = dvui.box(@src(), .{}, .{
+        .rect = .{ .x = rect.x + radius - notch_w / 2, .y = rect.y + rect.h * 0.12, .w = notch_w, .h = rect.h * 0.28 },
+        .background = true,
+        .color_fill = .{ .color = layer_color },
+        .corners = .all(notch_w / 2),
+        .padding = .{},
+        .margin = .{},
+    });
+    notch.deinit();
+    return clicked;
 }
 
 fn layerChipWidth(theme: ui.Theme, name: []const u8) f32 {

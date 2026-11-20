@@ -46,7 +46,8 @@ const bindings = [_]Binding{
     .{ .root = "examples/dasbob/main.zig", .sides = .unassigned },
     // Encoder actions are defined in the entrypoint, not in the keymap.
     .{ .root = "my_keyboards/rollercole/tuckytwotimes.zig", .encoder_actions = 4 },
-    .{ .root = "my_keyboards/molekula/main.zig" },
+    // Encoder actions come from the keymap; CW and CCW of one encoder.
+    .{ .root = "my_keyboards/molekula/main.zig", .encoder_actions = 2 },
 };
 
 fn unassignedSides(comptime count: usize) []const core.Side {
@@ -107,7 +108,7 @@ test "processing inventory covers every selector and keeps encoder slot indexes"
         try std.testing.expect(entry.key_count > 0 and entry.key_count <= 127);
     }
     try std.testing.expectEqual(@as(usize, 4), find("tuckytwotimes").?.encoder_actions);
-    try std.testing.expectEqual(@as(usize, 0), find("molekula").?.encoder_actions);
+    try std.testing.expectEqual(@as(usize, 2), find("molekula").?.encoder_actions);
     try std.testing.expectEqual(@as(usize, 34), find("lk8").?.key_count);
     try std.testing.expectEqualSlices(core.Side, find("lk7").?.sides, find("lk8").?.sides);
     for (find("dasbob").?.sides) |side| try std.testing.expectEqual(core.Side.X, side);
