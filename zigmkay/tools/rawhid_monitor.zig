@@ -42,12 +42,30 @@ pub fn main() !void {
     std.posix.sigaction(.INT, &action, null);
 
     std.debug.print("Waiting for ZigMkay RawHID ({X:0>4}:{X:0>4}, {X:0>4}:{X:0>4})...\n", .{ vendor_id, product_id, usage_page, usage });
+    const terminal = hideTyping();
+    defer restoreTyping(terminal);
     CFRunLoopRun();
 
     if (current_device) |device| {
         send(device, .disconnect);
         std.debug.print("Sent disconnect.\n", .{});
     }
+}
+
+/// The keyboard also types into this terminal. Hide that echo while the
+/// monitor runs, so only report lines appear; null when stdin is no terminal.
+fn hideTyping() ?std.posix.termios {
+    const saved = std.posix.tcgetattr(std.posix.STDIN_FILENO) catch return null;
+    var quiet = saved;
+    quiet.lflag.ECHO = false;
+    quiet.lflag.ICANON = false;
+    std.posix.tcsetattr(std.posix.STDIN_FILENO, .NOW, quiet) catch return null;
+    return saved;
+}
+
+/// Restores the terminal and drops what was typed, so it never reaches the shell.
+fn restoreTyping(saved: ?std.posix.termios) void {
+    std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, saved orelse return) catch {};
 }
 
 fn stop(_: std.posix.SIG) callconv(.c) void {
