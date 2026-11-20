@@ -358,8 +358,12 @@ fn tapHeight(self: *const Context) f32 {
     var height: f32 = 542;
     if (tap.one_shot != null) height += 52;
     if (tap.custom != null) height += 46;
+    if (tap.key_press != null) height += dead_row_h;
     return height;
 }
+
+/// The Dead key row below the modifiers, shown when the tap sends a key.
+const dead_row_h: f32 = 34;
 
 fn drawTap(self: *Context, width: f32, height: f32) !void {
     const t = self.theme;
@@ -383,17 +387,18 @@ fn drawTap(self: *Context, width: f32, height: f32) !void {
     y += 144;
     sectionLabel(self, "Sent together with the key", y);
     modifierRow(self, .tap, y + 20);
+    y += 70;
     const key_press = editing.tapPart(self.primaryAction()).key_press;
     if (key_press) |key| {
         var dead = key.dead;
         if (dvui.checkbox(@src(), &dead, "Dead key", .{
-            .rect = .{ .x = width - margin - 120, .y = y - 4, .w = 120, .h = 22 },
+            .rect = .{ .x = margin, .y = y - 10, .w = inner, .h = 30 },
             .tag = "key.editor.dead",
             .font = ui.editorFont("Dead key", 13),
             .color_text = .{ .color = t.text },
         })) self.session.mutate(.{ .tap_dead = dead });
+        y += dead_row_h;
     }
-    y += 70;
     const tap = editing.tapPart(self.primaryAction());
     if (tap.one_shot) |one| {
         oneShot(self, one, y);
