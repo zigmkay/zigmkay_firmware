@@ -459,3 +459,20 @@ test "document key layer combo and name capacity limits are exercised at their b
     doc.layers = extra_layers;
     try std.testing.expectError(error.InvalidDimensions, p.validate(doc, synthetic));
 }
+
+test "a project saved before its board had encoders opens with empty encoder slots" {
+    const gpa = std.testing.allocator;
+    const io = std.testing.io;
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var with_encoders = board;
+    with_encoders.encoder_actions = 2;
+    try p.snapshot.save(gpa, io, tmp.dir, .{ .document = fixture, .sources = &.{} }, board);
+    var loaded = try p.snapshot.load(gpa, io, tmp.dir, with_encoders);
+    defer loaded.deinit();
+    try std.testing.expectEqual(@as(usize, 2), loaded.snapshot.document.encoders.len);
+    for (loaded.snapshot.document.encoders) |tap| try std.testing.expectEqual(p.Tap{}, tap);
+    var mismatched = fixture;
+    mismatched.encoders = &.{.{}};
+    try std.testing.expectError(error.InvalidDimensions, p.validate(mismatched, with_encoders));
+}

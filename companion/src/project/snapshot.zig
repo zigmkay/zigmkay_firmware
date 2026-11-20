@@ -231,9 +231,15 @@ pub const Loaded = struct {
 pub fn load(gpa: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, board: p.Board) !Loaded {
     const bytes = try dir.readFileAlloc(io, "project.zon", gpa, .limited(p.Limits.document_bytes));
     defer gpa.free(bytes);
-    const doc = try p.parse(gpa, bytes, null);
+    var doc = try p.parse(gpa, bytes, null);
     errdefer p.deinit(gpa, doc);
     try p.validate(doc, board);
+    if (p.legacyEncoders(doc, board)) {
+        const encoders = try gpa.alloc(p.Tap, board.encoder_actions);
+        @memset(encoders, .{});
+        gpa.free(doc.encoders);
+        doc.encoders = encoders;
+    }
     var sources: std.ArrayList(SourceBytes) = .empty;
     errdefer {
         for (sources.items) |source| gpa.free(source.bytes);

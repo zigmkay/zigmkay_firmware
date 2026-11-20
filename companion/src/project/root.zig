@@ -242,6 +242,13 @@ pub fn lowerAction(doc: Document, value: Action) ValidationError!model.KeyDef {
     };
 }
 
+/// A project saved before its board declared encoder actions has none.
+/// `snapshot.load` gives it the board's slots, empty, which changes nothing
+/// the firmware does.
+pub fn legacyEncoders(doc: Document, board: Board) bool {
+    return doc.encoders.len == 0 and board.encoder_actions != 0;
+}
+
 pub fn validate(doc: Document, board: Board) !void {
     if (doc.schema_version != schema_version) return error.UnsupportedVersion;
     if (!std.mem.eql(u8, &doc.board_id, &board.id) or
@@ -259,7 +266,7 @@ pub fn validate(doc: Document, board: Board) !void {
         board.sides.len != doc.key_ids.len or
         doc.layers.len == 0 or
         doc.layers.len > Limits.layers or
-        doc.encoders.len != board.encoder_actions) return error.InvalidDimensions;
+        (doc.encoders.len != board.encoder_actions and !legacyEncoders(doc, board))) return error.InvalidDimensions;
     for (doc.key_ids, board.key_ids, 0..) |key, expected, index| {
         if (!nameValid(key) or !std.mem.eql(u8, key, expected)) return error.InvalidKey;
         for (doc.key_ids[0..index]) |earlier| if (std.mem.eql(u8, earlier, key)) return error.InvalidKey;
