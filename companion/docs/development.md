@@ -84,17 +84,15 @@ in caches, and preserve personal projects and attached source bundles.
   multi-keyboard collections, device-specific companion routing and source migration research.
 - [Keyboard projects user guide](keyboard-projects.md): creation, collections,
   one-way import, native tutor preparation and hardware-free acceptance commands.
-- [README screenshot notes](screenshots/overview/README.md): native capture provenance.
 - [Compatibility status](compatibility.md): remaining acceptance gates.
 
 ## Build and check
 
-Use exactly Zig 0.17.0 (`.zigversion` and `mise.toml`). Verify your compiler with
-`zig version` before running these commands. The normal firmware dependency is
-an immutable, hash-pinned PR-head revision (see [compatibility](compatibility.md));
-the normal source build does not require a sibling firmware checkout. Fetching
-missing pinned source archives may require network access during dependency
-acquisition.
+Use exactly Zig 0.17.0 (`.zigversion` and the root `mise.toml`). Verify your
+compiler with `zig version` before running these commands. The firmware is the
+root package of this repository, a path dependency (`..`); microzig and picotool
+come from its pins in `zigmkay/build.zig.zon`. Fetching missing pinned source
+archives may require network access during dependency acquisition.
 
 ```sh
 zig build check test

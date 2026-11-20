@@ -1,170 +1,180 @@
 <div align="center">
 
-# Zigmkay Companion
+# ZigMkay Companion
 
 **Make your keyboard yours. Learn it as you go.**
 
-A native visual editor, an on-demand keyboard companion, and a typing tutor
-for programmable keyboards running [Zigmkay firmware](https://github.com/zigmkay/zigmkay_firmware).
-Written in Zig.
+A native visual keymap editor, a live keyboard overlay and a typing tutor for
+keyboards running [ZigMkay firmware](../README.md). Written in Zig.
 
-[Get started](#get-started-with-mise) · [Companion](#your-layout-one-hotkey-away) · [Editor](#program-your-keyboard-visually) · [Tutor](#try-your-layout-with-the-typing-tutor) · [Development](#development)
+[Features](#features) · [Install and run](#install-and-run) · [Preview releases](#preview-releases-and-platform-status) · [Development](#development) · [Discord](https://discord.gg/bJCZUtJD65)
 
 </div>
 
-![Zigmkay editor showing a split keyboard, four layers, a tap/hold key inspector, and Build and Flash controls](docs/screenshots/overview/editor.png)
+<p align="center">
+  <img src="../assets/screenshots/editor.png" alt="ZigMkay Companion editor: a Leonardo Keycaprio layout with six layers, thumb keys fanned out like on the PCB, the OS keyboard palette and Build and Flash in the toolbar" width="900">
+</p>
 
-Choose what a key does when tapped or held, see the layout while you work,
-and try it out in a typing test. The editor and companion share a
-resident desktop application, accessible from its little keyboard tray icon.
+The companion is the `companion/` package of the ZigMkay firmware repository.
+It builds on the firmware in the same checkout, so the editor always compiles
+the processor, keycodes and board sources it sits next to. One resident desktop
+application holds the editor, the overlay and the tutor, reachable from a
+keyboard icon in the tray.
 
-*All images below are real native macOS application captures. The companion
-is shown offline; tutor exercises use deterministic sample input.
-[Capture details](docs/screenshots/overview/README.md).*
+## Features
 
-## Get started with mise
+- **Visual keymap editor.** Every key has two halves: click the upper half to
+  choose what it types, the lower half to choose what it does while held. Press
+  the key on your computer's keyboard, search for an action, or drag a key from
+  the OS keyboard palette onto either half. Changes apply at once, with undo
+  and redo.
+- **Tap, hold and autofire without modes.** The key type follows from what you
+  set. Tune tapping terms and autofire delays, combine keys with left or right
+  modifiers, use layer holds and one-shots, and tell inherited keys apart from
+  keys that do nothing. Media controls, mouse actions and companion signals are
+  assignable too.
+- **Combos.** Pick the two keys of a combo on the PCB schematic and give the
+  combo its own action.
+- **Encoders as knob directions.** On boards with rotary encoders, the
+  **Encoders** tab shows each knob with one action per direction, clockwise and
+  counter-clockwise. A knob's push button is an ordinary key on the keyboard.
+- **Your keyboards and layouts.** **My Keyboards** groups layouts by keyboard
+  and PCB revision. Start a layout from a firmware default, a copy, a blank base
+  layer or an [import from Git](docs/keyboard-projects.md); callback source is
+  preserved and refreshed only when you ask.
+- **Build and Flash.** **Build**, **Flash** and optional **Auto-build** sit in
+  the toolbar. **Flash** builds the project if needed, requests BOOTSEL,
+  transfers the verified UF2 and waits for the keyboard to reconnect; if BOOTSEL
+  is not found, the editor asks you to enter it by hand. Auto-build compiles
+  while you edit and never starts a transfer. The installed application carries
+  its own Zig compiler, firmware sources and flash tools, so it builds offline.
+- **Live overlay.** A transparent, click-through overlay of your keyboard that
+  follows the running layout's active layer, modifiers and pressed keys over a
+  verified connection. Bind a key's tap or hold to **Show / hide companion**
+  (reserved signal `255`): a quick tap toggles the overlay, a longer press shows
+  it while held. Losing the connection hides it; editor changes stay a draft
+  until built and flashed.
+- **Tray.** Close the editor and the application stays resident. The tray menu
+  shows the device status and opens the editor, shows or hides the companion,
+  binds the saved editor project to the live companion, zooms the editor and
+  quits Zigmkay.
+- **Typing tutor.** Choose **Open tutor** in the editor. Before a test the tutor
+  shows your layout and highlights each key you press, so you can check a
+  freshly flashed layout key by key. Then run an English test of 1, 3, 5 or 10
+  sentences or one of three short Zig lessons, with words per minute and
+  accuracy. The tutor saves nothing between sessions; see the
+  [typing practice guide](docs/typing-practice.md).
 
-Run Zigmkay from source with [mise](https://mise.jdx.dev/getting-started), or use
-an unsigned executable preview once published. The [preview release workflow](docs/preview-releases.md)
-packages macOS DMGs, a portable Windows EXE and a Linux AppImage with Zig and the
-offline runtime included. Native Windows and Linux release acceptance runs in CI;
-device acceptance remains separate. See [compatibility status](docs/compatibility.md).
+<table>
+  <tr>
+    <td width="50%"><img src="../assets/screenshots/my-keyboards.png" alt="My Keyboards: the Leonardo Keycaprio with three saved layouts and a New layout card"></td>
+    <td width="50%"><img src="../assets/screenshots/combos.png" alt="The Combos editor: 22 combos, a two-key picker on the PCB schematic and the combo's tap action"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Your keyboards and layouts</sub></td>
+    <td align="center"><sub>Combos on the PCB schematic</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="../assets/screenshots/tutor.png" alt="Typing tutor during an English test at 47 WPM with the next key highlighted on the keyboard"></td>
+    <td width="50%"><img src="../assets/screenshots/companion-overlay.png" alt="Live companion overlay on the base layer of a Leonardo Keycaprio: home-row modifiers, layer holds on the thumbs and a verified running profile"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Typing tutor</sub></td>
+    <td align="center"><sub>Live layer overlay</sub></td>
+  </tr>
+</table>
 
-Install [mise](https://mise.jdx.dev/installing-mise.html) and Git, then:
+## Install and run
+
+Install [mise](https://mise.jdx.dev/installing-mise.html) and Git, then run
+the companion from source, from the repository root:
 
 ```sh
 git clone https://github.com/zigmkay/zigmkay_firmware.git
 cd zigmkay_firmware
-mise trust --all
-mise install
-mise exec -- zig version    # must print 0.17.0
-mise run //companion:editor
+mise trust --all && mise install
+mise exec -- zig version         # prints 0.17.0
+mise run //companion:editor      # the editor; connects to your keyboard automatically
 ```
 
-Mise selects exactly **Zig 0.17.0** and assembles the complete application.
-The developer build may download pinned dependencies and compile tools. The
-assembled application bundles its compiler, firmware sources and Flash tools;
-it runs and builds offline without this checkout. On macOS, compiling the
-application from source needs Xcode Command Line Tools (`xcode-select --install`).
+mise selects exactly Zig 0.17.0. The first build downloads pinned dependencies
+and assembles the complete application. On macOS, compiling from source needs
+the Xcode Command Line Tools (`xcode-select --install`).
 
-For the companion in the background, start this instead:
+To start only the resident companion, with its windows hidden and the tray
+icon showing:
 
 ```sh
 mise run //companion:companion
 ```
 
-It starts with its windows hidden. Use the tray icon to open the editor or show
-the companion. Normal startup automatically monitors compatible keyboards.
-Firmware transfer starts only when you explicitly choose **Flash**.
+Normal startup monitors compatible keyboards automatically. Firmware is
+transferred only when you choose **Flash**. For a session without keyboard
+monitoring, pass `--offline` through mise and `zig build`:
 
-## Your layout, one hotkey away
+```sh
+mise run //companion:editor -- -- --offline
+```
 
-Forgot where a symbol lives? Bring up a transparent, passive overlay of your
-keyboard. With a verified connection, it follows the running profile's layers,
-modifiers and pressed keys. It stays out of pointer interaction so you can keep
-working in your current application.
+Closing the editor can leave the tray resident running; choose **Quit Zigmkay**
+to exit.
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview/companion-dark.png">
-  <img src="docs/screenshots/overview/companion.png" alt="Transparent Zigmkay companion overlay showing the split layout, home-row modifiers and layer holds" width="880">
-</picture>
+## Preview releases and platform status
 
-Program a key's tap or hold action as **Show / hide companion** (reserved signal
-`255`). In the default mode, a quick tap toggles the overlay; a longer press
-shows it while held and restores its previous visibility on release. Dedicated
-hold-only and toggle-only modes are available for development and testing.
+Preview packages are unsigned and include Zig 0.17.0, the firmware sources and
+the flash tools, so they need no checkout and no Zig install: a DMG for macOS
+(Apple Silicon and Intel), a portable EXE for Windows and an AppImage for
+Linux. The [application workflow](../.github/workflows/companion-application-bundle.yml)
+builds them for pull requests and `main`, and publishes a prerelease for a
+`companion-vMAJOR.MINOR.PATCH-preview.N` tag that matches the version in
+[`build.zig.zon`](build.zig.zon). The offline, desktop and typing practice
+checks run from the other `.github/workflows/companion-*.yml` workflows.
 
-The overlay uses the verified running layout. Losing the connection clears its
-visibility; editor changes remain a draft until built and flashed. The screenshot
-above shows the explicitly labeled offline draft view.
-
-## Program your keyboard visually
-
-The physical keyboard, layer list and OS keyboard palette live in one window.
-Every key has two halves: click the upper half to choose what it types and the
-lower half to choose what it does while held. Press the key on your computer's
-keyboard, search for an action, or drag an OS keyboard key onto either half.
-Changes apply at once, with undo/redo available afterward.
-
-- **Tap, hold and autofire without modes:** the key type follows from what you
-  set; tune tapping terms and autofire delays, and combine key chords with
-  left/right modifiers.
-- **Layers and one-shots:** add, duplicate and name layers, use layer holds,
-  and distinguish inherited assignments from keys that do nothing.
-- **More than letters:** assign media controls, mouse actions, companion signals,
-  combos and encoder actions.
-- **Your own Zig:** preserve callback source snapshots, attach external source,
-  and refresh it explicitly when it changes.
-- **Projects and profiles:** save and reopen projects, switch profiles, and
-  export source for firmware builds. The catalog contains 14 board entries;
-  individual hardware acceptance is tracked separately.
-
-### Build and Flash from the same window
-
-**Build**, **Flash** and optional **Auto-build** sit in the editor toolbar shown
-above. The installed application includes everything needed to build firmware
-and run the tutor offline. Startup does not download or prepare packages.
-
-Click **Flash** to build the current project if needed, request BOOTSEL, transfer
-the verified UF2, and wait for reconnection. If BOOTSEL is not discovered, the
-editor prompts for manual entry. Progress stays in the message bar; errors open
-details. Auto-build compiles edits without starting a transfer.
-
-[Build and Flash details](docs/development.md#editor-build-and-flash) explain
-bundling, supported source bindings and current limits.
-
-## A little tray icon, always within reach
-
-Close the editor window and keep the resident application available. The tray
-menu opens the editor, shows or hides the companion, reports device status,
-adjusts editor zoom, and lets you explicitly bind a saved editor project to the
-live companion. **Quit Zigmkay** exits the resident application.
-
-<p align="center">
-  <img src="docs/screenshots/overview/tray.png" alt="Native macOS keyboard tray icon and Zigmkay menu with Open Editor, Show Companion, device status, zoom and Quit" width="360">
-</p>
-
-## Try your layout with the typing tutor
-
-Choose **Open tutor** in the editor. Before a test, the tutor shows your
-keyboard's layout and highlights each key you press, so you can check a freshly
-flashed layout key by key. Start an English typing test of 1, 3, 5 or 10
-sentences, or one of three short Zig lessons, and see your words per minute and
-accuracy. The tutor saves nothing between sessions.
-
-![Typing tutor highlighting the next character and the key to tap](docs/screenshots/typing-practice/tutor.png)
-
-The [typing practice guide](docs/typing-practice.md) covers the controls, the
-keyboard guide and input sources. Text input measures output and timing; it
-cannot prove which finger or physical route you used.
+- [Preview releases](docs/preview-releases.md): packaging, Linux device
+  permissions, CI and publishing.
+- [Compatibility status](docs/compatibility.md): what source checks prove and
+  which platform and hardware acceptance gates remain.
 
 ## Development
 
-The companion lives in the `companion/` folder of the firmware repository and
-builds on the firmware in the same checkout. Use the pinned compiler; no private
-plans or other repositories are required. Start with the offline checks:
+All tasks run from the repository root; the root `mise.toml` is a mise
+monorepo and `//companion:<task>` names a task from [`mise.toml`](mise.toml).
 
-```sh
-mise run //companion:check
-mise run //companion:test
-```
+| Command | Purpose |
+| --- | --- |
+| `mise run //companion:check` | Compile every source, tool and test without devices |
+| `mise run //companion:test` | Run all offline tests |
+| `mise run //companion:firmware:check` | Compile every board with synthetic, default and imported keymaps; never flashes |
+| `mise run //companion:desktop:check` | Compile the native editor and GUI dependencies without launching |
+| `mise run //companion:editor:build` | Assemble the complete application without launching |
+| `mise run //companion:editor:test` | Run offline GUI fixtures |
+| `mise run //companion:typing-practice:test` | Check typing test generation, scoring and tutor controls |
 
-`mise run test` at the repository root runs the firmware tests too.
+`mise run test` at the repository root runs the firmware tests as well.
+Builds, tests and offline startup never access keyboards.
 
-The [development guide](docs/development.md) covers the package map, native GUI
-builds, explicit offline startup, test tasks, application assembly and further
-design/implementation docs. Builds, tests and explicit offline startup do not
-access keyboards. See [compatibility status](docs/compatibility.md) for the
-remaining platform and hardware acceptance work.
+The [development guide](docs/development.md) covers the source map, every
+`zig build` step and option, application assembly and CI. Firmware internals,
+the Raw HID protocol and adding a keyboard are documented in the
+[repository docs](../docs/README.md).
+
+## Community
+
+Questions, bug reports and layout ideas are welcome on the
+[ZigMkay Discord](https://discord.gg/bJCZUtJD65) and in
+[GitHub issues](https://github.com/zigmkay/zigmkay_firmware/issues).
+
+## AI usage
+
+Parts of the companion were developed with AI assistance. All AI-generated
+code, features and changes were reviewed and tested by human developers before
+inclusion. See [AI_USAGE.md](../AI_USAGE.md).
 
 ## License
 
-Zigmkay companion is free software: you can redistribute it and/or modify it
-under the terms of the **GNU General Public License as published by the Free
+ZigMkay Companion is free software: you can redistribute it and/or modify it
+under the terms of the GNU General Public License as published by the Free
 Software Foundation, either version 2 of the License, or (at your option) any
-later version** (`GPL-2.0-or-later`). See [LICENSE](LICENSE) for the version 2
-text.
-
-The application compiles in the zigmkay firmware from the enclosing repository,
-which is also licensed under `GPL-2.0-or-later`. Imported dependencies retain their own license notices; see
-[NOTICE](NOTICE).
+later version (`GPL-2.0-or-later`). See [LICENSE](LICENSE) for the version 2
+text. The firmware it compiles is licensed under the same terms. Imported
+dependencies keep their own license notices; see [NOTICE](NOTICE).
