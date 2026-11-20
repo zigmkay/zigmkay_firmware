@@ -1,4 +1,6 @@
 //! Stable-key/layer combo drafts; explicit bound save/delete owns one commit.
+//! Opening selects the first combo; only `new` starts an unsaved combo, and
+//! nothing reaches the document before Save.
 const std = @import("std");
 const p = @import("project");
 const Model = @import("model.zig").Model;
@@ -8,6 +10,7 @@ pub const Kind = enum { save, delete };
 pub const Action = struct {
     snapshot: [32]u8,
     index: ?usize,
+    creating: bool,
     keys: [2]usize,
     layer: usize,
     timeout: u16,
@@ -18,6 +21,9 @@ pub const Action = struct {
 pub const Session = struct {
     snapshot: [32]u8,
     index: ?usize = null,
+    /// An unsaved new combo is edited. Without it and without `index`, no
+    /// combo is selected and the sheet shows its empty state.
+    creating: bool = false,
     keys: [2]usize = .{ 0, 1 },
     layer: usize = 0,
     timeout: u16 = 30,
@@ -25,7 +31,24 @@ pub const Session = struct {
 
     pub fn init(model: *const Model) !Session {
         if (model.document().key_ids.len < 2) return error.ComboNeedsTwoKeys;
-        return .{ .snapshot = try model.id() };
+        var session: Session = .{ .snapshot = try model.id() };
+        try session.select(model, 0);
+        return session;
+    }
+
+    /// Picks combo `index`, or the last one before it; selects nothing when
+    /// no combo exists or the combo names a key or layer that is gone.
+    fn select(self: *Session, model: *const Model, index: usize) !void {
+        const count = model.document().combos.len;
+        if (count == 0) return;
+        self.pick(model, @min(index, count - 1)) catch |err| switch (err) {
+            error.InvalidCombo => {},
+            else => return err,
+        };
+    }
+
+    pub fn selected(self: Session) bool {
+        return self.index != null or self.creating;
     }
 
     pub fn fresh(self: Session, model: *const Model) !bool {
@@ -51,20 +74,23 @@ pub const Session = struct {
         const second = keys[1] orelse return error.InvalidCombo;
         const layer_index = layer orelse return error.InvalidCombo;
         self.index = index;
+        self.creating = false;
         self.keys = .{ first, second };
         self.layer = layer_index;
         self.timeout = combo.timeout.ms;
         self.draft = Draft.from(combo.action);
     }
 
+    /// Starts an unsaved combo on the current layer.
     pub fn new(self: *Session) void {
-        self.index = null;
+        self.* = .{ .snapshot = self.snapshot, .layer = self.layer, .creating = true };
     }
 
     pub fn action(self: Session, kind: Kind) Action {
         return .{
             .snapshot = self.snapshot,
             .index = self.index,
+            .creating = self.creating,
             .keys = self.keys,
             .layer = self.layer,
             .timeout = self.timeout,
@@ -76,6 +102,7 @@ pub const Session = struct {
     pub fn dispatch(self: *Session, model: *Model, rendered: Action) !void {
         if (!std.meta.eql(rendered, self.action(rendered.kind)) or
             !try self.fresh(model)) return error.StaleComboAction;
+        if (!self.selected()) return error.InvalidCombo;
         try self.draft.validate();
         const doc = model.document();
         if (self.index) |index| if (index >= doc.combos.len) return error.InvalidCombo;
@@ -115,5 +142,8 @@ pub const Session = struct {
         try model.setCombos(combos);
         self.snapshot = next_digest;
         self.index = next_index;
+        self.creating = false;
+        // A deleted combo hands the selection to its successor, else its predecessor.
+        if (rendered.kind == .delete) try self.select(model, rendered.index.?);
     }
 };

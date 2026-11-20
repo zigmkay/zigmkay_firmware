@@ -634,6 +634,7 @@ test "combo editor commits stable IDs once and refuses invalid or stale rendered
     var editor = try desktop.combo_editor.Session.init(&model);
     const before = try model.id();
     const history = model.undo_stack.items.len;
+    editor.new();
     editor.keys = .{ 0, 0 };
     try t.expectError(error.InvalidCombo, editor.dispatch(&model, editor.action(.save)));
     try t.expectEqualDeep(before, try model.id());
@@ -651,9 +652,75 @@ test "combo editor commits stable IDs once and refuses invalid or stale rendered
     try editor.pick(&model, index);
     const delete = editor.action(.delete);
     try editor.dispatch(&model, delete);
-    try t.expect(editor.index == null);
+    // The selection moves to the combo before the deleted last one.
+    try t.expectEqual(if (index == 0) null else @as(?usize, index - 1), editor.index);
+    try t.expect(!editor.creating);
     try model.undo();
     try t.expectError(error.StaleComboAction, editor.dispatch(&model, editor.action(.save)));
+}
+
+test "opening the combo editor selects the first combo and adds nothing" {
+    const t = std.testing;
+    var loaded = try project.profiles.create(t.allocator, .eurmac);
+    defer loaded.deinit();
+    var snapshot = loaded.snapshot;
+    const keys = project.profiles.board.key_ids;
+    const combos = [_]project.Combo{
+        .{ .key_ids = .{ keys[4], keys[5] }, .layer_id = snapshot.document.layers[0].id, .timeout = .{ .ms = 40 }, .action = .{ .tap_only = .{ .key_press = .{ .tap_keycode = 5 } } } },
+        .{ .key_ids = .{ keys[2], keys[3] }, .layer_id = snapshot.document.layers[0].id, .timeout = .{ .ms = 50 }, .action = .{ .tap_only = .{ .key_press = .{ .tap_keycode = 6 } } } },
+    };
+    snapshot.document.combos = &combos;
+    var model = try desktop.model.Model.init(t.allocator, project.profiles.board, snapshot);
+    defer model.deinit();
+    const before = try model.id();
+    var editor = try desktop.combo_editor.Session.init(&model);
+    try t.expectEqual(@as(?usize, 0), editor.index);
+    try t.expect(!editor.creating and editor.selected());
+    try t.expectEqual(@as(u16, 40), editor.timeout);
+    try t.expectEqual(before, try model.id());
+    try t.expectEqual(@as(usize, 2), model.document().combos.len);
+    try t.expectEqual(@as(usize, 0), model.undo_stack.items.len);
+    // Only New combo starts a draft, and it reaches the document only on Save.
+    editor.new();
+    try t.expect(editor.creating and editor.index == null);
+    try t.expectEqual(@as(usize, 2), model.document().combos.len);
+    try editor.dispatch(&model, editor.action(.save));
+    try t.expectEqual(@as(usize, 3), model.document().combos.len);
+    try t.expectEqual(@as(?usize, 2), editor.index);
+    try t.expectEqual(@as(usize, 1), model.undo_stack.items.len);
+
+    // Without combos nothing is selected and Save is refused.
+    var empty_model = try desktop.model.Model.init(t.allocator, project.profiles.board, loaded.snapshot);
+    defer empty_model.deinit();
+    const empty_before = try empty_model.id();
+    var empty = try desktop.combo_editor.Session.init(&empty_model);
+    if (empty_model.document().combos.len == 0) {
+        try t.expect(!empty.selected());
+        try t.expectError(error.InvalidCombo, empty.dispatch(&empty_model, empty.action(.save)));
+    }
+    try t.expectEqual(empty_before, try empty_model.id());
+    try t.expectEqual(@as(usize, 0), empty_model.undo_stack.items.len);
+}
+
+test "encoder slots alternate clockwise and counter-clockwise per knob" {
+    const t = std.testing;
+    const encoders = desktop.encoder_editor;
+    try t.expectEqual(encoders.Slot{ .knob = 0, .direction = .clockwise }, encoders.slot(0));
+    try t.expectEqual(encoders.Slot{ .knob = 0, .direction = .counter_clockwise }, encoders.slot(1));
+    try t.expectEqual(encoders.Slot{ .knob = 1, .direction = .clockwise }, encoders.slot(2));
+    try t.expectEqual(encoders.Slot{ .knob = 1, .direction = .counter_clockwise }, encoders.slot(3));
+    for (0..8) |index| {
+        const turn = encoders.slot(index);
+        try t.expectEqual(index, encoders.slotIndex(turn.knob, turn.direction));
+    }
+    try t.expectEqual(@as(usize, 0), encoders.knobs(0));
+    try t.expectEqual(@as(usize, 1), encoders.knobs(2));
+    try t.expectEqual(@as(usize, 2), encoders.knobs(3));
+    try t.expectEqual(@as(usize, 2), encoders.knobs(4));
+    var buffer: [48]u8 = undefined;
+    try t.expectEqualStrings("Counter-clockwise", encoders.slotName(1, 2, &buffer));
+    try t.expectEqualStrings("Knob 1 · Clockwise", encoders.slotName(0, 4, &buffer));
+    try t.expectEqualStrings("Knob 2 · Counter-clockwise", encoders.slotName(3, 4, &buffer));
 }
 
 test "rendered mixed inspector intent rejects later staged fields and selection" {

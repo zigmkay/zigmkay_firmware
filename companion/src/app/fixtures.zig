@@ -96,8 +96,8 @@ fn showDrawer(app: *App) !void {
     const view = &app.view;
     switch (scene) {
         0 => {
+            // Opening selects the first combo, as the Combos segment does.
             view.combo = try desktop.combo_editor.Session.init(&app.model);
-            if (app.model.document().combos.len != 0) try view.combo.?.pick(&app.model, 0);
             view.modal = .combo;
         },
         2 => view.modal = .callback,

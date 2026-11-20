@@ -49,6 +49,11 @@ pub fn draw(
     const doc = model.document();
     session.layer = @min(session.layer, doc.layers.len - 1);
     try drawList(session, model, theme, board);
+    if (!session.selected()) {
+        drawEmpty(theme, doc.combos.len);
+        try drawFooter(session, doc, theme, diagnostic, &result);
+        return result;
+    }
     try drawPreview(session, doc, theme, board);
     try drawKeys(session, doc, theme, board, sheet.data().id);
     drawLayerAndTimeout(session, doc, theme);
@@ -212,7 +217,7 @@ fn drawList(session: *desktop.combo_editor.Session, model: *const desktop.model.
     const scroll = dvui.scrollArea(@src(), .{}, .{ .expand = .both, .background = false, .padding = .{} });
     defer scroll.deinit();
     const row_h: f32 = 58;
-    const rows = doc.combos.len + @intFromBool(session.index == null);
+    const rows = doc.combos.len + @intFromBool(session.creating);
     const content = dvui.box(@src(), .{}, .{
         .expand = .horizontal,
         .min_size_content = .{ .w = list_w - 24, .h = @as(f32, @floatFromInt(rows)) * (row_h + 6) },
@@ -223,7 +228,7 @@ fn drawList(session: *desktop.combo_editor.Session, model: *const desktop.model.
     const row_w = list_w - 26;
     var y: f32 = 0;
     // An unsaved combo is listed first and selected.
-    if (session.index == null) {
+    if (session.creating) {
         _ = drawRowFrame(theme, .{ .x = 0, .y = y, .w = row_w, .h = row_h }, true, doc.combos.len, "combo.row.new");
         const layer = session.layer;
         drawRowContent(theme, doc, board, .{
@@ -245,6 +250,27 @@ fn drawList(session: *desktop.combo_editor.Session, model: *const desktop.model.
         }, y, index);
         y += row_h + 6;
     }
+}
+
+/// The right side while no combo is selected: none exists yet, or the first
+/// one could not be opened.
+fn drawEmpty(theme: ui.Theme, count: usize) void {
+    const center = right_x + right_w / 2;
+    dvui.icon(@src(), "combo.none", ui.control_icons.combo, .{}, .{
+        .rect = .{ .x = center - 20, .y = 290, .w = 40, .h = 40 },
+        .color_text = .{ .color = theme.muted },
+        .padding = .{},
+        .margin = .{},
+    });
+    var centered = ui.options(theme, .{ .x = right_x, .y = 346, .w = right_w, .h = 24 }, 17);
+    centered.padding = .{};
+    centered.background = false;
+    dvui.labelNoFmt(@src(), if (count == 0) "No combos yet" else "No combo selected", .{ .align_x = 0.5 }, centered);
+    centered.rect = .{ .x = right_x, .y = 374, .w = right_w, .h = 20 };
+    centered.font = ui.editorFont("", 13);
+    centered.color_text = .{ .color = theme.muted };
+    const hint = if (count == 0) "Click New combo to add one." else "Choose a combo from the list or click New combo.";
+    dvui.labelNoFmt(@src(), hint, .{ .align_x = 0.5 }, centered);
 }
 
 /// A clickable list row; the selected row is outlined in the accent color.
@@ -479,11 +505,14 @@ fn drawFooter(session: *desktop.combo_editor.Session, doc: p.Document, theme: ui
         diagnostic
     else if (session.index) |index|
         try std.fmt.allocPrint(dvui.currentWindow().arena(), "Editing {s} + {s}", .{ doc.combos[index].key_ids[0], doc.combos[index].key_ids[1] })
+    else if (session.creating)
+        "New combo · not saved yet"
     else
-        "New combo · not saved yet";
+        "";
     ui.label(status, message, .{ .x = status_x, .y = y + 11, .w = width - status_x - 300, .h = 18 }, 13);
     const save_x = width - margin - 150;
     if (ui.iconButton(theme, null, "Close", "combo.close", .{ .x = save_x - 116, .y = y, .w = 104, .h = 40 }, false) and result.* == null) result.* = .close;
+    if (!session.selected()) return;
     if (ui.iconButton(theme, null, "Save combo", "combo.save", .{ .x = save_x, .y = y, .w = 150, .h = 40 }, true) and result.* == null)
         result.* = .{ .action = session.action(.save) };
 }

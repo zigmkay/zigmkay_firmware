@@ -176,8 +176,11 @@ Combos, Encoders, Callbacks and Open / Export open as centered modal drawers
 on a dimmed editor, 900 to 960 wide with 28 padding, with a title, one
 sentence of explanation, the content and a footer with the primary action on
 the right.
-Encoder actions are labeled clockwise or counter-clockwise only where the
-board definition says so; other slots read "Action slot N". Build and Flash
+Encoder actions are grouped per knob and labeled clockwise or
+counter-clockwise: every board wires slot 2n to knob n + 1 clockwise and slot
+2n + 1 counter-clockwise. A knob's push button is a matrix key, edited on the
+keyboard. Combos open on the first combo, or an empty state when there is
+none; only New combo starts an unsaved combo. Build and Flash
 activity opens from Details below the status row. My Keyboards replaces the
 editor with a full-window collection view.
 
