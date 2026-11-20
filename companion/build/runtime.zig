@@ -24,8 +24,9 @@ pub const firmware_paths: []const []const u8 = &@import("zigmkay_firmware").mani
 /// prefixes and other local files stay out of the bundle.
 pub const firmware_extensions = [_][]const u8{ ".zig", ".zon", ".hjson" };
 
-/// Directory names that never belong to a package's sources.
-pub const skipped = [_][]const u8{ ".git", ".zig-cache", "zig-out", "zig-pkg" };
+/// Directory names that never belong to the firmware's sources, including
+/// `keyboards/local/`, the git-ignored folder of personal keymaps.
+pub const skipped = [_][]const u8{ ".git", ".zig-cache", "zig-out", "zig-pkg", "local" };
 
 /// The bundled `build/build.zig.zon`: this package's identity with only the
 /// firmware dependency.

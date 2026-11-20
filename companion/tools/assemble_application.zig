@@ -17,8 +17,9 @@ const Assembler = struct {
     fn copy(self: *Assembler, source: []const u8, relative: []const u8) anyerror!void {
         return self.copyTree(source, relative, null);
     }
-    /// Like `copy`; with `extensions`, files inside directories are kept only
-    /// when their name ends in one of them.
+    /// Like `copy`; with `extensions` (the firmware sources), files inside
+    /// directories are kept only when their name ends in one of them, and the
+    /// firmware's skipped directories stay out.
     fn copyTree(self: *Assembler, source: []const u8, relative: []const u8, extensions: ?[]const []const u8) anyerror!void {
         const destination = try std.fs.path.join(self.a, &.{ self.output, relative });
         const stat = try std.Io.Dir.cwd().statFile(self.io, source, .{});
@@ -31,6 +32,9 @@ const Assembler = struct {
             while (try it.next(self.io)) |entry| {
                 if (std.mem.eql(u8, entry.name, ".git") or std.mem.eql(u8, entry.name, ".zig-cache") or std.mem.eql(u8, entry.name, "zig-out") or std.mem.eql(u8, entry.name, "zig-pkg")) continue;
                 if (extensions) |kept| if (entry.kind != .directory and !hasExtension(entry.name, kept)) continue;
+                if (extensions != null and entry.kind == .directory and for (pins.firmware_skipped) |name| {
+                    if (std.mem.eql(u8, entry.name, name)) break true;
+                } else false) continue;
                 try names.append(self.a, try self.a.dupe(u8, entry.name));
             }
             std.mem.sort([]const u8, names.items, {}, less);

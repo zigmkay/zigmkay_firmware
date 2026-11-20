@@ -95,6 +95,7 @@ fn pins(b: *std.Build, revision: []const u8) *std.Build.Step.Options {
     options.addOption([]const u8, "firmware_root", runtime.firmware_root);
     options.addOption([]const []const u8, "firmware_paths", runtime.firmware_paths);
     options.addOption([]const []const u8, "firmware_extensions", &runtime.firmware_extensions);
+    options.addOption([]const []const u8, "firmware_skipped", &runtime.skipped);
     // The firmware is part of this repository, so its revision is the source
     // commit; development builds without one record an all-zero revision.
     options.addOption([]const u8, "firmware_revision", if (isCommit(revision)) revision else &zero_revision);
