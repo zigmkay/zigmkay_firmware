@@ -23,35 +23,9 @@ pub const Entry = struct {
     encoder_actions: usize,
 };
 
-/// Where an entrypoint takes the sides it passes to the processor.
-const SideSource = enum {
-    /// `.side_definition = &<keymap>.sides`.
-    keymap,
-    /// No `side_definition`; the processor default is all `.X`.
-    unassigned,
-};
-
-/// What each entrypoint owns beyond its keymap. Every selected entrypoint must
-/// be listed here, so that adding a board forces a review of its main file.
-const Binding = struct { root: []const u8, sides: SideSource = .keymap, encoder_actions: usize = 0 };
-
-const bindings = [_]Binding{
-    .{ .root = "my_keyboards/rollercole/clacky_chan.zig" },
-    .{ .root = "my_keyboards/janbeelte/clackychan_main.zig" },
-    .{ .root = "my_keyboards/janbeelte/keycaprio_main_0_4.zig" },
-    .{ .root = "my_keyboards/janbeelte/keycaprio_main_0_6.zig" },
-    .{ .root = "my_keyboards/janbeelte/keycaprio_main_0_7.zig" },
-    .{ .root = "my_keyboards/rollercole/leonardo_keycaprio_0_1.zig" },
-    .{ .root = "my_keyboards/rollercole/leonardo_keycaprio_0_2.zig" },
-    .{ .root = "my_keyboards/rollercole/leonardo_keycaprio_0_6.zig" },
-    .{ .root = "my_keyboards/rollercole/leonardo_keycaprio_0_7.zig" },
-    .{ .root = "my_keyboards/rollercole/leonardo_keycaprio_0_8.zig" },
-    .{ .root = "examples/dasbob/main.zig", .sides = .unassigned },
-    // Encoder actions are defined in the entrypoint, not in the keymap.
-    .{ .root = "my_keyboards/rollercole/tuckytwotimes.zig", .encoder_actions = 4 },
-    // Encoder actions come from the keymap; CW and CCW of one encoder.
-    .{ .root = "my_keyboards/molekula/main.zig", .encoder_actions = 2 },
-};
+/// The reviewed entrypoints are listed in `boards.zig` (`bindings`), next to
+/// the inventory, which offers only boards that have one.
+const binding_of = @import("boards.zig").binding;
 
 fn unassignedSides(comptime count: usize) []const core.Side {
     return &struct {
@@ -68,12 +42,7 @@ pub const entries = blk: {
     }
     var result: [boards.entries.len]Entry = undefined;
     for (boards.entries, profiles, 0..) |board, Profile, index| {
-        var selected: ?Binding = null;
-        for (bindings) |binding| if (std.mem.eql(u8, board.root_source_file, binding.root)) {
-            if (selected != null) @compileError("Duplicate processing descriptor root binding");
-            selected = binding;
-        };
-        const binding = selected orelse @compileError(
+        const binding = binding_of(board.root_source_file) orelse @compileError(
             "Missing processing descriptor for " ++ board.root_source_file,
         );
         const key_count = @typeInfo(@typeInfo(@TypeOf(Profile.keymap)).array.child).array.len;

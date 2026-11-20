@@ -99,6 +99,9 @@ pub const entries = blk: {
 };
 
 pub const unselected_examples = boards.unselected_examples;
+/// Firmware boards with a keymap but no processing binding in
+/// `src/firmware/boards.zig`; the companion does not offer them.
+pub const without_companion_data = boards.without_binding;
 
 /// Borrowed logical defaults in firmware key-index order. Missing profile fields
 /// remain unknown; consumers must not derive processing sides from display hands.
@@ -243,6 +246,28 @@ test "selected firmware inventory is complete and all geometry indexes validate"
     try std.testing.expect(find("yak") == null);
     try std.testing.expectEqualStrings("my_keyboards/rollercole/encoder_demo.zig", unselected_examples[0]);
     try std.testing.expect(find("encoder_demo") == null);
+}
+
+test "every contributed board is offered" {
+    const offered = [_][]const u8{
+        "clacky_chan",           "clackychan_colemak",    "keycaprio_colemak_0_4", "keycaprio_colemak_0_6",
+        "keycaprio_colemak_0_7", "keycaprio_us_intl_0_7", "lk1",                   "lk2",
+        "lk6",                   "lk7",                   "lk8",                   "dasbob",
+        "tuckytwotimes",         "molekula",
+    };
+    for (offered) |selector| try std.testing.expect(find(selector) != null);
+    for (without_companion_data) |name| try std.testing.expect(find(name) == null);
+}
+
+// A board fresh from `board:new` builds and flashes, and the companion still
+// compiles and runs without it; this test names it, so that a pull request
+// cannot add a board that the companion silently leaves out.
+test "every firmware board with a keymap has companion data" {
+    if (without_companion_data.len == 0) return;
+    std.debug.print("Not offered by the companion: no processing binding in companion/src/firmware/boards.zig for", .{});
+    for (without_companion_data) |name| std.debug.print(" {s}", .{name});
+    std.debug.print(". See keyboards/README.md.\n", .{});
+    return error.MissingCompanionData;
 }
 
 test "processing digest detects indexed side and encoder slot changes" {

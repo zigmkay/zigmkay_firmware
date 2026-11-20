@@ -70,7 +70,7 @@ pub fn metadata(comptime selector: []const u8) Metadata {
         .template = "Rollercole",
         .host_layout = "Danish",
     };
-    @compileError("Missing catalog presentation");
+    @compileError("Missing catalog presentation for " ++ selector ++ " in companion/src/catalog/presentation.zig");
 }
 
 test "each keyboard revision opens with exactly one primary selector" {
