@@ -52,7 +52,7 @@ well.
 For a GUI session without keyboard monitoring:
 
 ```sh
-mise run editor -- -- --offline
+mise run //companion:editor -- -- --offline
 ```
 
 The two `--` separators forward arguments through mise and `zig build` to the
@@ -196,7 +196,7 @@ This developer-only step acquires pinned dependencies and builds the editor and
 Flash tools before copying the complete runtime payload. macOS output is
 `zig-out/Zigmkay.app`; Windows output is `zig-out/Zigmkay.exe`.
 Signing, notarization and DMG creation are separate release work.
-`mise run editor` and `mise run companion` assemble and launch this installed
+`mise run //companion:editor` and `mise run //companion:companion` assemble and launch this installed
 application. Compile-only desktop checks do not produce a distributable bundle.
 
 To validate firmware and native runners for every catalog board without devices:

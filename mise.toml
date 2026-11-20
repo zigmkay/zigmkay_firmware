@@ -14,5 +14,5 @@ description = "Run every offline firmware and companion test (no device access)"
 depends = ["//zigmkay:test", "//keyboards:test", "//zkeycodes:test", "//companion:test"]
 
 [tasks.check]
-description = "Compile every board and every companion source, tool and test without running them"
+description = "Compile every board and companion source; runs the keyboard regression tests, not the companion tests"
 depends = ["//keyboards:test", "//companion:check", "//companion:firmware:check"]

@@ -75,6 +75,12 @@ cd companion && zig build run -Dbundle
 
 See [companion/README.md](companion/README.md) for details.
 
+The companion offers every board in [`keyboards/boards.zig`](keyboards/boards.zig)
+that has a `keymap`. When you add such a board, also list its main file in
+[`companion/src/firmware/processing_descriptors.zig`](companion/src/firmware/processing_descriptors.zig),
+with its encoder action count; otherwise the companion stops compiling. `mise run
+test` checks both.
+
 ## Only modify files in my_keyboards/
 
 Do only modify things inside my_keyboards. If you stick to this rule, future git fetches should be painless most of the time as we will keep changes inside the my_keyboards to an absolute minimum.

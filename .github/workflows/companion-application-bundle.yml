@@ -3,9 +3,17 @@ name: Companion application bundle
 on:
   push:
     branches: [main]
-    # Companion previews are tagged companion-v<version>-preview.<n>. Tag pushes
-    # carry no path filter so a release tag always builds.
+    # Companion previews are tagged companion-v<version>-preview.<n>. GitHub
+    # ignores path filters for tag pushes, so a release tag always builds.
     tags: ['companion-v*-preview.*']
+    paths:
+      - "companion/**"
+      - "zigmkay/**"
+      - "keyboards/**"
+      - "zkeycodes/**"
+      - build.zig
+      - build.zig.zon
+      - .github/workflows/companion-application-bundle.yml
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     paths:

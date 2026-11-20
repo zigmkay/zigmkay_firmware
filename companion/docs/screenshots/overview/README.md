@@ -10,10 +10,10 @@ No UI mockups or generated illustrations are used in the repository README.
 | [companion-dark.png](companion-dark.png) | The same native overlay in dark appearance; the README selects it for dark mode |
 | [tray.png](tray.png) | macOS keyboard menu-bar icon with its native resident menu open |
 
-Captured with exactly Zig 0.17.0, after `mise run editor:build`, using:
+Captured with exactly Zig 0.17.0, after `mise run //companion:editor:build`, using:
 
 ```sh
-mise run editor -- -- --light-companion
+mise run //companion:editor -- -- --light-companion
 ```
 
 This explicit preview disables keyboard monitoring and automatic preparation.

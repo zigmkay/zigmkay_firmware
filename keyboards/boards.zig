@@ -1,5 +1,7 @@
 //! The keyboards this package builds, selected with `-Dkeyboard=<name>`.
 //! Plain data with no build dependencies, so other packages can import it too.
+//! The companion offers every board with a `keymap`; a new one also needs an
+//! entry in companion/src/firmware/processing_descriptors.zig.
 const std = @import("std");
 
 pub const Board = struct {

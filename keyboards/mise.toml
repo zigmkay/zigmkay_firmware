@@ -25,7 +25,10 @@ usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
 flag "--mount <mount>" help="Mount point or volume label (default: RPI-RP2)"
 '''
-run = 'zig build flash_mount -Dkeyboard={{usage.keyboard}} {% if usage.mount %}"-Dflash-mount={{usage.mount}}"{% endif %}'
+# The mount path comes from mise's usage_mount variable, so the shell does
+# not expand anything inside it.
+run = 'zig build flash_mount -Dkeyboard={{usage.keyboard}} ${usage_mount:+"-Dflash-mount=$usage_mount"}'
+run_windows = 'zig build flash_mount -Dkeyboard={{usage.keyboard}} {% if usage.mount %}"-Dflash-mount=%usage_mount%"{% endif %}'
 
 [tasks.udev]
 description = "Linux: install picotool's udev rules (sudo)"
