@@ -54,13 +54,15 @@ pub fn install_tools(b: *std.Build) void {
     if (b.graph.host.result.os.tag == .macos) {
         const rawhid_monitor = b.addExecutable(.{
             .name = "rawhid-monitor",
-            .root_module = b.createModule(.{ .target = b.graph.host }),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/rawhid_monitor.zig"),
+                .target = b.graph.host,
+                .optimize = .ReleaseSafe,
+                .link_libc = true,
+            }),
         });
-        rawhid_monitor.root_module.addCSourceFile(.{
-            .file = b.path("tools/rawhid_monitor.c"),
-            .flags = &.{"-std=c11"},
-        });
-        rawhid_monitor.root_module.link_libc = true;
+        // The monitor decodes reports with the firmware's own companion definitions.
+        rawhid_monitor.root_module.addImport("zigmkay", b.modules.get("zigmkay").?);
         rawhid_monitor.root_module.linkFramework("IOKit", .{});
         rawhid_monitor.root_module.linkFramework("CoreFoundation", .{});
         b.installArtifact(rawhid_monitor);

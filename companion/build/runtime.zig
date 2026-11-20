@@ -22,7 +22,7 @@ pub const firmware_paths: []const []const u8 = &@import("zigmkay_firmware").mani
 
 /// File types copied from the firmware directories, so build outputs in custom
 /// prefixes and other local files stay out of the bundle.
-pub const firmware_extensions = [_][]const u8{ ".zig", ".zon", ".hjson", ".c" };
+pub const firmware_extensions = [_][]const u8{ ".zig", ".zon", ".hjson" };
 
 /// Directory names that never belong to a package's sources.
 pub const skipped = [_][]const u8{ ".git", ".zig-cache", "zig-out", "zig-pkg" };
