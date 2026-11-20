@@ -1,4 +1,5 @@
-# `<keyboard>` is a name from boards.zig, such as lk8.
+# `<keyboard>` is a name from boards.zig, such as lk8; the shell completes it
+# with Tab from boards.zig.
 
 [tasks.test]
 description = "Compile every keyboard and run the keyboard regression tests (no device access)"
@@ -6,23 +7,33 @@ run = "zig build test"
 
 [tasks.build]
 description = "Build the firmware of one keyboard into zig-out/firmware"
-usage = 'arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"'
+usage = '''
+arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
+complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+'''
 run = 'zig build -Dkeyboard={{usage.keyboard}}'
 
 [tasks.flash]
 description = "Build and flash one keyboard with the host default (Windows/Linux: mounted volume, otherwise picotool)"
-usage = 'arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"'
+usage = '''
+arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
+complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+'''
 run = 'zig build flash -Dkeyboard={{usage.keyboard}}'
 
 [tasks."flash:picotool"]
 description = "Build and flash one keyboard with picotool"
-usage = 'arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"'
+usage = '''
+arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
+complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+'''
 run = 'zig build flash_pt -Dkeyboard={{usage.keyboard}}'
 
 [tasks."flash:mount"]
 description = "Build and flash one keyboard through the mounted RP2 bootloader volume"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
+complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
 flag "--mount <mount>" help="Mount point or volume label (default: RPI-RP2)"
 '''
 # The mount path comes from mise's usage_mount variable, so the shell does
