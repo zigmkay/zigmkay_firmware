@@ -12,8 +12,8 @@
 //!
 //! Without options the wrapper runs interactively for `zig build flash_pt`:
 //! it waits for a BOOTSEL device without a time limit, retries every failed
-//! `picotool info`, and load and reboot inherit stdout and stderr without a
-//! command budget. Any option selects the managed mode described below.
+//! `picotool info` and runs it without a command budget, and load and reboot
+//! inherit stdout and stderr without a command budget. Any option selects the managed mode described below.
 //!
 //! Every mode rejects a UF2 whose blocks lack the RP2040 family ID before
 //! picotool runs: picotool silently skips such blocks and still exits
@@ -117,11 +117,11 @@ pub fn parse(args: []const []const u8) !Config {
 pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     const config = parse(args[1..]) catch std.process.fatal("{s}", .{usage});
-    controlledExecute(init.gpa, init.io, config) catch |err| {
-        std.process.fatal(
-            "flash stopped: {t}; interrupted load/reboot requires explicit recovery, never automatic retry",
-            .{err},
-        );
+    controlledExecute(init.gpa, init.io, config) catch |err| switch (err) {
+        error.MissingRp2040FamilyId => std.process.fatal("{s}: a UF2 block has no RP2040 family ID; picotool would flash nothing", .{config.firmware}),
+        error.InvalidUf2 => std.process.fatal("{s} is not a complete RP2040 UF2 file", .{config.firmware}),
+        error.FileNotFound => std.process.fatal("unable to read {s} or run {s}", .{ config.firmware, config.picotool }),
+        else => std.process.fatal("flash stopped: {t}", .{err}),
     };
 }
 
@@ -162,7 +162,9 @@ pub fn execute(gpa: std.mem.Allocator, io: std.Io, config: Config) !void {
         .clock = .awake,
     }) else null;
     while (true) {
-        var result = tool(gpa, io, config, &.{"info"}, try remainingMs(io, config, deadline)) catch |err| {
+        // Interactive probes run without a budget, like the original flash_pt tool.
+        const budget: ?u32 = if (config.interactive) null else try remainingMs(io, config, deadline);
+        var result = tool(gpa, io, config, &.{"info"}, budget) catch |err| {
             if (err == error.CommandTimeout) return error.DiscoveryTimeout;
             return err;
         };
@@ -187,6 +189,7 @@ pub fn execute(gpa: std.mem.Allocator, io: std.Io, config: Config) !void {
     // callers pass an immutable frozen copy.
     const current_hash = try validateFile(gpa, io, config);
     if (!std.mem.eql(u8, &hash, &current_hash)) return error.ArtifactChanged;
+    errdefer std.debug.print("interrupted load/reboot requires explicit recovery, never automatic retry\n", .{});
     std.debug.print("phase: load-verify\n", .{});
     if (!try write(gpa, io, config, &.{ "load", "--verify", config.firmware })) return error.LoadVerifyFailed;
     std.debug.print("phase: reboot\n", .{});
@@ -313,12 +316,13 @@ fn expire(io: std.Io, ms: u32) anyerror!void {
 
 /// The watchdog covers child wait, even if a hung child closes its output pipes.
 /// On cancellation the invocation kills and reaps the child before returning.
+/// A null budget waits without a watchdog.
 pub fn tool(
     gpa: std.mem.Allocator,
     io: std.Io,
     config: Config,
     command: []const []const u8,
-    ms: u32,
+    budget: ?u32,
 ) !std.process.RunResult {
     var argv: [10][]const u8 = undefined;
     argv[0] = config.picotool;
@@ -332,6 +336,7 @@ pub fn tool(
         argv[len..][0..2].* = .{ "--ser", serial };
         len += 2;
     }
+    const ms = budget orelse return invoke(gpa, io, argv[0..len]);
     const Completion = union(enum) { process: anyerror!std.process.RunResult, timeout: anyerror!void };
     var buffer: [2]Completion = undefined;
     var select = std.Io.Select(Completion).init(io, &buffer);
