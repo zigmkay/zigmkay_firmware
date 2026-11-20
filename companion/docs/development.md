@@ -134,7 +134,7 @@ whose option is missing fails with a message that names it.
 | `-Dproject-export`, `-Dproject-board` | Inputs of `build-project` |
 | `-Dimport-root`, `-Dimport-module` | Inputs of `analyze-keymap` |
 | `-Dnative-only` | Skip the embedded graph even with `-Dfirmware`; the importer passes it to both this script and the bundled runtime build |
-| `-Dcandidate-project`, `-Dcandidate-overlay-trigger`, `-Dfirmware-revision` | Inputs of the `hardware-tools` USB candidate |
+| `-Dcandidate-project`, `-Dcandidate-overlay-trigger` | Inputs of the `hardware-tools` USB candidate; its firmware revision is `-Drevision` |
 
 `check-firmware` and `check-firmware-defaults` compile firmware into the build
 cache; they do not flash hardware. The bundled application runs

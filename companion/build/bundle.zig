@@ -10,11 +10,10 @@ const native = @import("native.zig");
 const fw_build = @import("../src/firmware/build.zig");
 const Compile = std.Build.Step.Compile;
 
-pub fn add(s: *tests.Suite, deps: Deps, app: *Compile, bootsel: ?*Compile) void {
+pub fn add(s: *tests.Suite, deps: Deps, mb: *Deps.MicroBuild, app: *Compile, bootsel: ?*Compile) void {
     const b = s.b;
     const cfg = s.cfg;
     const os = b.graph.host.result.os.tag;
-    const mb = deps.microBuild() orelse return;
     // Configure every board so Zig acquires all build-time lazy inputs of the
     // firmware closure before it is copied.
     const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*;
@@ -86,7 +85,7 @@ fn pins(b: *std.Build, revision: []const u8) *std.Build.Step.Options {
         manifest.dependencies.svg2tvg.hash,
         manifest.dependencies.icons.hash,
         manifest.dependencies.inter.hash,
-        @import("../src/jobs/flash_inputs.zig").picotool_package_hash,
+        @import("zigmkay_firmware").zigmkay_manifest.dependencies.picotool.hash,
     });
     options.addOption([]const u8, "manifest", runtime.manifest(b));
     options.addOption([]const u8, "runtime_source_root", runtime.source_root);
@@ -94,7 +93,7 @@ fn pins(b: *std.Build, revision: []const u8) *std.Build.Step.Options {
     // Untracked: the assembler always runs, and the firmware directory holds caches.
     options.addOptionPathUntracked("firmware_source", b.dependency("zigmkay_firmware", .{}).path("."));
     options.addOption([]const u8, "firmware_root", runtime.firmware_root);
-    options.addOption([]const []const u8, "firmware_paths", &runtime.firmware_paths);
+    options.addOption([]const []const u8, "firmware_paths", runtime.firmware_paths);
     options.addOption([]const []const u8, "firmware_extensions", &runtime.firmware_extensions);
     // The firmware is part of this repository, so its revision is the source
     // commit; development builds without one record an all-zero revision.

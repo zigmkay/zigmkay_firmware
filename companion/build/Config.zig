@@ -12,7 +12,8 @@ pub const zig_version = "0.17.0";
 /// Configure a deliberately small graph for constrained CI jobs.
 pub const Only = enum {
     /// Typing tests, application paths, release tooling and subprocess
-    /// contracts, without the firmware dependency or native bridges.
+    /// contracts, without compiling firmware or native bridges. Zig still
+    /// fetches microzig, which the firmware's zigmkay package pins eagerly.
     practice,
     /// Only the symbolized artifact-publication diagnostic.
     diagnostic,
@@ -39,7 +40,6 @@ import_root: ?[]const u8,
 import_module: []const u8,
 candidate_project: ?[]const u8,
 candidate_overlay_trigger: bool,
-firmware_revision: []const u8,
 
 pub fn init(b: *std.Build) Config {
     if (!std.mem.eql(u8, builtin.zig_version_string, zig_version))
@@ -65,10 +65,10 @@ pub fn init(b: *std.Build) Config {
         .import_module = b.option([]const u8, "import-module", "Captured module relative to import-root (analyze-keymap)") orelse "src/keymap.zig",
         .candidate_project = b.option([]const u8, "candidate-project", "Absolute existing LK7 project to export read-only instead of the QWERTY fixture"),
         .candidate_overlay_trigger = b.option(bool, "candidate-overlay-trigger", "Prepare a test-only base W companion trigger in the cached candidate project") orelse false,
-        .firmware_revision = b.option([]const u8, "firmware-revision", "Exact local firmware revision for the offline candidate inventory") orelse "missing",
     };
     if (config.only != null and (config.desktop or config.firmware))
         @panic("-Donly cannot be combined with -Ddesktop, -Dfirmware or -Dbundle");
+    if (bundle and native_only) @panic("-Dbundle needs the firmware graph; drop -Dnative-only");
     if (config.candidate_project) |path| if (!std.fs.path.isAbsolute(path))
         @panic("candidate-project must be an absolute explicit input path");
     return config;

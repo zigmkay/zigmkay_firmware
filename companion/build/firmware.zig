@@ -11,7 +11,7 @@ const runner_build = @import("../src/runner/build.zig");
 /// Every firmware-area test root; `tests-reached` checks it against the wiring.
 pub const test_roots = [_][]const u8{ "tests/project_processor_contract.zig", "tools/usb_candidate.zig" };
 
-pub fn add(s: *tests.Suite, deps: Deps, fixtures: tests.Fixtures) void {
+pub fn add(s: *tests.Suite, mb: *Deps.MicroBuild, fixtures: tests.Fixtures) void {
     const b = s.b;
     const cfg = s.cfg;
     const steps = s.steps;
@@ -20,7 +20,6 @@ pub fn add(s: *tests.Suite, deps: Deps, fixtures: tests.Fixtures) void {
         steps.build_project.dependOn(&b.addInstallArtifact(runner_build.projectRunner(b, cfg.project_export.?, h.zigmkay, h.keycodes, h.layout, h.runner_protocol), .{}).step);
     } else Steps.unavailable(b, steps.build_project, "build-project requires -Dproject-export=<absolute export> and -Dproject-board=<selector>");
 
-    const mb = deps.microBuild() orelse return;
     const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*;
     const sources = h.sources;
     if (cfg.project_export) |path| if (cfg.project_board) |board| {
@@ -105,7 +104,7 @@ pub fn add(s: *tests.Suite, deps: Deps, fixtures: tests.Fixtures) void {
         const inventory = b.addRunArtifact(b.addExecutable(.{ .name = "usb-candidate", .root_module = candidate }));
         inventory.addFileArg(image);
         const manifest = inventory.addOutputFileArg("candidate.zon");
-        inventory.addArg(cfg.firmware_revision);
+        inventory.addArg(cfg.revision);
         for ([_]*std.Build.Step{
             &inventory.step,
             &b.addInstallFile(manifest, "acceptance/candidate.zon").step,

@@ -43,8 +43,12 @@ pub fn build(b: *std.Build) !void {
     steps.@"test".dependOn(steps.test_jobs);
 
     const app = if (mods.gui != null) gui.add(&suite, fixtures) else null;
-    if (cfg.firmware) firmware.add(&suite, deps, fixtures);
-    if (cfg.bundle) bundle.add(&suite, deps, app.?, utilities.bootsel);
+    if (cfg.firmware) {
+        // Until Zig has fetched the lazy RP2xxx port, `init` returns null.
+        const mb = Deps.MicroBuild.init(b, Deps.microzig(b)) orelse return;
+        firmware.add(&suite, mb, fixtures);
+        if (cfg.bundle) bundle.add(&suite, deps, mb, app.?, utilities.bootsel);
+    }
     if (cfg.macos_sdk) |sdk| if (app) |exe| native.sdkPaths(b, exe.root_module, sdk);
 
     suite.guard(steps.@"test", &.{

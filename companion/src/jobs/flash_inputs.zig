@@ -3,8 +3,9 @@ const std = @import("std");
 const firmware = @import("firmware.zig");
 const target = @import("target_lock.zig");
 pub const Digest = firmware.Digest;
-pub const picotool_revision = "d8df33801dbea792128baaab516291720d400a91";
-pub const picotool_package_hash = "picotool-2.3.1-PtJrRaJNAAA3xRwGctKAdomuKCJXz5UwMOrhzQ_Z2f-e";
+/// The picotool pin of the firmware's zigmkay package.
+pub const picotool_revision = @import("firmware-pins").picotool_revision;
+pub const picotool_package_hash = @import("firmware-pins").picotool_package_hash;
 pub const Backend = enum { picotool, windows_bootsel };
 
 pub const Record = struct {

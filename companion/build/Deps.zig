@@ -7,10 +7,7 @@ const Config = @import("Config.zig");
 const Deps = @This();
 
 /// The firmware's microzig build API with the RP2xxx port.
-const MicroBuildApi = @import("zigmkay_firmware").keyboards.MicroBuild;
-/// `MicroBuildApi` once Zig has fetched its lazy RP2xxx port, else `void`.
-/// Use `microBuild`, never this type, to reach it.
-pub const MicroBuild = if (portsFetched(MicroBuildApi)) MicroBuildApi else void;
+pub const MicroBuild = @import("zigmkay_firmware").keyboards.MicroBuild;
 
 /// `zigmkay_firmware`, the firmware of this repository: processor, keycodes
 /// and board sources (absent under `-Donly`).
@@ -23,7 +20,6 @@ icons: ?*std.Build.Dependency = null,
 inter: ?*std.Build.Dependency = null,
 /// The prebuilt picotool shipped with non-Windows bundles, from the firmware's pin.
 picotool: ?*std.Build.Dependency = null,
-micro: if (MicroBuild == void) void else ?*MicroBuild = if (MicroBuild == void) {} else null,
 
 pub fn init(b: *std.Build, cfg: Config) error{LazyDependencyNeeded}!Deps {
     var deps: Deps = .{};
@@ -47,42 +43,23 @@ pub fn init(b: *std.Build, cfg: Config) error{LazyDependencyNeeded}!Deps {
     }
     if (cfg.bundle and cfg.target.result.os.tag != .windows)
         deps.picotool = zigmkay(b).builder.dependency("picotool", .{ .target = cfg.target, .optimize = cfg.optimize });
-    if (cfg.firmware) {
-        // `init` requests the lazy port packages and, until Zig has fetched
-        // them, returns `?noreturn`.
-        const micro = MicroBuildApi.init(b, zigmkay(b).builder.dependency("microzig", .{}));
-        if (comptime MicroBuild == void) {
-            missing = true;
-        } else {
-            deps.micro = micro;
-            if (micro == null) missing = true;
-        }
-    }
     if (missing) return error.LazyDependencyNeeded;
     return deps;
 }
 
-/// The configured microzig build. Inline so that, while microzig is not yet
-/// fetched, a caller's `orelse return` leaves the rest of its body unanalyzed.
-pub inline fn microBuild(deps: Deps) ?*MicroBuild {
-    if (comptime MicroBuild == void) return null;
-    return deps.micro;
+/// microzig, pinned by the firmware's zigmkay package.
+pub fn microzig(b: *std.Build) *std.Build.Dependency {
+    return zigmkay(b).builder.dependency("microzig", .{});
 }
 
 fn lazy(b: *std.Build, missing: *bool, name: []const u8, args: anytype) ?*std.Build.Dependency {
-    const dep = b.lazyDependency(name, args);
-    if (dep == null) missing.* = true;
-    return dep;
+    return b.dependencyLazy(name, args) catch {
+        missing.* = true;
+        return null;
+    };
 }
 
 /// The firmware's zigmkay package, which pins microzig and picotool.
 fn zigmkay(b: *std.Build) *std.Build.Dependency {
     return b.dependency("zigmkay_firmware", .{}).builder.dependency("zigmkay", .{});
-}
-
-/// Whether microzig sees every selected port package: until Zig has fetched
-/// them, `init` returns `?noreturn` and `ports` lacks their board APIs.
-fn portsFetched(comptime Api: type) bool {
-    const Return = @typeInfo(@TypeOf(Api.init)).@"fn".return_type.?;
-    return @typeInfo(Return).optional.child != noreturn;
 }

@@ -18,7 +18,7 @@ pub const firmware_root = "firmware";
 
 /// The firmware package's `.paths`, copied to `firmware_root`. Its manifest
 /// pins microzig and picotool, which the bundle ships as packages.
-pub const firmware_paths = [_][]const u8{ "build.zig", "build.zig.zon", "LICENSE", "README.md", "keyboards", "zigmkay", "zkeycodes" };
+pub const firmware_paths: []const []const u8 = &@import("zigmkay_firmware").manifest.paths;
 
 /// File types copied from the firmware directories, so build outputs in custom
 /// prefixes and other local files stay out of the bundle.
@@ -69,6 +69,7 @@ fn copySources(files: *std.Build.Step.WriteFile, firmware: *std.Build.Dependency
         _ = files.addCopyFile(firmware.path(path), b.fmt("{s}/{s}", .{ firmware_root, path }));
         return;
     }
+    b.dependOnDirectoryContents(firmware.path(path));
     var dir = root.openDir(io, path, .{ .iterate = true }) catch |err| std.debug.panic("Cannot open firmware '{s}': {t}", .{ path, err });
     defer dir.close(io);
     var it = dir.iterate();

@@ -173,7 +173,13 @@ pub fn root(m: Modules, path: []const u8, imports: []const Import) *Module {
 fn initCore(b: *std.Build, cfg: Config) Core {
     const owned_zon = b.createModule(.{ .root_source_file = b.path("src/project/owned_zon.zig") });
     const uf2 = b.createModule(.{ .root_source_file = b.path("src/artifact/uf2.zig") });
-    const jobs_deps = dupe(b, &.{ .{ .name = "owned-zon", .module = owned_zon }, .{ .name = "firmware-uf2", .module = uf2 } });
+    // The picotool pin of the firmware's zigmkay package, recorded with each flash.
+    const picotool_pin = @import("zigmkay_firmware").zigmkay_manifest.dependencies.picotool;
+    const picotool_revision = comptime picotool_pin.url[std.mem.lastIndexOfScalar(u8, picotool_pin.url, '#').? + 1 ..];
+    const firmware_pins = b.addOptions();
+    firmware_pins.addOption([]const u8, "picotool_revision", picotool_revision);
+    firmware_pins.addOption([]const u8, "picotool_package_hash", picotool_pin.hash);
+    const jobs_deps = dupe(b, &.{ .{ .name = "owned-zon", .module = owned_zon }, .{ .name = "firmware-uf2", .module = uf2 }, .{ .name = "firmware-pins", .module = firmware_pins.createModule() } });
     const jobs = b.createModule(.{ .root_source_file = b.path("src/jobs/root.zig"), .imports = jobs_deps });
     const jobs_only = dupe(b, &.{.{ .name = "companion-jobs", .module = jobs }});
     const release_options = b.addOptions();

@@ -1,6 +1,8 @@
 const std = @import("std");
 
 pub const microzig = @import("microzig");
+/// This package's manifest: the microzig and picotool pins.
+pub const manifest = @import("build.zig.zon");
 const build_utils = @import("build_utils.zig");
 
 pub const add_test_steps = build_utils.add_test_steps;
@@ -17,10 +19,6 @@ pub const addFlash = build_utils.addFlash;
 pub const addPicotoolFlash = build_utils.addPicotoolFlash;
 pub const addMountFlash = build_utils.addMountFlash;
 pub const addUdevRulesInstall = build_utils.addUdevRulesInstall;
-
-const MicroBuild = microzig.MicroBuild(.{
-    .rp2xxx = true,
-});
 
 pub fn build(b: *std.Build) void {
     const zigmkay_mod = b.addModule("zigmkay", .{
