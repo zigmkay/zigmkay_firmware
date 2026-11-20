@@ -20,6 +20,10 @@ pub const firmware_root = "firmware";
 /// pins microzig and picotool, which the bundle ships as packages.
 pub const firmware_paths = [_][]const u8{ "build.zig", "build.zig.zon", "LICENSE", "README.md", "keyboards", "zigmkay", "zkeycodes" };
 
+/// File types copied from the firmware directories, so build outputs in custom
+/// prefixes and other local files stay out of the bundle.
+pub const firmware_extensions = [_][]const u8{ ".zig", ".zon", ".hjson", ".c" };
+
 /// Directory names that never belong to a package's sources.
 pub const skipped = [_][]const u8{ ".git", ".zig-cache", "zig-out", "zig-pkg" };
 
@@ -54,8 +58,8 @@ pub fn tree(b: *std.Build, firmware: *std.Build.Dependency, extra: []const []con
     return files.getDirectory();
 }
 
-/// Copy `path` of the firmware package to `firmware_root`, without build
-/// outputs and caches.
+/// Copy `path` of the firmware package to `firmware_root`: listed files, and
+/// the `firmware_extensions` files of listed directories without caches.
 fn copySources(files: *std.Build.Step.WriteFile, firmware: *std.Build.Dependency, path: []const u8) void {
     const b = files.step.owner;
     const io = b.graph.io;
@@ -72,6 +76,9 @@ fn copySources(files: *std.Build.Step.WriteFile, firmware: *std.Build.Dependency
         if (for (skipped) |name| {
             if (std.mem.eql(u8, entry.name, name)) break true;
         } else false) continue;
+        if (entry.kind != .directory and for (firmware_extensions) |extension| {
+            if (std.mem.endsWith(u8, entry.name, extension)) break false;
+        } else true) continue;
         copySources(files, firmware, b.fmt("{s}/{s}", .{ path, entry.name }));
     }
 }

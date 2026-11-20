@@ -15,6 +15,11 @@ const Assembler = struct {
     legal_seen: std.StringHashMap(void),
     hash: std.crypto.hash.sha2.Sha256 = .init(.{}),
     fn copy(self: *Assembler, source: []const u8, relative: []const u8) anyerror!void {
+        return self.copyTree(source, relative, null);
+    }
+    /// Like `copy`; with `extensions`, files inside directories are kept only
+    /// when their name ends in one of them.
+    fn copyTree(self: *Assembler, source: []const u8, relative: []const u8, extensions: ?[]const []const u8) anyerror!void {
         const destination = try std.fs.path.join(self.a, &.{ self.output, relative });
         const stat = try std.Io.Dir.cwd().statFile(self.io, source, .{});
         if (stat.kind == .directory) {
@@ -25,10 +30,11 @@ const Assembler = struct {
             var it = dir.iterate();
             while (try it.next(self.io)) |entry| {
                 if (std.mem.eql(u8, entry.name, ".git") or std.mem.eql(u8, entry.name, ".zig-cache") or std.mem.eql(u8, entry.name, "zig-out") or std.mem.eql(u8, entry.name, "zig-pkg")) continue;
+                if (extensions) |kept| if (entry.kind != .directory and !hasExtension(entry.name, kept)) continue;
                 try names.append(self.a, try self.a.dupe(u8, entry.name));
             }
             std.mem.sort([]const u8, names.items, {}, less);
-            for (names.items) |name| try self.copy(try std.fs.path.join(self.a, &.{ source, name }), try std.fs.path.join(self.a, &.{ relative, name }));
+            for (names.items) |name| try self.copyTree(try std.fs.path.join(self.a, &.{ source, name }), try std.fs.path.join(self.a, &.{ relative, name }), extensions);
         } else if (stat.kind == .file) {
             try std.Io.Dir.cwd().copyFile(source, .cwd(), destination, self.io, .{ .make_path = true });
             const bytes = try std.Io.Dir.cwd().readFileAlloc(self.io, source, self.a, .limited(512 * 1024 * 1024));
@@ -102,6 +108,10 @@ const Assembler = struct {
 fn less(_: void, a: []const u8, b: []const u8) bool {
     return std.mem.lessThan(u8, a, b);
 }
+fn hasExtension(name: []const u8, extensions: []const []const u8) bool {
+    for (extensions) |extension| if (std.mem.endsWith(u8, name, extension)) return true;
+    return false;
+}
 pub fn main(init: std.process.Init) !void {
     const a = init.arena.allocator();
     const args = try init.minimal.args.toSlice(a);
@@ -137,7 +147,7 @@ pub fn main(init: std.process.Init) !void {
         try assembly.copy(args[7], "tools/picotool");
     }
     // The firmware package of this repository, and the packages it pins.
-    for (pins.firmware_paths) |path| try assembly.copy(try std.fs.path.join(a, &.{ pins.firmware_source, path }), try std.fs.path.join(a, &.{ "build", pins.firmware_root, path }));
+    for (pins.firmware_paths) |path| try assembly.copyTree(try std.fs.path.join(a, &.{ pins.firmware_source, path }), try std.fs.path.join(a, &.{ "build", pins.firmware_root, path }), pins.firmware_extensions);
     try assembly.closure(pins.firmware_source);
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "build/build.zig.zon" }), .data = pins.manifest });
     assembly.hash.update(pins.manifest);
