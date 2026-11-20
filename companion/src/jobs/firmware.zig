@@ -50,8 +50,9 @@ pub const Command = struct {
     uf2_path: []const u8,
     build_key: Digest,
 
-    /// Input paths are absolute literals; --fork is a canonical relative path
-    /// resolved from the canonical cwd. No shell, flash or device discovery.
+    /// Input paths are absolute literals. No shell, flash or device discovery.
+    /// The firmware always comes from the build root's own package, so a
+    /// development lock is rejected.
     pub fn init(
         gpa: std.mem.Allocator,
         input: Inputs,
@@ -59,24 +60,18 @@ pub const Command = struct {
         repository: []const u8,
         export_directory: []const u8,
         install_directory: []const u8,
-        development_firmware: ?[]const u8,
     ) !Command {
         try validateInputs(input);
-        if ((input.lock.source_kind == .development) != (development_firmware != null))
-            return error.FirmwareOverrideMismatch;
+        if (input.lock.source_kind == .development) return error.FirmwareOverrideMismatch;
         for ([_][]const u8{ compiler, repository, export_directory, install_directory }) |path| {
-            if (!std.fs.path.isAbsolute(path) or
-                std.mem.indexOfScalar(u8, path, 0) != null) return error.InvalidBuildPath;
-        }
-        if (development_firmware) |path| {
             if (!std.fs.path.isAbsolute(path) or
                 std.mem.indexOfScalar(u8, path, 0) != null) return error.InvalidBuildPath;
         }
         var arena: std.heap.ArenaAllocator = .init(gpa);
         errdefer arena.deinit();
         const a = arena.allocator();
-        const args = try a.alloc([]const u8, if (development_firmware != null) 14 else 12);
-        var owned_cwd: []const u8 = try a.dupe(u8, repository);
+        const args = try a.alloc([]const u8, 12);
+        const owned_cwd: []const u8 = try a.dupe(u8, repository);
         args[0] = try a.dupe(u8, compiler);
         args[1] = "build";
         args[2] = "--build-file";
@@ -89,20 +84,6 @@ pub const Command = struct {
         args[cache_dir_arg] = try std.fs.path.join(a, &.{ install_directory, "local-cache" });
         args[10] = "-p";
         args[11] = try a.dupe(u8, install_directory);
-        if (development_firmware) |path| {
-            // Zig 0.17 needs a relative --fork for local package dependencies.
-            // Canonicalize both paths so symlinked checkout spellings agree with
-            // the process cwd. Source ownership is checked by the caller.
-            var threaded = std.Io.Threaded.init(gpa, .{});
-            defer threaded.deinit();
-            const io = threaded.io();
-            owned_cwd = try std.Io.Dir.realPathFileAbsoluteAlloc(io, repository, a);
-            const canonical_firmware = try std.Io.Dir.realPathFileAbsoluteAlloc(io, path, a);
-            const relative = try std.fs.path.relativeAlloc(a, owned_cwd, null, owned_cwd, canonical_firmware);
-            if (std.fs.path.isAbsolute(relative)) return error.InvalidBuildPath;
-            args[12] = "--fork";
-            args[13] = relative;
-        }
         const owned_path = try std.fs.path.join(a, &.{ install_directory, "firmware", "project.uf2" });
         return .{
             .arena = arena,
@@ -290,7 +271,6 @@ test "firmware argv preserves literal metacharacters and selects build only" {
         "/repo",
         "/export ; $(touch nope)",
         "/cache ; output",
-        null,
     );
     defer command.deinit();
     try std.testing.expectEqualStrings("-Dproject-export=/export ; $(touch nope)", command.argv[6]);
@@ -303,38 +283,12 @@ test "firmware argv preserves literal metacharacters and selects build only" {
     try std.testing.expectEqual(@as(usize, 12), command.argv.len);
     try std.testing.expectError(
         error.InvalidBuildPath,
-        Command.init(std.testing.allocator, inputs(), "zig", "/repo", "/export", "/cache", "/firmware"),
+        Command.init(std.testing.allocator, publishedInputs(), "zig", "/repo", "/export", "/cache"),
     );
     try std.testing.expectError(
         error.FirmwareOverrideMismatch,
-        Command.init(std.testing.allocator, inputs(), "/zig", "/repo", "/export", "/cache", null),
+        Command.init(std.testing.allocator, inputs(), "/zig", "/repo", "/export", "/cache"),
     );
-}
-
-test "development fork canonicalizes symlinked cwd and sibling with spaces" {
-    const a = std.testing.allocator;
-    var threaded = std.Io.Threaded.init(a, .{});
-    defer threaded.deinit();
-    const io = threaded.io();
-    var temp = std.testing.tmpDir(.{});
-    defer temp.cleanup();
-    try temp.dir.createDir(io, "companion checkout", .default_dir);
-    try temp.dir.createDir(io, "firmware checkout", .default_dir);
-    try temp.dir.symLink(io, "companion checkout", "companion link", .{ .is_directory = true });
-    const root = try temp.dir.realPathFileAlloc(io, ".", a);
-    defer a.free(root);
-    const repo = try std.fs.path.join(a, &.{ root, "companion link" });
-    defer a.free(repo);
-    const firmware = try std.fs.path.join(a, &.{ root, "firmware checkout" });
-    defer a.free(firmware);
-    var command = try Command.init(a, inputs(), "/zig", repo, "/export", "/cache", firmware);
-    defer command.deinit();
-    const canonical_repo = try std.Io.Dir.realPathFileAbsoluteAlloc(io, repo, a);
-    defer a.free(canonical_repo);
-    try std.testing.expectEqualStrings(canonical_repo, command.cwd);
-    try std.testing.expectEqualStrings("--fork", command.argv[12]);
-    const expected_fork = if (@import("builtin").os.tag == .windows) "..\\firmware checkout" else "../firmware checkout";
-    try std.testing.expectEqualStrings(expected_fork, command.argv[13]);
 }
 
 test "manifest rejects failures cancellation stale input and corrupt artifact" {
@@ -425,6 +379,6 @@ test "manifest freezes provenance and rejects an unpinned compiler" {
     captured.lock.zig_version = "0.15.2";
     try std.testing.expectError(
         error.UnsupportedCompilerVersion,
-        Command.init(a, captured, "/zig", "/repo", "/export", "/cache", "/firmware"),
+        Command.init(a, captured, "/zig", "/repo", "/export", "/cache"),
     );
 }

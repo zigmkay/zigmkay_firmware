@@ -19,7 +19,6 @@ pub const Request = struct {
     export_directory: []const u8,
     expected_export_tree: jobs.firmware.Digest,
     install_directory: []const u8,
-    development_firmware: ?[]const u8 = null,
     // Cold builds compile the shipped build runner, native runner and firmware.
     // Hosted Windows runners can exceed five minutes without being hung.
     timeout_ms: u32 = 900_000,
@@ -100,7 +99,6 @@ pub const Job = struct {
             owned.selection.build_root,
             owned.export_directory,
             install_path,
-            owned.development_firmware,
         );
         errdefer command.deinit();
         if (owned.native_only) {
