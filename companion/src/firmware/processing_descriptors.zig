@@ -17,6 +17,9 @@ pub const Entry = struct {
     key_count: usize,
     sides: []const core.Side,
     /// Action slots, not encoder devices: CW and CCW have separate indexes.
+    /// Every entrypoint wires knob n (from 0) to slot 2n clockwise and slot
+    /// 2n + 1 counter-clockwise; the editor names slots by this convention.
+    /// A knob's push button is a matrix key and has no slot.
     encoder_actions: usize,
 };
 
