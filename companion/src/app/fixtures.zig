@@ -341,14 +341,15 @@ fn nativeTrayScript(app: *App) !void {
     }
 }
 
-/// The status fixture shows each toolbar state for four frames.
+/// The status fixture shows each toolbar state for four frames. Scene 6 is the
+/// plain editor with nothing open, as in the README screenshot.
 pub fn statusScene(app: *const App) usize {
     return if (app.mode.isStatus()) (app.count - 1) / 4 else 0;
 }
 
 pub fn resizeStatusWindow(app: *App) void {
     if (app.mode.isDrawers() and app.count == 1) _ = c.SDL_SetWindowSize(app.native.window, 1440, 1000);
-    if (!app.mode.isStatus() or (app.count != 1 and app.count != 21)) return;
+    if (!app.mode.isStatus() or (app.count != 1 and app.count != 21 and app.count != 25)) return;
     const narrow = app.count == 21;
     _ = c.SDL_SetWindowSize(app.native.window, if (narrow) 900 else 1440, if (narrow) 600 else 1000);
 }
@@ -367,6 +368,7 @@ pub fn showStatusDetails(app: *App) void {
     // Scenes 0 and 1 open the key editor on F: its tap, then its hold, after
     // F gained a Shift hold.
     const scene = statusScene(app);
+    if (scene == 6 and app.count % 4 == 1) @memset(app.model.selected, false);
     if (scene <= 1 and app.count % 4 == 1) {
         app.model.select(13, false);
         if (scene == 1) {
@@ -395,9 +397,12 @@ pub fn statusToolbar(app: *const App, toolbar: *@FieldType(editor.Frame, "toolba
     toolbar.first_build = scene == 0;
     toolbar.flash_active = scene == 1;
     toolbar.flash_succeeded = scene == 2;
-    toolbar.flash_failed = scene >= 3;
+    toolbar.flash_failed = scene >= 3 and scene != 6;
+    // The fixture has no build plan; the plain editor shows the installed
+    // application's idle status instead of the missing-resources notice.
+    if (scene == 6) toolbar.build_status = "Ready to build and Flash";
     toolbar.flash_status = switch (scene) {
-        0 => "",
+        0, 6 => "",
         1 => "Transferring firmware to keyboard…",
         2 => "Matching firmware reconnected",
         else => "Flash failed: the selected firmware could not be verified against the current project snapshot. " ++

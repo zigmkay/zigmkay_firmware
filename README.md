@@ -125,7 +125,7 @@ schematic of its PCB. Your board is not listed? See
 ## Companion
 
 <p align="center">
-  <img src="assets/screenshots/editor.png" alt="ZigMkay Companion editor: a Leonardo Keycaprio layout with six layers, the Tap picker open on the F key, the OS keyboard palette and Build and Flash in the toolbar" width="900">
+  <img src="assets/screenshots/editor.png" alt="ZigMkay Companion editor: a Leonardo Keycaprio layout with six layers, thumb keys fanned out like on the PCB, the OS keyboard palette and Build and Flash in the toolbar" width="900">
 </p>
 
 The [ZigMkay Companion](companion/README.md) is a native desktop application
