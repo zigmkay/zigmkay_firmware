@@ -7,6 +7,20 @@ same structures when you edit visually.
 
 [Documentation index](README.md) · [Discord](https://discord.gg/bJCZUtJD65)
 
+## Your own keymap
+
+Start from your keyboard's default keymap in `keyboards/local/`, which Git
+ignores, so upstream updates never conflict with it:
+
+```sh
+mise run //keyboards:keymap:new lk8                                # keyboards/local/lk8/keymap.zig
+mise run //keyboards:build lk8 --keymap local/lk8/keymap.zig
+mise run //keyboards:flash lk8 --keymap local/lk8/keymap.zig
+```
+
+The [keyboards README](../keyboards/README.md#use-your-own-keymap) has the
+details.
+
 ## Layers and keys
 
 A keymap is `[N][M]?KeyDef`: N layers of M keys. Key indexes run in the order

@@ -22,6 +22,7 @@ pub const Sources = struct {
 
 pub fn build(b: *std.Build) void {
     const selected_keyboard = b.option([]const u8, "keyboard", keyboardOptionDescription(b)) orelse boards.boards[0].name;
+    const keymap_option = b.option([]const u8, "keymap", "Keymap file that replaces the keyboard's own, relative to this directory or absolute, such as local/lk8/keymap.zig");
 
     const zigmkay_dep = b.dependency("zigmkay", .{});
     const mz_dep = zigmkay_dep.builder.dependency("microzig", .{});
@@ -45,7 +46,8 @@ pub fn build(b: *std.Build) void {
         std.debug.panic("Unknown keyboard sample: '{s}'", .{selected_keyboard});
     };
 
-    const firmware = addKeyboardFirmware(b, mb, &target, optimize, "zigmkay_firmware", sample, sources, null);
+    const keymap_override = if (keymap_option) |path| keymapPath(b, sample, path) else null;
+    const firmware = addKeyboardFirmware(b, mb, &target, optimize, "zigmkay_firmware", sample, sources, keymap_override);
     mb.install_firmware(firmware, .{});
 
     const firmware_uf2 = firmware.get_emitted_bin(.{ .uf2 = .{ .family_id = .RP2040 } });
@@ -70,17 +72,38 @@ pub fn build(b: *std.Build) void {
     keymap_test_module.addImport("clackychan_keymap", clackychan_keymap_module);
     const keymap_tests = b.addTest(.{ .root_module = keymap_test_module });
     test_step.dependOn(&b.addRunArtifact(keymap_tests).step);
-    const board_tests = b.addTest(.{ .root_module = b.createModule(.{
+    const boards_mod = b.createModule(.{
         .root_source_file = b.path("boards.zig"),
         .target = b.graph.host,
-    }) });
+    });
+    const board_tests = b.addTest(.{ .root_module = boards_mod });
     test_step.dependOn(&b.addRunArtifact(board_tests).step);
 
     // Compile every keyboard so a broken keymap fails the tests, not just the
-    // one selected with -Dkeyboard.
-    for (boards.boards) |keyboard| {
+    // one selected with -Dkeyboard; the board template too, so that what
+    // board:new creates always builds.
+    for (boards.boards ++ [_]boards.Board{board_template}) |keyboard| {
         const keyboard_firmware = addKeyboardFirmware(b, mb, &target, optimize, keyboard.name, keyboard, sources, null);
         test_step.dependOn(&keyboard_firmware.exe.step);
+    }
+
+    // keymap:new and board:new; see tools/scaffold.zig.
+    const scaffold_mod = b.createModule(.{
+        .root_source_file = b.path("tools/scaffold.zig"),
+        .target = b.graph.host,
+        .imports = &.{.{ .name = "boards", .module = boards_mod }},
+    });
+    const scaffold = b.addExecutable(.{ .name = "scaffold", .root_module = scaffold_mod });
+    test_step.dependOn(&b.addRunArtifact(b.addTest(.{ .root_module = scaffold_mod })).step);
+    for ([_][3][]const u8{
+        .{ "keymap-new", "keymap", "Copy a keyboard's default keymap into local/ (zig build keymap-new -- <keyboard> [name])" },
+        .{ "board-new", "board", "Create my_keyboards/<name>/ from the board template and register it (zig build board-new -- <name>)" },
+    }) |step| {
+        const run = b.addRunArtifact(scaffold);
+        run.addArg(step[1]);
+        run.addPassthruArgs();
+        run.setCwd(b.path("."));
+        b.step(step[0], step[2]).dependOn(&run.step);
     }
 
     _ = @import("zigmkay").addFlashSteps(b, zigmkay_dep, firmware_uf2);
@@ -126,6 +149,26 @@ pub fn addKeyboardFirmware(
         firmware.add_app_import("keymap", keymap_mod, .{ .depend_on_microzig = true });
     }
     return firmware;
+}
+
+/// What `board:new` copies; compiled by the test step, not a build target.
+const board_template: boards.Board = .{
+    .name = "board_template",
+    .root_source_file = "tools/templates/main.zig",
+    .keymap = "tools/templates/keymap.zig",
+};
+
+/// The `-Dkeymap` file of `board`: relative to this directory, or absolute.
+fn keymapPath(b: *std.Build, board: boards.Board, path: []const u8) std.Build.LazyPath {
+    if (board.keymap == null) std.process.fatal(
+        "'{s}' defines its keymap in its main file, {s}; -Dkeymap needs a keyboard with a keymap file.",
+        .{ board.name, board.root_source_file },
+    );
+    const absolute = std.fs.path.isAbsolute(path);
+    const found = if (absolute) std.Io.Dir.accessAbsolute(b.graph.io, path, .{}) else b.root.access(b.graph.io, path, .{});
+    found catch |err|
+        std.process.fatal("Cannot read the keymap '{s}' ({t}); a relative path starts in the keyboards directory, such as local/lk8/keymap.zig.", .{ path, err });
+    return if (absolute) .{ .cwd_relative = path } else b.path(path);
 }
 
 fn keyboardOptionDescription(b: *std.Build) []const u8 {

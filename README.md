@@ -98,7 +98,9 @@ ZigMkay deliberately leaves out wireless, RGB and tap dance. See
 
 On Linux, picotool needs a udev rule once (`mise run //keyboards:udev`). Mount
 paths, picotool and other options are covered in
-[Building and flashing](docs/development/getting-started.md#flashing).
+[Building and flashing](docs/development/getting-started.md#flashing). To keep
+a keymap of your own, run `mise run //keyboards:keymap:new lk8`; the
+[keyboards README](keyboards/README.md) shows every task.
 
 ## Supported keyboards
 
@@ -119,8 +121,9 @@ Every board below is an RP2040 build target from
 | Encoder demo | `encoder_demo` | RP2040 | 1 key + encoder | Minimal encoder example; not offered in the companion |
 
 The companion offers every board that has a separate keymap file, with a
-schematic of its PCB. Your board is not listed? See
-[Adding a keyboard](docs/development/adding-a-keyboard.md).
+schematic of its PCB. Your board is not listed?
+`mise run //keyboards:board:new <name>` creates one; see
+[Add a new keyboard](keyboards/README.md#add-a-new-keyboard).
 
 ## Companion
 

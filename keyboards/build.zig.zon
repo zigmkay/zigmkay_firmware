@@ -17,5 +17,6 @@
         "boards.zig",
         "examples",
         "my_keyboards",
+        "tools",
     },
 }

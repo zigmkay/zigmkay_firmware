@@ -39,7 +39,9 @@ The repository root is a mise monorepo: run any package's task as
 | `mise run //zigmkay:test` | Firmware core tests |
 | `mise run //keyboards:test` | Compiles every keyboard and runs the keyboard regression tests |
 | `mise run //zkeycodes:test` | Keycode generator and layout tests |
-| `mise run //keyboards:build <name>` | Builds one keyboard into `keyboards/zig-out/firmware/` |
+| `mise run //keyboards:build <name>` | Builds one keyboard into `keyboards/zig-out/firmware/`; `--keymap <file>` builds another keymap |
+| `mise run //keyboards:keymap:new <keyboard> [name]` | Copies a default keymap to the Git-ignored `keyboards/local/<name>/` |
+| `mise run //keyboards:board:new <name>` | Creates a new board in `keyboards/my_keyboards/` and registers it |
 | `mise run //companion:editor` | Builds and starts the companion editor |
 | `mise run //companion:test` | Offline companion tests |
 
@@ -49,7 +51,9 @@ Raw HID monitor and normal companion startup talk to devices.
 ## Flashing
 
 `<name>` is a target from [`keyboards/boards.zig`](../../keyboards/boards.zig);
-the shell completes it with Tab.
+the shell completes it with Tab. Every flash task also takes
+`--keymap <file>`, as `build` does. The
+[keyboards README](../../keyboards/README.md) lists every keyboard task.
 
 | Task | `zig build` step (in `keyboards/`) | Method |
 | --- | --- | --- |

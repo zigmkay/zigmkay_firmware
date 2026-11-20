@@ -1,5 +1,8 @@
 # `<keyboard>` is a name from boards.zig, such as lk8; the shell completes it
-# with Tab from boards.zig.
+# with Tab from boards.zig. keyboards/README.md explains every task.
+#
+# Values typed by the user reach the shell only through mise's usage_*
+# environment variables, quoted, so the shell expands nothing inside them.
 
 [tasks.test]
 description = "Compile every keyboard and run the keyboard regression tests (no device access)"
@@ -10,24 +13,30 @@ description = "Build the firmware of one keyboard into zig-out/firmware"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
 complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+flag "--keymap <keymap>" help="Keymap file to build instead of the keyboard's own, relative to keyboards/, such as local/lk8/keymap.zig"
 '''
-run = 'zig build -Dkeyboard={{usage.keyboard}}'
+run = 'zig build -Dkeyboard={{usage.keyboard}} ${usage_keymap:+"-Dkeymap=$usage_keymap"}'
+run_windows = 'zig build -Dkeyboard={{usage.keyboard}} {% if usage.keymap %}"-Dkeymap=%usage_keymap%"{% endif %}'
 
 [tasks.flash]
 description = "Build and flash one keyboard with the host default (Windows/Linux: mounted volume, otherwise picotool)"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
 complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+flag "--keymap <keymap>" help="Keymap file to build instead of the keyboard's own, relative to keyboards/, such as local/lk8/keymap.zig"
 '''
-run = 'zig build flash -Dkeyboard={{usage.keyboard}}'
+run = 'zig build flash -Dkeyboard={{usage.keyboard}} ${usage_keymap:+"-Dkeymap=$usage_keymap"}'
+run_windows = 'zig build flash -Dkeyboard={{usage.keyboard}} {% if usage.keymap %}"-Dkeymap=%usage_keymap%"{% endif %}'
 
 [tasks."flash:picotool"]
 description = "Build and flash one keyboard with picotool"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
 complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+flag "--keymap <keymap>" help="Keymap file to build instead of the keyboard's own, relative to keyboards/, such as local/lk8/keymap.zig"
 '''
-run = 'zig build flash_pt -Dkeyboard={{usage.keyboard}}'
+run = 'zig build flash_pt -Dkeyboard={{usage.keyboard}} ${usage_keymap:+"-Dkeymap=$usage_keymap"}'
+run_windows = 'zig build flash_pt -Dkeyboard={{usage.keyboard}} {% if usage.keymap %}"-Dkeymap=%usage_keymap%"{% endif %}'
 
 [tasks."flash:mount"]
 description = "Build and flash one keyboard through the mounted RP2 bootloader volume"
@@ -35,11 +44,28 @@ usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
 complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
 flag "--mount <mount>" help="Mount point or volume label (default: RPI-RP2)"
+flag "--keymap <keymap>" help="Keymap file to build instead of the keyboard's own, relative to keyboards/, such as local/lk8/keymap.zig"
 '''
-# The mount path comes from mise's usage_mount variable, so the shell does
-# not expand anything inside it.
-run = 'zig build flash_mount -Dkeyboard={{usage.keyboard}} ${usage_mount:+"-Dflash-mount=$usage_mount"}'
-run_windows = 'zig build flash_mount -Dkeyboard={{usage.keyboard}} {% if usage.mount %}"-Dflash-mount=%usage_mount%"{% endif %}'
+run = 'zig build flash_mount -Dkeyboard={{usage.keyboard}} ${usage_mount:+"-Dflash-mount=$usage_mount"} ${usage_keymap:+"-Dkeymap=$usage_keymap"}'
+run_windows = 'zig build flash_mount -Dkeyboard={{usage.keyboard}} {% if usage.mount %}"-Dflash-mount=%usage_mount%"{% endif %} {% if usage.keymap %}"-Dkeymap=%usage_keymap%"{% endif %}'
+
+[tasks."keymap:new"]
+description = "Copy a keyboard's default keymap into keyboards/local/<name>/, which Git ignores, to edit and build"
+usage = '''
+arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
+complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+arg "[name]" help="Folder name under keyboards/local/ (default: the keyboard name)"
+'''
+run = 'zig build keymap-new -- "$usage_keyboard" ${usage_name:+"$usage_name"}'
+run_windows = 'zig build keymap-new -- "%usage_keyboard%" {% if usage.name %}"%usage_name%"{% endif %}'
+
+[tasks."board:new"]
+description = "Create keyboards/my_keyboards/<name>/ for a new RP2040 board from the template and add it to boards.zig"
+usage = '''
+arg "<name>" help="New keyboard name: a lowercase letter, then lowercase letters, digits and _"
+'''
+run = 'zig build board-new -- "$usage_name"'
+run_windows = 'zig build board-new -- "%usage_name%"'
 
 [tasks.udev]
 description = "Linux: install picotool's udev rules (sudo)"

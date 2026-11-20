@@ -56,10 +56,14 @@ The library every keyboard imports as `@import("zigmkay")`. It pins
 | Path | Contents |
 | --- | --- |
 | [`boards.zig`](../../keyboards/boards.zig) | Every build target: name, main file, keymap file |
-| `build.zig` | `-Dkeyboard=<name>`, the UF2 output, flash steps, and a test step that compiles every board |
+| `build.zig` | `-Dkeyboard=<name>`, `-Dkeymap=<path>`, the UF2 output, flash steps, and a test step that compiles every board |
 | `my_keyboards/<owner>/` | Main files and keymaps of contributors' boards |
 | `examples/` | Starter boards such as `dasbob` |
+| `tools/` | `scaffold.zig` and its templates, behind `keymap:new` and `board:new` |
+| `local/` | Personal keymaps from `keymap:new`; git-ignored and never bundled |
 | `tests/` | Keymap regression tests |
+
+The [keyboards README](../../keyboards/README.md) lists every task.
 
 ### `zkeycodes/`: keycodes
 
