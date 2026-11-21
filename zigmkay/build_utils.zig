@@ -36,9 +36,9 @@ pub fn add_test_steps(b: *std.Build, zigmkay_module: *std.Build.Module, test_ste
 
 /// Builds and installs the host tools so that dependents can fetch them with
 /// `dependency.artifact(...)`: `flash_picotool`, `flash_mount` and, on macOS,
-/// `rawhid-monitor`. Also exposes picotool, built from source, as the named
-/// lazy path "picotool", and its upstream udev rules as "picotool-udev-rules".
-pub fn install_tools(b: *std.Build) void {
+/// `rawhid-monitor`. picotool itself is a lazy dependency, fetched only by
+/// builds that configure a picotool step.
+pub fn install_tools(b: *std.Build) ?*std.Build.Step.Compile {
     inline for (.{ "flash_picotool", "flash_mount" }) |name| {
         const tool = b.addExecutable(.{
             .name = name,
@@ -51,28 +51,24 @@ pub fn install_tools(b: *std.Build) void {
         b.installArtifact(tool);
     }
 
-    const picotool_dep = b.dependency("picotool", .{
-        .target = b.graph.host,
-        .optimize = .ReleaseFast,
-    });
-    b.addNamedLazyPath("picotool", picotool_dep.artifact("picotool").getEmittedBin());
-    const picotool_src = picotool_dep.builder.dependency("picotool", .{});
-    b.addNamedLazyPath("picotool-udev-rules", picotool_src.path("udev/60-picotool.rules"));
-
     if (b.graph.host.result.os.tag == .macos) {
         const rawhid_monitor = b.addExecutable(.{
             .name = "rawhid-monitor",
-            .root_module = b.createModule(.{ .target = b.graph.host }),
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("tools/rawhid_monitor.zig"),
+                .target = b.graph.host,
+                .optimize = .ReleaseSafe,
+                .link_libc = true,
+            }),
         });
-        rawhid_monitor.root_module.addCSourceFile(.{
-            .file = b.path("tools/rawhid_monitor.c"),
-            .flags = &.{"-std=c11"},
-        });
-        rawhid_monitor.root_module.link_libc = true;
+        // The monitor decodes reports with the firmware's own companion definitions.
+        rawhid_monitor.root_module.addImport("zigmkay", b.modules.get("zigmkay").?);
         rawhid_monitor.root_module.linkFramework("IOKit", .{});
         rawhid_monitor.root_module.linkFramework("CoreFoundation", .{});
         b.installArtifact(rawhid_monitor);
+        return rawhid_monitor;
     }
+    return null;
 }
 
 /// Adds an uncached run step that flashes `firmware_uf2` with picotool: it
@@ -82,7 +78,7 @@ pub fn install_tools(b: *std.Build) void {
 /// `dependency` is the zigmkay package as a dependency of the calling package.
 pub fn addPicotoolFlash(b: *std.Build, dependency: *std.Build.Dependency, firmware_uf2: std.Build.LazyPath) *std.Build.Step.Run {
     const flash_command = b.addRunArtifact(dependency.artifact("flash_picotool"));
-    flash_command.addFileArg(dependency.namedLazyPath("picotool"));
+    flash_command.addArtifactArg(picotool(dependency).artifact("picotool"));
     flash_command.addFileArg(firmware_uf2);
     flash_command.has_side_effects = true;
     return flash_command;
@@ -105,7 +101,7 @@ pub fn addMountFlash(b: *std.Build, dependency: *std.Build.Dependency, firmware_
 pub fn addUdevRulesInstall(b: *std.Build, dependency: *std.Build.Dependency) *std.Build.Step.Run {
     const script = "install -m 644 \"$1\" /etc/udev/rules.d/60-picotool.rules && udevadm control --reload-rules && udevadm trigger";
     const install_command = b.addSystemCommand(&.{ "sudo", "sh", "-c", script, "sh" });
-    install_command.addFileArg(dependency.namedLazyPath("picotool-udev-rules"));
+    install_command.addFileArg(picotool(dependency).builder.dependency("picotool", .{}).path("udev/60-picotool.rules"));
     install_command.stdio = .inherit;
     install_command.has_side_effects = true;
     return install_command;
@@ -160,4 +156,13 @@ pub fn addFlashSteps(b: *std.Build, dependency: *std.Build.Dependency, firmware_
         .flash_mount = flash_mount_step,
         .install_udev_rules = install_udev_rules_step,
     };
+}
+
+/// picotool, built from source for the host. A lazy dependency of zigmkay:
+/// only builds that configure a picotool step fetch it.
+fn picotool(dependency: *std.Build.Dependency) *std.Build.Dependency {
+    return dependency.builder.dependency("picotool", .{
+        .target = dependency.builder.graph.host,
+        .optimize = .ReleaseFast,
+    });
 }

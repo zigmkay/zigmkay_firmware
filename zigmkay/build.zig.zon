@@ -7,10 +7,12 @@
         .microzig = .{
             .url = "https://github.com/ZigEmbeddedGroup/microzig/releases/download/0.17.12/microzig.tar.gz",
             .hash = "microzig-0.17.12-D20YSbDKAAA_aWCmmydsldbUrhmCUzNFqseEIAE4__5g",
+            .lazy = true,
         },
         .picotool = .{
             .url = "git+https://github.com/allyourcodebase/picotool.git#d8df33801dbea792128baaab516291720d400a91",
             .hash = "picotool-2.3.1-PtJrRaJNAAA3xRwGctKAdomuKCJXz5UwMOrhzQ_Z2f-e",
+            .lazy = true,
         },
     },
     .paths = .{

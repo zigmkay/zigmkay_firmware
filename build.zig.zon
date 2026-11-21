@@ -4,6 +4,7 @@
     .fingerprint = 0x8c0e2683c32a9e11, // Changing this has security and trust implications.
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
+        .keyboards = .{ .path = "keyboards" },
         .zigmkay = .{
             .path = "zigmkay",
         },

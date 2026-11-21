@@ -1,0 +1,40 @@
+name: Native desktop contracts
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - "companion/**"
+      - "zigmkay/**"
+      - "keyboards/**"
+      - "zkeycodes/**"
+      - build.zig
+      - build.zig.zon
+      - .github/workflows/companion-desktop-checks.yml
+  pull_request:
+    paths: *paths
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    working-directory: companion
+
+jobs:
+  desktop:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install pinned Zig
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+      - name: Verify compiler
+        run: test "$(zig version)" = 0.17.0
+      - name: Compile and link the native editor, DVUI, SDL3 and tray
+        run: zig build check -Ddesktop -j2
+      - name: Run offline GUI contracts without keyboard access
+        run: zig build test-desktop -Ddesktop -j2 --test-timeout 180s

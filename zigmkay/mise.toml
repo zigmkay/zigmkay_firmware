@@ -1,0 +1,7 @@
+[tasks.test]
+description = "Run the firmware core tests (no device access)"
+run = "zig build test"
+
+[tasks.rawhid-monitor]
+description = "macOS: print the Raw HID key events of a connected keyboard"
+run = "zig build rawhid-monitor"

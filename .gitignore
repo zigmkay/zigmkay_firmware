@@ -5,3 +5,6 @@
 **/zig-x86_64-linux-*/
 **/zls-x86_64-linux-*/
 **/zig-pkg/
+
+# Personal keymaps from `mise run //keyboards:keymap:new`; see keyboards/README.md.
+/keyboards/local/

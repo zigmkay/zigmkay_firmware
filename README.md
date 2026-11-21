@@ -1,255 +1,267 @@
-# Welcome
-ZigMkay is a keyboard firmware made in zig. You also configure your own keymaps in zig. 
+<div align="center">
 
-## Getting started
-1. Install zig on your machine. Ensure you can run "zig version" and that it spits out 0.17.0. These is a shell.nix which will show all needed dependencies over time.
+<img src="assets/logo-banner.png" alt="ZigMkay logo: an orange keycap with a lightning bolt" width="420">
 
-2. Clone this repo
+**Keyboard firmware you can read.<br>A keymap editor you'll actually enjoy.**
 
-3. TODO: Describe how to copy an example and built it to the keyboard. 
+[![Firmware tests](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/firmware.yml/badge.svg)](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/firmware.yml)
+[![Companion offline checks](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-offline-checks.yml/badge.svg)](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-offline-checks.yml)
+[![Companion desktop checks](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-desktop-checks.yml/badge.svg)](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-desktop-checks.yml)
+<br>
+[![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
+[![Zig 0.17.0](https://img.shields.io/badge/zig-0.17.0-f7a41d.svg?logo=zig&logoColor=white)](https://ziglang.org/download/)
+[![Firmware: RP2040](https://img.shields.io/badge/firmware-RP2040-c51a4a.svg?logo=raspberrypi&logoColor=white)](#supported-keyboards)
+[![Companion preview: macOS | Windows | Linux](https://img.shields.io/badge/companion%20preview-macOS%20%7C%20Windows%20%7C%20Linux-555.svg)](companion/docs/compatibility.md)
+[![Discord](https://img.shields.io/badge/chat-Discord-5865F2.svg?logo=discord&logoColor=white)](https://discord.gg/bJCZUtJD65)
 
-## Flashing
+[Documentation](docs/README.md) · [Companion](#companion) · [Discord](https://discord.gg/bJCZUtJD65) · [Contributing](CONTRIBUTING.md)
 
-Run these from the `keyboards/` folder. `-Dkeyboard=<name>` picks the keyboard; `zig build --help` lists the available names.
+</div>
 
-```bash
-zig build flash -Dkeyboard=<name>        # host default (see below)
-zig build flash_pt -Dkeyboard=<name>     # picotool
-zig build flash_mount -Dkeyboard=<name>  # copy to the mounted RPI-RP2 drive
+## What is ZigMkay
+
+ZigMkay is open source firmware for programmable keyboards built on the
+Raspberry Pi RP2040. Your keymap is ordinary Zig: layers, tap-hold keys, combos
+and custom behaviour are typed values that the compiler checks before anything
+reaches the keyboard. The core is plain sequential code (scan, process, send)
+with no hidden events or interrupts, and the processing step is covered by an
+extensive test suite.
+
+ZigMkay is for people who build or tune their own split and compact keyboards
+and want firmware they can read end to end. If you would rather click than
+type, the bundled **ZigMkay Companion** edits the same keymaps visually, builds
+and flashes the firmware, shows your live layer on screen and lets you practise
+the layout in a typing tutor.
+
+## Contents
+
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Supported keyboards](#supported-keyboards)
+- [Companion](#companion)
+- [Writing a keymap](#writing-a-keymap)
+- [Documentation](#documentation)
+- [Contributing](#contributing)
+- [Community](#community)
+- [AI usage](#ai-usage)
+- [License](#license)
+
+## Features
+
+| | |
+| --- | --- |
+| **Keymaps in Zig.** Layers are arrays of `KeyDef` values; mistakes are compile errors, not surprises on the desk. | **Tap, hold, tap-hold.** Per-key tapping terms, permissive hold always on, optional retro tapping. |
+| **Hold layers and modifiers together.** One hold can switch a layer *and* add modifiers. | **Taps with their own modifiers.** Fire `AltGr+7` on tap and still hold a modifier on the same key; dead keys too. |
+| **Autofire.** Per-key repeat with its own start delay and interval, for arrows and Vim motions. | **Two-key combos.** A combo fires anything a key can, including holds and layer switches, per layer. |
+| **One-shot modifiers and layers.** A tap arms a hold for the next key. | **Media and mouse.** Consumer control (volume, tracks, mute) and mouse buttons and wheel. |
+| **Rotary encoders.** Quadrature encoders fire a tap per step: keys, media, mouse wheel. | **Split keyboards.** Primary and secondary halves over UART or PIO UART; unibody boards too. |
+| **Custom code where you need it.** One `on_event` callback sees tap and hold enter/exit and every tick. | **Raw HID companion link.** Silent until a host connects; then streams layers, modifiers and key events. |
+| **Flashing built in.** `picotool` is built from source, or copy to the mounted `RPI-RP2` drive. | **Locale keycodes.** `zkeycodes` generates Zig keycodes from QMK's locale layouts, around 70 of them. |
+
+ZigMkay deliberately leaves out wireless, RGB and tap dance. See
+[Design principles](docs/development/architecture.md#design-principles).
+
+## Quick start
+
+1. **Install the tools.** Install [mise](https://mise.jdx.dev/installing-mise.html)
+   and Git. mise selects exactly Zig 0.17.0 for this repository.
+
+2. **Clone and set up.**
+
+   ```sh
+   git clone https://github.com/zigmkay/zigmkay_firmware.git
+   cd zigmkay_firmware
+   mise trust --all && mise install
+   mise exec -- zig version        # prints 0.17.0
+   ```
+
+3. **Build your keyboard.** Pick a name from the [table below](#supported-keyboards):
+
+   ```sh
+   mise run //keyboards:build lk8  # writes keyboards/zig-out/firmware/zigmkay_firmware.uf2
+   ```
+
+4. **Flash it.** Start the command, then put the keyboard into bootloader mode
+   (hold BOOT while plugging it in, or hold BOOT and press RESET). The command
+   waits for the keyboard, flashes it and exits.
+
+   ```sh
+   mise run //keyboards:flash lk8
+   ```
+
+5. **Or do it all visually.** Start the companion, choose your keyboard and a
+   layout, and press **Build** and **Flash**:
+
+   ```sh
+   mise run //companion:editor
+   ```
+
+On Linux, picotool needs a udev rule once (`mise run //keyboards:udev`). Mount
+paths, picotool and other options are covered in
+[Building and flashing](docs/development/getting-started.md#flashing). To keep
+a keymap of your own, run `mise run //keyboards:keymap:new lk8`; the
+[keyboards README](keyboards/README.md) shows every task.
+
+## Supported keyboards
+
+Every board below is an RP2040 build target from
+[`keyboards/boards.zig`](keyboards/boards.zig). Pass its name to
+`mise run //keyboards:build <name>` or `mise run //keyboards:flash <name>`.
+
+| Keyboard | Build targets | Controller | Layout | Notes |
+| --- | --- | --- | --- | --- |
+| Leonardo Keycaprio | `lk1`, `lk2` | RP2040 | Unibody, 30 keys | PCB 0.1 and 0.2 |
+| Leonardo Keycaprio | `keycaprio_colemak_0_4` | RP2040 | Unibody, 30 keys | PCB 0.4, Colemak keymap |
+| Leonardo Keycaprio | `lk6`, `lk7`, `lk8` | RP2040 | Unibody, 34 keys | PCB 0.6 to 0.8 |
+| Leonardo Keycaprio | `keycaprio_colemak_0_6`, `keycaprio_colemak_0_7`, `keycaprio_us_intl_0_7` | RP2040 | Unibody, 34 keys | Colemak and US International keymaps |
+| Clacky Chan | `clacky_chan`, `clackychan_colemak` | RP2040 per half | Split (UART), 30 keys | Default and Colemak keymaps |
+| Dasbob | `dasbob` | RP2040 per half | Split (UART / PIO UART), 36 keys | Direct wiring; the starter example in [`keyboards/examples/dasbob/`](keyboards/examples/dasbob/) |
+| Tucky Two Times | `tuckytwotimes` | RP2040 per half | Split (UART), 30 keys | Two rotary encoders |
+| Molekula | `molekula` | RP2040 | Unibody, 38 keys | One rotary encoder (volume) |
+| Encoder demo | `encoder_demo` | RP2040 | 1 key + encoder | Minimal encoder example; not offered in the companion |
+
+The companion offers every board that has a separate keymap file, with a
+schematic of its PCB. Your board is not listed?
+`mise run //keyboards:board:new <name>` creates one; see
+[Add a new keyboard](keyboards/README.md#add-a-new-keyboard).
+
+## Companion
+
+<p align="center">
+  <img src="assets/screenshots/editor.png" alt="ZigMkay Companion editor: a Leonardo Keycaprio layout with six layers, thumb keys fanned out like on the PCB, the OS keyboard palette and Build and Flash in the toolbar" width="900">
+</p>
+
+The [ZigMkay Companion](companion/README.md) is a native desktop application
+for the same firmware, written in Zig and living in [`companion/`](companion/).
+
+- **Visual keymap editor.** Click the upper half of a key for its tap, the lower
+  half for its hold. Layers, combos, encoders, one-shots, media and mouse keys,
+  with undo and redo.
+- **Build and Flash.** Compile the firmware and flash it from the toolbar;
+  Auto-build compiles while you edit. The installed application carries its own
+  Zig toolchain and firmware sources.
+- **Live companion overlay.** A transparent, click-through overlay that follows
+  the active layer, modifiers and pressed keys of a connected keyboard. Bind a
+  key to **Show / hide companion** to bring it up.
+- **Typing tutor.** Check a freshly flashed layout key by key, then run short
+  English tests or Zig lessons with words per minute and accuracy.
+
+<table>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/my-keyboards.png" alt="My Keyboards: the Leonardo Keycaprio with three saved layouts and a New layout card"></td>
+    <td width="50%"><img src="assets/screenshots/combos.png" alt="The Combos editor: 22 combos, a two-key picker on the PCB schematic and the combo's tap action"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Your keyboards and layouts</sub></td>
+    <td align="center"><sub>Combos on the PCB schematic</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="assets/screenshots/tutor.png" alt="Typing tutor during an English test at 47 WPM with the next key highlighted on the keyboard"></td>
+    <td width="50%">
+      <img src="assets/screenshots/companion-overlay.png" alt="Live companion overlay on the base layer of a Leonardo Keycaprio: home-row modifiers, layer holds on the thumbs and a verified running profile">
+    </td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Typing tutor</sub></td>
+    <td align="center"><sub>Live layer overlay</sub></td>
+  </tr>
+</table>
+
+Start it from the repository root:
+
+```sh
+mise run //companion:editor      # the editor, connects to your keyboard automatically
+mise run //companion:companion   # start hidden, with the tray icon and overlay only
 ```
 
-Start the command, then put the keyboard into bootloader mode (hold BOOT while plugging it in, or hold BOOT and press RESET). The command waits for the keyboard, flashes it and finishes.
+Read the [companion README](companion/README.md) for the full tour,
+[typing practice](companion/docs/typing-practice.md),
+[preview releases](companion/docs/preview-releases.md) and
+[platform status](companion/docs/compatibility.md).
 
-| Host    | `flash` uses |
-|---------|--------------|
-| Windows | mount        |
-| Linux   | mount        |
-| macOS   | picotool     |
+## Writing a keymap
 
-picotool is built from source by the build, so you don't need to install it.
+A keymap is a Zig file with one array per layer. Each entry is a `KeyDef`:
+`tap_only`, `hold_only`, `tap_hold`, `tap_with_autofire`, `.none` for a key
+that does nothing, or `null` to inherit from the layer below. This excerpt
+from [`keyboards/examples/dasbob/keymap.zig`](keyboards/examples/dasbob/keymap.zig)
+shows the base layer and a tap-hold key that types Enter on tap and holds
+Shift:
 
-### Mount based flashing
+```zig
+const keycodes = @import("zkeycodes");
+const dk = keycodes.layouts.danish;
+const us = keycodes.layouts.keycodes.kcf;
 
-This waits for the `RPI-RP2` drive and copies the firmware onto it. On Linux it looks for `/run/media/$USER/RPI-RP2`, and mounts the drive with `udisksctl` if your desktop doesn't do it automatically. If your system mounts it somewhere else (e.g. `/media/$USER/RPI-RP2` on Ubuntu/Debian), pass the mount point or another volume label:
+pub const key_count = 36;
 
-```bash
-zig build flash_mount -Dkeyboard=<name> -Dflash-mount=/media/$USER/RPI-RP2
+pub const keymap = [_][key_count]?zigmkay.core.KeyDef{
+    // BASE_LAYER: 0
+    .{
+         T(dk.Q), T(dk.W), T(dk.E), T(dk.R),     T(dk.T),                  T(dk.Y), T(dk.U),      T(dk.I),    T(dk.O),   T(dk.P),
+         T(dk.A), T(dk.S), T(dk.D), T(dk.F),     T(dk.G),                  T(dk.H), T(dk.J),      T(dk.K),    T(dk.L),   T(dk.SCLN),
+         T(dk.Z), T(dk.X), T(dk.C), T(dk.V),     T(dk.B),                  T(dk.N), T(dk.M),      T(dk.COMM), T(dk.DOT), T(dk.SLSH),
+                           T(dk.A), Enter_Shift, T(dk.B),                  T(dk.T), Space_Arrows, T(dk.C)
+    },
+    // ...
+};
+
+pub const tapping_term = core.TimeSpan{ .ms = 250 };
+pub const Enter_Shift = core.KeyDef{
+    .tap_hold = .{
+        .tap = .{ .key_press = us.ENTER },
+        .hold = .{ .hold_modifiers = .{ .left_shift = true } },
+        .tapping_term = tapping_term,
+    },
+};
 ```
 
-### picotool on Linux
+The board's main file wires pins and passes the keymap to the processor; it
+reaches the keymap as `@import("keymap")`, so one board can be built with
+several keymaps. The [keymap guide](docs/keymaps.md) covers every key type,
+combos, encoders and custom code.
 
-Without root, picotool can't access the bootloader until a udev rule is installed. To install picotool's official rule (asks for your sudo password):
+## Documentation
 
-```bash
-zig build install-udev-rules
-```
+| | |
+| --- | --- |
+| [Documentation index](docs/README.md) | Start here |
+| [Keymap guide](docs/keymaps.md) | Key types, combos, encoders, custom code |
+| [Getting started for developers](docs/development/getting-started.md) | Tools, building, testing, flashing |
+| [Repository layout](docs/development/repository-layout.md) | The packages and how they fit together |
+| [Adding a keyboard](docs/development/adding-a-keyboard.md) | Board table, keymap, companion descriptor |
+| [Architecture](docs/development/architecture.md) | Scan, process, send; split and encoders |
+| [Companion protocol](docs/development/companion-protocol.md) | The Raw HID messages |
+| [Testing and CI](docs/development/testing-and-ci.md) | Test tasks and GitHub workflows |
+| [Companion development](companion/docs/development.md) | Building and testing the desktop application |
 
-Unplug the keyboard and plug it back in afterwards.
+## Contributing
 
-## Only modify files in my_keyboards/
+Contributions are welcome: new boards, firmware features, companion
+improvements, documentation and bug reports. Read [CONTRIBUTING.md](CONTRIBUTING.md),
+then the [developer guide](docs/development/getting-started.md). Run
+`mise run test` before you open a pull request.
 
-Do only modify things inside my_keyboards. If you stick to this rule, future git fetches should be painless most of the time as we will keep changes inside the my_keyboards to an absolute minimum.
+## Community
 
-# Join our discord:
+Questions, build logs and keymap ideas are welcome on the ZigMkay Discord.
 
-Feel free to join our discord server: https://discord.gg/jWY6UPgu
+<p>
+  <a href="https://discord.gg/bJCZUtJD65"><img src="https://img.shields.io/badge/Join%20the%20ZigMkay%20Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the ZigMkay Discord"></a>
+</p>
 
+Bugs and feature requests also go to
+[GitHub issues](https://github.com/zigmkay/zigmkay_firmware/issues).
 
-<br>
-<br>
-<br>
-<br>
-<br>
-<br>
-<br>
-<br>
-<br>
-<br>
+## AI usage
 
+Parts of this firmware were developed with AI assistance. All AI-generated
+code, features and changes were reviewed and tested by human developers before
+inclusion. See [AI_USAGE.md](AI_USAGE.md).
 
-# OLD AND OUTDATED INFORMATION THAT NEEDS REWRITING:
+## License
 
-
-To get started, follow these steps:
-
-1. Install zig. 
-Follow these instructions: https://ziglang.org/learn/getting-started/ - The objective is to be able to call "zig version" and get the zig version displayed. That means you have installed zig correctly and it can be found in your path
-
-2. Fork this repo and clone it to your local machine and open your favourite IDE with the zigmkay folder as the root folder (the folder that contains the hidden .git folder)
-
-3. Contact me on the discord "microzig" for a personal guide to get you up and running. :) 
- 
-# Getting started
-- Copy an existing keyboard folder. For this walk through, we will copy the zilpzapl keyboard folder and call it "cool_board".
-- In the outer most main.zig, the one that is located directly at the root of the src folder, change the content to this:
-
-```c
-pub fn main() !void {
-    try @import("keyboards/cool_board/main.zig").main();
-}
-```
-
-- Open a terminal at the root folder (the parent folder of the src folder) and run the follow command:
-```bash
-zig build
-```
-
-If you don't encounter any build errors, nothing will be outputted in the terminal.
-
-Now you can find a .uf2 file in zig-out/firmware/zigmkay.uf2
-
-Now flash this file to your keyboard.
-
-# Editing your keymap
-Typically you will only need to edit the keymap.zig file. This will contain your keymap with combos and custom code, and your pin mappings which you only need to alter if the board you use is different from what the copied keyboard was made for.
-
-# Introduction to using ZigMKay
-A keymap consists of N number of layers each with M number of keys. It is defined as [N][M]KeyDef. 
-
-A KeyDef can be any of the following kinds:
-- Tap_only: has a TapDef value only
-- Hold_only: has a HoldDef value only
-- Tap_Hold: has both a TapDef and a HoldDef
-- Tap_autofire: has a TapDef only - when holding down a key of this type, repeating taps will be fired at a rate you can configure
-
-A TapDef contains:
-- a keycode, which is the code that will be fired when zigmkay decides that a tap has happened
-- an optional Modifiers value - if set, this will be applied to the keycode 
-- an optional media_key value - if set, this will fire a Consumer Control HID report (e.g., volume, play/pause, mute)
-- an optional mouse_action value - if set, this will fire a Mouse HID report (e.g., clicks, wheel movements)
-If a tap has a modifiers, the current held modifiers will be cancelled, the tap will be fired with its own modifiers and then any previous modifiers will be re-applied.
-This behaviour allows for various features, eg. a layer activates shift, but a single key should not be shifted. In this case, the optional modifier could be set to empty (instead of null).
-
-A HoldDef contains:
-- an optional layer to activate
-- an optional modifiers to activate
-This model allows for straight forward combinations of layer switches and modifiers at the same time.
-The modifiers defined here will be added to any existing mod holds (eg if left_alt is held down and this hold key is set to enable left_shift, then both of these modifiers will be held at the same time
-  
-Want to have a single key that fires a keycode with a modifier on tap and also shifts layer and applies another modifier when held? This is automatically support out of the box by this model. If you can express it with a KeyDef struct, it is possible.
-
-## Autofire
-Autofire allows for fast repeating and cannot be used in combination with holds, hence it has its own type. The usetype for this is to allow arrow keys (for instance) to reach very fast to holding, allowing for snappy ide work for instance. Likewise, w and b could also have autofire, and suddenly vim motions got a boost - this feature is very addictive by the way.
-
-## Combos
-A combo is defined by a KeyDef, 2 key_indexes and a layer that it is active on. By using a keyDef for combos so everything that is possible for a single key is also possible with a combo, ie tap_only, hold_only, tap_hold and aurofire are all supported by combos out of the box. Currently combos are limited to 2 keys but let me know if you need 3, then I might look into it.
-
-## Retrotapping
-Retrotapping is an opt in on the tap_hold type. When set to true, the key will fire its tap after the hold is released if no other key were tapped while the key were held. A use case for this is in combination with a tapping term of 0 ms. This will allow for eg instant layers switches and still trigger eg ENTER on release. 
-
-## Permissive hold
-Permissive hold is always on. In qmk you can enable permissive hold and pressing tap/hold key 1, then press and release key 2 and then releasing key 1 - all withing the tapping term will still make zigmkay choose the hold over the tap allowing for fast use of shift while typing fast. Permissive hold is not only the default but the only way in zigmkay.
-
-## Encoders
-ZigMKay supports quadrature rotary encoders. An encoder is defined with two key indexes representing clockwise (CW) and counter-clockwise (CCW) rotation. When the encoder is rotated, it simulates key press/release events for these indexes, allowing the same KeyDef logic (tap, hold, layer, etc.) to apply to encoder movements.
-
-## HID Channels
-ZigMKay supports multiple HID channels beyond standard keyboard:
-- **Keyboard**: Standard 6-key rollover with modifier keys and LED indicator feedback
-- **Consumer Control**: Media keys (volume, play/pause, mute, next/prev track)
-- **Mouse**: 5-button mouse with X/Y movement, wheel, and pan support
-- **Raw HID**: 32-byte bidirectional channel for companion app communication and key logging
-
-This allows keymaps to define keys that control media playback, move the mouse cursor, or send custom data to a companion application.
-
-## Custom code
-You can hook into events and manipulate modifiers, layer settings and manually fire key presses and releases. By providing this pattern, zigmkay gives you full flexibility without making you opt out intirely from all tap/hold decision logic. 
-The events you can hook into are:
-- OnTapEnterBefore => This is fired when a tap is decided (by using tap_only, tap_hold or autofire) right before the actual tap press logic is executed (which will send a "keycode press" to the host)
-- OnTapEnterAfter => This is fired when a tap is decided (by using tap_only, tap_hold or autofire) right after the actual tap press logic is executed (which will send a "keycode press" to the host)
-- OnTapExitBefore => This is fired when a previously decided tap is released again (by using tap_only, tap_hold or autofire) right before the actual tap release logic is executed (which will send a "keycode release" to the host)
-- OnTapExitAfter => This is fired when a previously decided tap is released again (by using tap_only, tap_hold or autofire) right after the actual tap release logic is executed (which will send a "keycode release" to the host)
-- OnHoldEnterBefore => This is fired when a hold is decided (by using hold_only or tap_hold) right before the actual hold is executed (eg before any modifiers are sent and layers are manipulated)
-- OnHoldEnterAfter => This is fired when a hold is decided (by using hold_only or tap_hold) right after the actual hold is executed (eg after any modifiers are sent and layers are manipulated)
-- OnHoldExitBefore => This is fired when a previously decided hold is released again (by using hold_only or tap_hold) right before the actual hold-release is executed (eg before any modifiers cancels are sent and layers are manipulated back)
-- OnHoldExitAfter => This is fired when a previously decided hold is released again (by using hold_only or tap_hold) right after the actual hold-release is executed (eg after any modifiers cancels are sent and layers are manipulated back)
-- Tick => every time the loop ticks, this will be fired. Useful for when you want to time something that cannot be correlated to any of the other events.
-
-
-# Guide
-```c
-pub fn main() !void {
-    // Data queues
-    var matrix_change_queue = zigmkay.core.MatrixStateChangeQueue.Create();
-    var usb_command_queue = zigmkay.core.OutputCommandQueue.Create();
-
-    // Logic
-    const matrix_scanner = zigmkay.matrix_scanning.CreateMatrixScanner(.{ .debounce_ms = 5 });
-    var processor = zigmkay.processing.CreateProcessorType(keyboard.dimensions, &keyboard.keymap){};
-    const usb_command_executor = zigmkay.usb_command_executor.CreateAndInitUsbCommandExecutor();
-
-    while (true) {
-        const current_time = time.get_time_since_boot().to_us();
-
-        // Detect matrix changes
-        try matrix_scanner.DetectKeyboardChanges(&matrix_change_queue, current_time);
-
-        // Decide actions
-        try processor.Process(&matrix_change_queue, &usb_command_queue, current_time);
-
-        // Execute actions
-        try usb_command_executor.HouseKeepAndProcessCommands(&usb_command_queue);
-    }
-}
-```
-# KeyDef examples
-- tap_only
-- tap_only tap-with-mod
-- tap_only with media key: KC.MEDIA_VOLUME_UP
-- tap_only with mouse action: MS().WheelUp
-- tap_only with mouse action: MS().WheelDown
-- tap_only with mouse action: MS().LeftClick
-- hold mod
-- hold layer
-- tap/hold with layer hold
-- tap/hold with mod hold
-- tap/hold with both layer and mod hold
-- tap/hold with retro tapping enabled
-- autofire
-- combo
-- custom code, example to do a tri-layer
-
-# Philosophy
-No hidden control flow. I don't want any behind-the-scenes triggered timing events og interrupts working anywhere it can be avoided (which I believe is everywhere). I want plain, readable sequential code that the reader can make sense of, even the first time they read the code. 
-
-# Why did I make ZigMkay?
-I was curious to what it would take to do this and then there was some things that could be improved in the existing options available:
-- Written in zig. This should make it possible to give better and more compile error messages.
-- Easy start: Easy to setup and compile locally (in opposition to qmk where python is now annoying, you must git pull with -recursive flag, you must run a qmk setup command etc). The "etc" is mainly because I personally always feel there are more cases, but I could not come up with any at the time of writing :D
-- handling is done in plain procedural code (look at processing.zig). No events with hidden control flow or anything like that.
-- tap-with-mod combined with hold: Say you need to press altgr+7 for making a {, then you also want the same key to be a modifier when hold. This is possible out of the box (possible in zmk, but in qmk this must be done using custom tap/hold handling)
-- combos can fire anything that a single key can fire, e.g. a combo can behave as a modifier hold (say a+s should act as a LGUI hold) as well as layer switch - all out of the box within the standard way of configuring zigmkay (combos for modifiers is not possible in zmk afaik - please correct me if I'm wrong)
-- custom code is more isolated to a key. This is one of the very nice feature in zmk - in qmk you cannot do this in the same manner, you will have the big switch case to handle all the custom behaviour.
-- tap-without-mods while mod activated: Option of defining that a given key should be fired without any modifiers (ctrl, shift etc) even though shift or other modifiers are currently being held. 
-- user is in control: The users code is the top level of orchestration. In qmk you hook into existing land and by magic everything is compiled. The zigmkay way makes it more obvious how the whole code is running and custom IO stuff will be implemented at the top level (the main.zig)
-- no black magic like #define specific field, compile flags, special function names to be implemented etc. Instead you edit the source code. You are not hooking into predefined events or defining methods with specific names to allow your logic to run at a specific place. And you IDE will understand more of what is going on as a result.
-- Strict 3-legged logic in terms of A:scanning, B:processing, C:send keycodes to the host using usb. Leg A and C are small, oneoffs and needs to be tested by hand. Leg B is the complex part an because queues are used for comminution between these 3, it is possible to test step B in isolation. And there are lots of tests of this part guarding against regression.
-- Readable pin mapping definition
-- Less custom code: Hook into tap-enter, tap-exit, hold-enter and hold-exit times. In qmk you react to key presses and key releases, so if you want a custom behaviour on tap, but standard on hold, you must handle both tap and hold in your custom code. in zigmkay you let zigmkay decide if tap or hold is chosen, and only run your code in one of the cases. 
-- Only dependencies is zig, which must be downloaded first, and microzig which will be auto-fetched when compiling (i think that is the time this happens)
-- Autofire per setting - allows for very fast autofire, eg on arrow keys while other keys remain unchanged. This feature does not support combination with hold functions.
-
-# When not to choose zigmkay
-- mcu: zigmkay will only support the mcu types that microzig supports.
-- wireless: zigmkay is not planned to be wireless ever.
-- tap dances: only tap/hold is supported as I don't need tap dances myself. But might be a future thing.
-- rgb: I don't need rgb support myself - however, it could be rather fun to explore good ways this could be supported so this might be a thing in the future - but no promisses
-
-# TODOs
-- 3 key combos (maybe)
-- make documentation
-- split support
-- import keycodes from qmk
-
-# Found a bug or want to contribute?
-- Please let me know. You can write me here in the repo or contact me on the "zig" or the "microzig" discord servers. My username is "Rollercole".
-
-# License 
-This project is licensed under GPL2
- 
-# AI-Assisted Development
-Parts of this firmware were developed with AI assistance. All AI-generated code, features, and changes were reviewed and tested by human developers before inclusion.
- 
- 
-
-
+ZigMkay is free software, licensed under the GNU General Public License,
+version 2 or (at your option) any later version (`GPL-2.0-or-later`). See
+[LICENSE](LICENSE) for the version 2 text. Imported companion dependencies keep
+their own notices; see [companion/NOTICE](companion/NOTICE).

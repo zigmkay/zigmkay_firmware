@@ -2,11 +2,14 @@ const std = @import("std");
 const builtin = @import("builtin");
 
 const zigmkay_build = @import("zigmkay");
-pub const microzig = @import("microzig");
 
-const MicroBuild = microzig.MicroBuild(.{
-    .rp2xxx = true,
-});
+/// For packages that build firmware from this one, such as the companion:
+/// the keyboard table and recipe, and microzig, pinned once by zigmkay.
+pub const keyboards = @import("keyboards");
+pub const microzig = zigmkay_build.microzig;
+/// This package's manifest (its `.paths`) and zigmkay's, which pins microzig and picotool.
+pub const manifest = @import("build.zig.zon");
+pub const zigmkay_manifest = zigmkay_build.manifest;
 
 pub const FlashSteps = zigmkay_build.FlashSteps;
 
@@ -37,4 +40,3 @@ pub fn build(b: *std.Build) void {
         rawhid_monitor_step.dependOn(&run_rawhid_monitor.step);
     }
 }
-
