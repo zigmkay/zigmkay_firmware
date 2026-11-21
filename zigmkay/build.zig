@@ -1,6 +1,10 @@
 const std = @import("std");
 
-pub const microzig = @import("microzig");
+/// microzig, pinned lazily so host-only builds never fetch it.
+/// Pass the `zigmkay` package's own `*std.Build` (for dependents: `zigmkay_dep.builder`).
+pub inline fn microzig(zigmkay_builder: *std.Build) ?type {
+    return zigmkay_builder.lazyImport(@This(), "microzig");
+}
 /// This package's manifest: the microzig and picotool pins.
 pub const manifest = @import("build.zig.zon");
 const build_utils = @import("build_utils.zig");
@@ -29,5 +33,12 @@ pub fn build(b: *std.Build) void {
     const test_run_step = b.step("test", "Run unit tests");
     build_utils.add_test_steps(b, zigmkay_mod, test_run_step, "tests");
 
-    build_utils.install_tools(b);
+    const rawhid_monitor = build_utils.install_tools(b);
+
+    const rawhid_monitor_step = b.step("rawhid-monitor", "macOS: observe ZigMkay Raw HID key events");
+    if (rawhid_monitor) |exe| {
+        rawhid_monitor_step.dependOn(&b.addRunArtifact(exe).step);
+    } else {
+        rawhid_monitor_step.dependOn(&b.addFail("rawhid-monitor is only available on macOS").step);
+    }
 }

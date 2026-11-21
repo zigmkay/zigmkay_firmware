@@ -38,7 +38,7 @@ pub fn add_test_steps(b: *std.Build, zigmkay_module: *std.Build.Module, test_ste
 /// `dependency.artifact(...)`: `flash_picotool`, `flash_mount` and, on macOS,
 /// `rawhid-monitor`. picotool itself is a lazy dependency, fetched only by
 /// builds that configure a picotool step.
-pub fn install_tools(b: *std.Build) void {
+pub fn install_tools(b: *std.Build) ?*std.Build.Step.Compile {
     inline for (.{ "flash_picotool", "flash_mount" }) |name| {
         const tool = b.addExecutable(.{
             .name = name,
@@ -66,7 +66,9 @@ pub fn install_tools(b: *std.Build) void {
         rawhid_monitor.root_module.linkFramework("IOKit", .{});
         rawhid_monitor.root_module.linkFramework("CoreFoundation", .{});
         b.installArtifact(rawhid_monitor);
+        return rawhid_monitor;
     }
+    return null;
 }
 
 /// Adds an uncached run step that flashes `firmware_uf2` with picotool: it

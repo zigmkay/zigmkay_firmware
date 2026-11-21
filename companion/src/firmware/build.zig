@@ -19,14 +19,14 @@ pub const Sources = keyboards.Sources;
 /// afterwards with `add_app_import("keymap", module, .{})`.
 pub fn addKeyboardFirmware(
     b: *std.Build,
-    mb: *keyboards.MicroBuild,
+    mb: anytype,
     target: anytype,
     optimize: std.builtin.OptimizeMode,
     name: []const u8,
     board: @import("boards.zig").Entry,
     sources: Sources,
     supplied_keymap: ?std.Build.LazyPath,
-) *keyboards.MicroBuild.Firmware {
+) *@TypeOf(mb.*).Firmware {
     return keyboards.addKeyboardFirmware(b, mb, target, optimize, name, .{
         .name = board.name,
         .root_source_file = board.root_source_file,

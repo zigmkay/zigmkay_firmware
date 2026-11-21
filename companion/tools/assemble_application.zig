@@ -32,9 +32,9 @@ const Assembler = struct {
             while (try it.next(self.io)) |entry| {
                 if (std.mem.eql(u8, entry.name, ".git") or std.mem.eql(u8, entry.name, ".zig-cache") or std.mem.eql(u8, entry.name, "zig-out") or std.mem.eql(u8, entry.name, "zig-pkg")) continue;
                 if (extensions) |kept| if (entry.kind != .directory and !hasExtension(entry.name, kept)) continue;
-                if (extensions != null and entry.kind == .directory and for (pins.firmware_skipped) |name| {
+                if (extensions != null and entry.kind == .directory and (for (pins.firmware_skipped) |name| {
                     if (std.mem.eql(u8, entry.name, name)) break true;
-                } else false) continue;
+                } else isSkippedFirmwarePath(relative, entry.name))) continue;
                 try names.append(self.a, try self.a.dupe(u8, entry.name));
             }
             std.mem.sort([]const u8, names.items, {}, less);
@@ -58,7 +58,7 @@ const Assembler = struct {
         var manifest = try jobs.package_manifest.parse(self.a, bytes);
         defer manifest.deinit();
         for (manifest.dependencies) |dep| {
-            if (dep.lazy and !std.mem.eql(u8, dep.name, "port/raspberrypi/rp2xxx") and !std.mem.eql(u8, dep.name, "pico-sdk")) continue;
+            if (dep.lazy and !std.mem.eql(u8, dep.name, "microzig") and !std.mem.eql(u8, dep.name, "port/raspberrypi/rp2xxx") and !std.mem.eql(u8, dep.name, "pico-sdk")) continue;
             if (dep.path) |path| {
                 try self.closure(try std.fs.path.join(self.a, &.{ source, path }));
             } else if (dep.package_hash) |hash| try self.package(hash);
@@ -114,6 +114,34 @@ fn less(_: void, a: []const u8, b: []const u8) bool {
 }
 fn hasExtension(name: []const u8, extensions: []const []const u8) bool {
     for (extensions) |extension| if (std.mem.endsWith(u8, name, extension)) return true;
+    return false;
+}
+fn isSkippedFirmwarePath(relative: []const u8, entry_name: []const u8) bool {
+    const prefix = "build/" ++ pins.firmware_root ++ "/";
+    if (relative.len < prefix.len) return false;
+    for (prefix, relative[0..prefix.len]) |expected, actual| {
+        if (expected == '/') {
+            if (actual != '/' and actual != '\\') return false;
+        } else if (actual != expected) return false;
+    }
+    const rest = relative[prefix.len..];
+    for (pins.firmware_skipped_paths) |excluded| {
+        if (rest.len + 1 + entry_name.len != excluded.len) continue;
+        if (excluded[rest.len] != '/') continue;
+        var matched = true;
+        for (rest, excluded[0..rest.len]) |actual, expected| {
+            if (expected == '/') {
+                if (actual != '/' and actual != '\\') {
+                    matched = false;
+                    break;
+                }
+            } else if (actual != expected) {
+                matched = false;
+                break;
+            }
+        }
+        if (matched and std.mem.eql(u8, entry_name, excluded[rest.len + 1 ..])) return true;
+    }
     return false;
 }
 pub fn main(init: std.process.Init) !void {

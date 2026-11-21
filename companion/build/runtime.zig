@@ -21,12 +21,15 @@ pub const firmware_root = "firmware";
 pub const firmware_paths: []const []const u8 = &@import("zigmkay_firmware").manifest.paths;
 
 /// File types copied from the firmware directories, so build outputs in custom
-/// prefixes and other local files stay out of the bundle.
-pub const firmware_extensions = [_][]const u8{ ".zig", ".zon", ".hjson" };
+/// prefixes, QMK HJSON inputs and other local files stay out of the bundle.
+pub const firmware_extensions = [_][]const u8{ ".zig", ".zon" };
 
-/// Directory names that never belong to the firmware's sources, including
-/// `keyboards/local/`, the git-ignored folder of personal keymaps.
-pub const skipped = [_][]const u8{ ".git", ".zig-cache", "zig-out", "zig-pkg", "local" };
+/// Directory names that never belong to the firmware's sources.
+pub const skipped = [_][]const u8{ ".git", ".zig-cache", "zig-out", "zig-pkg" };
+
+/// Paths relative to the firmware root that stay out of the bundle, including
+/// `keyboards/local`, the git-ignored folder of personal keymaps.
+pub const skipped_paths = [_][]const u8{"keyboards/local"};
 
 /// The bundled `build/build.zig.zon`: this package's identity with only the
 /// firmware dependency.
@@ -78,9 +81,13 @@ fn copySources(files: *std.Build.Step.WriteFile, firmware: *std.Build.Dependency
         if (for (skipped) |name| {
             if (std.mem.eql(u8, entry.name, name)) break true;
         } else false) continue;
+        const child = b.fmt("{s}/{s}", .{ path, entry.name });
+        if (entry.kind == .directory and for (skipped_paths) |excluded| {
+            if (std.mem.eql(u8, child, excluded)) break true;
+        } else false) continue;
         if (entry.kind != .directory and for (firmware_extensions) |extension| {
             if (std.mem.endsWith(u8, entry.name, extension)) break false;
         } else true) continue;
-        copySources(files, firmware, b.fmt("{s}/{s}", .{ path, entry.name }));
+        copySources(files, firmware, child);
     }
 }

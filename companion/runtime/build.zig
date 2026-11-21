@@ -35,9 +35,11 @@ pub fn build(b: *std.Build) void {
         step.dependOn(&install.step);
     } else runner_step.dependOn(&b.addFail("build-runner requires an absolute project-export").step);
     if (native_only) return;
-    // microzig is pinned once, by the firmware's zigmkay package.
-    const mz_dep = fw.builder.dependency("zigmkay", .{}).builder.dependency("microzig", .{});
-    const mb = @import("zigmkay_firmware").keyboards.MicroBuild.init(b, mz_dep) orelse return;
+    // microzig is pinned once, lazily, by the firmware's zigmkay package.
+    const zigmkay_dep = fw.builder.dependency("zigmkay", .{});
+    const mz = @import("zigmkay_firmware").microzig(zigmkay_dep.builder) orelse return;
+    const mz_dep = zigmkay_dep.builder.lazyDependency("microzig", .{}) orelse return;
+    const mb = @import("zigmkay_firmware").keyboards.MicroBuild(mz).init(b, mz_dep) orelse return;
     const path = export_option orelse return;
     const board = board_option orelse @panic("Missing board");
     const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*;

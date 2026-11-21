@@ -10,7 +10,7 @@ const native = @import("native.zig");
 const fw_build = @import("../src/firmware/build.zig");
 const Compile = std.Build.Step.Compile;
 
-pub fn add(s: *tests.Suite, deps: Deps, mb: *Deps.MicroBuild, app: *Compile, bootsel: ?*Compile) void {
+pub fn add(s: *tests.Suite, deps: Deps, mb: anytype, app: *Compile, bootsel: ?*Compile) void {
     const b = s.b;
     const cfg = s.cfg;
     const os = b.graph.host.result.os.tag;
@@ -24,7 +24,7 @@ pub fn add(s: *tests.Suite, deps: Deps, mb: *Deps.MicroBuild, app: *Compile, boo
     if (b.graph.needed_lazy_dependencies.count() != 0) return;
 
     const assembler = b.addExecutable(.{ .name = "assemble-application", .root_module = s.mods.root("tools/assemble_application.zig", s.mods.core.jobs_only) });
-    assembler.root_module.addOptions("bundle-pins", pins(b, cfg.revision));
+    assembler.root_module.addOptions("bundle-pins", pins(b, cfg.revision, cfg.target.result.os.tag));
     const icons = s.mods.gui.?.icon_files;
     switch (os) {
         .macos => assembler.root_module.addAnonymousImport("application-icns", .{ .root_source_file = icons.path(b, "Zigmkay.icns") }),
@@ -76,17 +76,21 @@ pub fn add(s: *tests.Suite, deps: Deps, mb: *Deps.MicroBuild, app: *Compile, boo
 
 /// Inputs the assembler records: dependency pins, the runtime closure and
 /// its manifest, and the application identity.
-fn pins(b: *std.Build, revision: []const u8) *std.Build.Step.Options {
+fn pins(b: *std.Build, revision: []const u8, target_os: std.Target.Os.Tag) *std.Build.Step.Options {
     const manifest = @import("../build.zig.zon");
     const options = b.addOptions();
-    options.addOption([]const []const u8, "license_hashes", &.{
+    const desktop_licenses = [_][]const u8{
         manifest.dependencies.dvui.hash,
         manifest.dependencies.ztray.hash,
         manifest.dependencies.svg2tvg.hash,
         manifest.dependencies.icons.hash,
         manifest.dependencies.inter.hash,
-        @import("zigmkay_firmware").zigmkay_manifest.dependencies.picotool.hash,
-    });
+    };
+    const license_hashes: []const []const u8 = if (target_os == .windows)
+        &desktop_licenses
+    else
+        &(desktop_licenses ++ [_][]const u8{@import("zigmkay_firmware").zigmkay_manifest.dependencies.picotool.hash});
+    options.addOption([]const []const u8, "license_hashes", license_hashes);
     options.addOption([]const u8, "manifest", runtime.manifest(b));
     options.addOption([]const u8, "runtime_source_root", runtime.source_root);
     options.addOption([]const []const u8, "runtime_closure", &runtime.closure);
@@ -96,6 +100,7 @@ fn pins(b: *std.Build, revision: []const u8) *std.Build.Step.Options {
     options.addOption([]const []const u8, "firmware_paths", runtime.firmware_paths);
     options.addOption([]const []const u8, "firmware_extensions", &runtime.firmware_extensions);
     options.addOption([]const []const u8, "firmware_skipped", &runtime.skipped);
+    options.addOption([]const []const u8, "firmware_skipped_paths", &runtime.skipped_paths);
     // The firmware is part of this repository, so its revision is the source
     // commit; development builds without one record an all-zero revision.
     options.addOption([]const u8, "firmware_revision", if (isCommit(revision)) revision else &zero_revision);

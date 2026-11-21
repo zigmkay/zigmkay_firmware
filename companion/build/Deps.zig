@@ -6,8 +6,11 @@ const std = @import("std");
 const Config = @import("Config.zig");
 const Deps = @This();
 
-/// The firmware's microzig build API with the RP2xxx port.
-pub const MicroBuild = @import("zigmkay_firmware").keyboards.MicroBuild;
+/// The firmware's microzig build API with the RP2xxx port, instantiated once
+/// microzig has been fetched.
+pub fn MicroBuild(comptime mz: type) type {
+    return @import("zigmkay_firmware").keyboards.MicroBuild(mz);
+}
 
 /// `zigmkay_firmware`, the firmware of this repository: processor, keycodes
 /// and board sources (absent under `-Donly`).
@@ -47,9 +50,14 @@ pub fn init(b: *std.Build, cfg: Config) error{LazyDependencyNeeded}!Deps {
     return deps;
 }
 
-/// microzig, pinned by the firmware's zigmkay package.
-pub fn microzig(b: *std.Build) *std.Build.Dependency {
-    return zigmkay(b).builder.dependency("microzig", .{});
+/// microzig's build script, lazily imported through the firmware's zigmkay package.
+pub inline fn microzig(b: *std.Build) ?type {
+    return @import("zigmkay_firmware").microzig(zigmkay(b).builder);
+}
+
+/// microzig, lazily pinned by the firmware's zigmkay package.
+pub fn microzigDep(b: *std.Build) ?*std.Build.Dependency {
+    return zigmkay(b).builder.lazyDependency("microzig", .{});
 }
 
 fn lazy(b: *std.Build, missing: *bool, name: []const u8, args: anytype) ?*std.Build.Dependency {

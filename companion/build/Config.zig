@@ -12,8 +12,7 @@ pub const zig_version = "0.17.0";
 /// Configure a deliberately small graph for constrained CI jobs.
 pub const Only = enum {
     /// Typing tests, application paths, release tooling and subprocess
-    /// contracts, without compiling firmware or native bridges. Zig still
-    /// fetches microzig, which the firmware's zigmkay package pins eagerly.
+    /// contracts, without compiling firmware or native bridges.
     practice,
     /// Only the symbolized artifact-publication diagnostic.
     diagnostic,

@@ -11,7 +11,7 @@ const runner_build = @import("../src/runner/build.zig");
 /// Every firmware-area test root; `tests-reached` checks it against the wiring.
 pub const test_roots = [_][]const u8{ "tests/project_processor_contract.zig", "tools/usb_candidate.zig" };
 
-pub fn add(s: *tests.Suite, mb: *Deps.MicroBuild, fixtures: tests.Fixtures) void {
+pub fn add(s: *tests.Suite, mb: anytype, fixtures: tests.Fixtures) void {
     const b = s.b;
     const cfg = s.cfg;
     const steps = s.steps;

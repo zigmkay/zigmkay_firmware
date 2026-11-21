@@ -8,8 +8,57 @@ const lk7_ids = @import("lk7-key-ids").ids;
 pub const registered_source = @embedFile("rollercole-source");
 pub const registered_binding = "official_lk7_e310ab36";
 pub const registered_entry = "rollercole.zig";
+pub const registered_ids = collectCustomIds();
+pub const registered_layers = blk: {
+    var ids: [original.keymap.len]p.LayerId = undefined;
+    for (&ids, 0..) |*id, index| id.* = @intCast(index + 1);
+    break :blk ids;
+};
 pub const Profile = enum { danish, qwerty, eurkey, eurmac };
 pub const names = [_][]const u8{ "Danish Rollercole", "QWERTY", "EurKEY draft", "EurKEY Next Mac candidate" };
+
+fn collectCustomIds() []const u8 {
+    @setEvalBranchQuota(100_000);
+    var used: [253]bool = @splat(false);
+    for (original.keymap) |layer| for (layer) |action| if (action) |value| markAction(&used, value);
+    for (original.combos) |combo| markAction(&used, combo.key_def);
+    var count: usize = 0;
+    for (used) |present| if (present) {
+        count += 1;
+    };
+    var ids: [count]u8 = undefined;
+    var cursor: usize = 0;
+    for (used, 0..) |present, id| if (present) {
+        ids[cursor] = @intCast(id);
+        cursor += 1;
+    };
+    const final = ids;
+    return &final;
+}
+
+fn markId(used: *[253]bool, id: ?u8) void {
+    if (id) |value| if (value > 0 and value < used.len) {
+        used[value] = true;
+    };
+}
+
+fn markTap(used: *[253]bool, tap: anytype) void {
+    markId(used, tap.custom);
+    if (tap.one_shot) |hold| markId(used, hold.custom);
+}
+
+fn markAction(used: *[253]bool, action: anytype) void {
+    switch (action) {
+        .none => {},
+        .tap_only => |tap| markTap(used, tap),
+        .hold_only => |hold| markId(used, hold.custom),
+        .tap_hold => |value| {
+            markTap(used, value.tap);
+            markId(used, value.hold.custom);
+        },
+        .tap_with_autofire => |value| markTap(used, value.tap),
+    }
+}
 
 pub const key_ids: [34][]const u8 = blk: {
     var ids: [34][]const u8 = undefined;
@@ -37,7 +86,7 @@ pub fn create(gpa: std.mem.Allocator, profile: Profile) !p.snapshot.Loaded {
     const layer_names = [_][]const u8{ "Base", "Navigation", "Numbers", "Symbols", "Gaming", "Media" };
     for (layers, 0..) |*layer, index| layer.* = .{
         .id = @intCast(index + 1),
-        .name = layer_names[index],
+        .name = if (index < layer_names.len) layer_names[index] else try std.fmt.allocPrint(a, "Layer {d}", .{index + 1}),
         .actions = try a.alloc(?p.Action, 34),
     };
     var doc = p.Document{
@@ -105,9 +154,9 @@ fn populateDanish(a: std.mem.Allocator, doc: *p.Document) ![]const p.snapshot.So
     callbacks[0] = .{
         .kind = .registered,
         .binding = registered_binding,
-        .ids = &.{ 1, 2, 3, 4 },
-        .required_layers = &.{ 1, 2, 3, 4 },
-        .index_constraints = &.{ 1, 2, 3, 4 },
+        .ids = registered_ids,
+        .required_layers = &registered_layers,
+        .index_constraints = &registered_layers,
         .sources = metadata,
     };
     doc.callbacks = callbacks;
@@ -161,12 +210,12 @@ pub fn callbackEntry(snapshot: p.snapshot.Snapshot, index: usize) ![]const u8 {
     if (!std.mem.eql(u8, callback.binding, registered_binding) or
         callback.sources.len != 1 or
         !std.mem.eql(u8, callback.sources[0].path, registered_entry)) return error.UnknownRegisteredCallback;
-    if (!std.mem.eql(u8, callback.ids, &.{ 1, 2, 3, 4 }) or
-        snapshot.document.layers.len < 4 or
-        callback.required_layers.len != 4) return error.RegisteredConstraintMismatch;
+    if (!std.mem.eql(u8, callback.ids, registered_ids) or
+        snapshot.document.layers.len < registered_layers.len or
+        callback.required_layers.len != registered_layers.len) return error.RegisteredConstraintMismatch;
     const constraints = callback.index_constraints orelse return error.RegisteredConstraintMismatch;
-    if (constraints.len != 4) return error.RegisteredConstraintMismatch;
-    for (snapshot.document.layers[0..4], callback.required_layers, constraints) |layer, required, constraint| {
+    if (constraints.len != registered_layers.len) return error.RegisteredConstraintMismatch;
+    for (snapshot.document.layers[0..registered_layers.len], callback.required_layers, constraints) |layer, required, constraint| {
         if (layer.id != required or layer.id != constraint) return error.RegisteredConstraintMismatch;
     }
     const bytes = try p.snapshot.find(snapshot, index, registered_entry);

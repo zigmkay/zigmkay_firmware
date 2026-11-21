@@ -44,8 +44,10 @@ pub fn build(b: *std.Build) !void {
 
     const app = if (mods.gui != null) gui.add(&suite, fixtures) else null;
     if (cfg.firmware) {
-        // Until Zig has fetched the lazy RP2xxx port, `init` returns null.
-        const mb = Deps.MicroBuild.init(b, Deps.microzig(b)) orelse return;
+        // Until Zig has fetched microzig and its lazy RP2xxx port, these return null.
+        const mz = Deps.microzig(b) orelse return;
+        const mz_dep = Deps.microzigDep(b) orelse return;
+        const mb = Deps.MicroBuild(mz).init(b, mz_dep) orelse return;
         firmware.add(&suite, mb, fixtures);
         if (cfg.bundle) bundle.add(&suite, deps, mb, app.?, utilities.bootsel);
     }

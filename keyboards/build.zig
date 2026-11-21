@@ -4,11 +4,14 @@ const std = @import("std");
 /// `@import("keyboards").boards` in their build.zig.
 pub const boards = @import("boards.zig");
 
-// microzig is pinned once, by the zigmkay package.
-const microzig = @import("zigmkay").microzig;
-pub const MicroBuild = microzig.MicroBuild(.{
-    .rp2xxx = true,
-});
+// microzig is pinned once, lazily, by the zigmkay package.
+const zigmkay_build = @import("zigmkay");
+
+pub fn MicroBuild(comptime microzig: type) type {
+    return microzig.MicroBuild(.{
+        .rp2xxx = true,
+    });
+}
 
 /// Where `addKeyboardFirmware` finds its sources.
 pub const Sources = struct {
@@ -25,8 +28,9 @@ pub fn build(b: *std.Build) void {
     const keymap_option = b.option([]const u8, "keymap", "Keymap file that replaces the keyboard's own, relative to this directory or absolute, such as local/lk8/keymap.zig");
 
     const zigmkay_dep = b.dependency("zigmkay", .{});
-    const mz_dep = zigmkay_dep.builder.dependency("microzig", .{});
-    const mb = MicroBuild.init(b, mz_dep) orelse return;
+    const microzig = zigmkay_build.microzig(zigmkay_dep.builder) orelse return;
+    const mz_dep = zigmkay_dep.builder.lazyDependency("microzig", .{}) orelse return;
+    const mb = MicroBuild(microzig).init(b, mz_dep) orelse return;
 
     const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*;
     const optimize: std.builtin.OptimizeMode = .ReleaseSafe;
@@ -117,14 +121,14 @@ pub fn build(b: *std.Build) void {
 /// A non-null `keymap` replaces the board's own keymap file.
 pub fn addKeyboardFirmware(
     b: *std.Build,
-    mb: *MicroBuild,
-    target: *const microzig.Target,
+    mb: anytype,
+    target: anytype,
     optimize: std.builtin.OptimizeMode,
     name: []const u8,
     board: boards.Board,
     sources: Sources,
     keymap: ?std.Build.LazyPath,
-) *MicroBuild.Firmware {
+) *@TypeOf(mb.*).Firmware {
     const firmware = mb.add_firmware(.{
         .name = name,
         .target = target,
