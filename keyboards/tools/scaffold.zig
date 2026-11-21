@@ -163,11 +163,19 @@ fn replaceName(arena: std.mem.Allocator, template: []const u8, name: []const u8)
 }
 
 /// `table` with `entry` inserted as the last element of `boards`, or null if
-/// the list is not where it is expected.
+/// the list is not where it is expected. Handles both LF and CRLF checkouts.
 fn insertBoard(arena: std.mem.Allocator, table: []const u8, entry: []const u8) !?[]u8 {
-    const start = std.mem.indexOf(u8, table, "pub const boards = [_]Board{\n") orelse return null;
-    const end = std.mem.indexOfPos(u8, table, start, "\n};\n") orelse return null;
-    return try std.mem.concat(arena, u8, &.{ table[0 .. end + 1], entry, table[end + 1 ..] });
+    const start = std.mem.indexOf(u8, table, "pub const boards = [_]Board{") orelse return null;
+    const line_end = std.mem.indexOfScalarPos(u8, table, start, '\n') orelse return null;
+    const crlf = line_end > 0 and table[line_end - 1] == '\r';
+    const closing = if (crlf) "\r\n};\r\n" else "\n};\n";
+    const end = std.mem.indexOfPos(u8, table, line_end, closing) orelse return null;
+    const insert_at = end + (if (crlf) @as(usize, 2) else 1);
+    const formatted = if (crlf and !std.mem.endsWith(u8, entry, "\r\n") and std.mem.endsWith(u8, entry, "\n"))
+        try std.mem.concat(arena, u8, &.{ entry[0 .. entry.len - 1], "\r\n" })
+    else
+        entry;
+    return try std.mem.concat(arena, u8, &.{ table[0..insert_at], formatted, table[insert_at..] });
 }
 
 /// `root` and every file it reaches through `@import` or `@embedFile` of a
@@ -316,6 +324,12 @@ test "a new board is appended to the board list" {
         \\
     , updated);
     try std.testing.expect(try insertBoard(state.allocator(), "const x = 1;\n", "") == null);
+    const crlf_table = "pub const boards = [_]Board{\r\n    .{ .name = \"lk8\" },\r\n};\r\n";
+    const crlf_updated = (try insertBoard(state.allocator(), crlf_table, "    .{ .name = \"new\" },\n")).?;
+    try std.testing.expectEqualStrings(
+        "pub const boards = [_]Board{\r\n    .{ .name = \"lk8\" },\r\n    .{ .name = \"new\" },\r\n};\r\n",
+        crlf_updated,
+    );
 }
 
 test "board names are build options, keymap names folder names" {

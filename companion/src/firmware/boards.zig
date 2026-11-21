@@ -40,7 +40,7 @@ pub const bindings = [_]Binding{
     .{ .root = "my_keyboards/rollercole/leonardo_keycaprio_0_7.zig" },
     .{ .root = "my_keyboards/rollercole/leonardo_keycaprio_0_8.zig" },
     .{ .root = "examples/dasbob/main.zig", .sides = .unassigned },
-    // Encoder actions are defined in the entrypoint, not in the keymap.
+    // Uses keymap.encoder_actions when exported, else the entrypoint's 4 defaults.
     .{ .root = "my_keyboards/rollercole/tuckytwotimes.zig", .encoder_actions = 4 },
     // Encoder actions come from the keymap; CW and CCW of one encoder.
     .{ .root = "my_keyboards/molekula/main.zig", .encoder_actions = 2 },

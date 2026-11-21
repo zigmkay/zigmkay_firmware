@@ -196,7 +196,7 @@ pub fn execute(gpa: std.mem.Allocator, io: std.Io, config: Config) !void {
     if (config.bus == null and config.serial == null) {
         // Unlike load, picotool reboot accepts multiple devices. Recheck the
         // unselected case; managed callers select a target.
-        const target = try tool(gpa, io, config, &.{"info"}, config.command_ms);
+        const target = try tool(gpa, io, config, &.{"info"}, if (config.interactive) null else config.command_ms);
         defer freeResult(gpa, target);
         if (std.mem.indexOf(u8, target.stdout, multiple_devices) != null) return error.AmbiguousDevice;
         if (!target.term.success()) return error.RebootTargetLost;

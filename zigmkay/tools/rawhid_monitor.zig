@@ -11,9 +11,16 @@ const product_id = 0x00F0;
 const usage_page = 0xFF31;
 const usage = 0x0074;
 
-var report_buffer: companion.Report = undefined;
-var current_device: ?*IOHIDDevice = null;
+const max_devices = 8;
+
+const DeviceSlot = struct {
+    device: ?*IOHIDDevice = null,
+    report_buffer: companion.Report = undefined,
+};
+
+var device_slots: [max_devices]DeviceSlot = @splat(.{});
 var run_loop: ?*CFRunLoop = null;
+var signal_write_fd: std.posix.fd_t = -1;
 
 pub fn main() !void {
     const manager = IOHIDManagerCreate(null, 0) orelse
@@ -37,18 +44,59 @@ pub fn main() !void {
     if (open_result != 0) std.process.fatal("Could not open ZigMkay RawHID: 0x{x:0>8}", .{@as(u32, @bitCast(open_result))});
     defer _ = IOHIDManagerClose(manager, 0);
 
-    // Ctrl-C stops the run loop so that `disconnect` is sent before exiting.
-    const action: std.posix.Sigaction = .{ .handler = .{ .handler = stop }, .mask = std.posix.sigemptyset(), .flags = 0 };
+    // Self-pipe so signal handlers only call async-signal-safe write(2), while
+    // CFRunLoopStop runs on the run loop thread.
+    var pipe_fds: [2]std.posix.fd_t = undefined;
+    if (std.c.pipe(&pipe_fds) != 0) std.process.fatal("Could not create signal pipe.", .{});
+    defer _ = std.c.close(pipe_fds[1]);
+    setNonBlocking(pipe_fds[0]);
+    setNonBlocking(pipe_fds[1]);
+    signal_write_fd = pipe_fds[1];
+    defer signal_write_fd = -1;
+
+    const signal_fd = CFFileDescriptorCreate(null, pipe_fds[0], true, signalFired, null) orelse {
+        _ = std.c.close(pipe_fds[0]);
+        std.process.fatal("Could not register signal descriptor.", .{});
+    };
+    defer {
+        CFFileDescriptorInvalidate(signal_fd);
+        CFRelease(signal_fd);
+    }
+    CFFileDescriptorEnableCallBacks(signal_fd, kCFFileDescriptorReadCallBack);
+    const signal_source = CFFileDescriptorCreateRunLoopSource(null, signal_fd, 0) orelse
+        std.process.fatal("Could not create signal run loop source.", .{});
+    defer CFRelease(signal_source);
+    CFRunLoopAddSource(run_loop.?, signal_source, kCFRunLoopDefaultMode);
+    defer CFRunLoopRemoveSource(run_loop.?, signal_source, kCFRunLoopDefaultMode);
+
+    // Ctrl-C / SIGTERM / SIGHUP stop the run loop so `disconnect` is sent and
+    // the terminal settings are restored before exiting.
+    const action: std.posix.Sigaction = .{ .handler = .{ .handler = handleSignal }, .mask = std.posix.sigemptyset(), .flags = 0 };
     std.posix.sigaction(.INT, &action, null);
+    std.posix.sigaction(.TERM, &action, null);
+    std.posix.sigaction(.HUP, &action, null);
 
     std.debug.print("Waiting for ZigMkay RawHID ({X:0>4}:{X:0>4}, {X:0>4}:{X:0>4})...\n", .{ vendor_id, product_id, usage_page, usage });
     const terminal = hideTyping();
     defer restoreTyping(terminal);
     CFRunLoopRun();
 
-    if (current_device) |device| {
-        send(device, .disconnect);
-        std.debug.print("Sent disconnect.\n", .{});
+    var disconnected = false;
+    for (&device_slots) |*slot| {
+        if (slot.device) |device| {
+            send(device, .disconnect);
+            slot.device = null;
+            disconnected = true;
+        }
+    }
+    if (disconnected) std.debug.print("Sent disconnect.\n", .{});
+}
+
+fn setNonBlocking(fd: std.posix.fd_t) void {
+    const flags = std.c.fcntl(fd, std.c.F.GETFL);
+    if (flags >= 0) {
+        const nonblock: c_int = @intCast(@as(u32, @bitCast(std.c.O{ .NONBLOCK = true })));
+        _ = std.c.fcntl(fd, std.c.F.SETFL, flags | nonblock);
     }
 }
 
@@ -68,8 +116,16 @@ fn restoreTyping(saved: ?std.posix.termios) void {
     std.posix.tcsetattr(std.posix.STDIN_FILENO, .FLUSH, saved orelse return) catch {};
 }
 
-fn stop(_: std.posix.SIG) callconv(.c) void {
-    CFRunLoopStop(run_loop.?);
+fn handleSignal(_: std.posix.SIG) callconv(.c) void {
+    const fd = signal_write_fd;
+    if (fd >= 0) {
+        const byte = [_]u8{1};
+        _ = std.c.write(fd, &byte, byte.len);
+    }
+}
+
+fn signalFired(_: *CFFileDescriptor, _: CFOptionFlags, _: ?*anyopaque) callconv(.c) void {
+    if (run_loop) |rl| CFRunLoopStop(rl);
 }
 
 fn setNumber(dictionary: *CFDictionary, comptime key: [:0]const u8, value: c_int) void {
@@ -90,15 +146,29 @@ fn send(device: *IOHIDDevice, command: companion.Command) void {
 }
 
 fn deviceConnected(_: ?*anyopaque, _: IOReturn, _: ?*anyopaque, device: *IOHIDDevice) callconv(.c) void {
-    std.debug.print("ZigMkay RawHID connected; press Ctrl-C to stop.\n", .{});
-    current_device = device;
-    IOHIDDeviceRegisterInputReportCallback(device, &report_buffer, report_buffer.len, printReport, null);
-    send(device, .connect);
+    for (&device_slots) |*slot| {
+        if (slot.device == device) return;
+    }
+    for (&device_slots) |*slot| {
+        if (slot.device == null) {
+            slot.device = device;
+            std.debug.print("ZigMkay RawHID connected; press Ctrl-C to stop.\n", .{});
+            IOHIDDeviceRegisterInputReportCallback(device, &slot.report_buffer, slot.report_buffer.len, printReport, null);
+            send(device, .connect);
+            return;
+        }
+    }
+    std.debug.print("ZigMkay RawHID connected, but all {d} monitor slots are in use.\n", .{max_devices});
 }
 
 fn deviceRemoved(_: ?*anyopaque, _: IOReturn, _: ?*anyopaque, device: *IOHIDDevice) callconv(.c) void {
-    if (current_device == device) current_device = null;
-    std.debug.print("ZigMkay RawHID disconnected; waiting for it to return...\n", .{});
+    for (&device_slots) |*slot| {
+        if (slot.device == device) {
+            slot.device = null;
+            std.debug.print("ZigMkay RawHID disconnected; waiting for it to return...\n", .{});
+            return;
+        }
+    }
 }
 
 fn printReport(_: ?*anyopaque, result: IOReturn, _: ?*anyopaque, _: u32, _: u32, report: [*]u8, length: CFIndex) callconv(.c) void {
@@ -106,6 +176,7 @@ fn printReport(_: ?*anyopaque, result: IOReturn, _: ?*anyopaque, _: u32, _: u32,
         std.debug.print("Raw HID read failed: 0x{x:0>8}\n", .{@as(u32, @bitCast(result))});
         return;
     }
+    if (length < 0) return;
     const bytes = report[0..@intCast(length)];
     if (bytes.len < @sizeOf(companion.Report)) return printHex(bytes);
     const id = std.enums.fromInt(companion.MessageId, bytes[0]) orelse return printHex(bytes);
@@ -163,21 +234,26 @@ fn printBits(bytes: []const u8) void {
 
 // IOKit and CoreFoundation, declared by hand to avoid a C import.
 const CFIndex = isize;
+const CFOptionFlags = usize;
 const IOReturn = i32;
 const CFAllocator = opaque {};
 const CFDictionary = opaque {};
 const CFString = opaque {};
 const CFRunLoop = opaque {};
+const CFRunLoopSource = opaque {};
+const CFFileDescriptor = opaque {};
 const CFCallBacks = opaque {};
 const IOHIDManager = opaque {};
 const IOHIDDevice = opaque {};
 
 const kCFStringEncodingUTF8: u32 = 0x08000100;
 const kCFNumberIntType: CFIndex = 9;
+const kCFFileDescriptorReadCallBack: CFOptionFlags = 1 << 0;
 const kIOHIDReportTypeOutput: u32 = 1;
 
 const DeviceCallback = *const fn (?*anyopaque, IOReturn, ?*anyopaque, *IOHIDDevice) callconv(.c) void;
 const ReportCallback = *const fn (?*anyopaque, IOReturn, ?*anyopaque, u32, u32, [*]u8, CFIndex) callconv(.c) void;
+const FileDescriptorCallback = *const fn (*CFFileDescriptor, CFOptionFlags, ?*anyopaque) callconv(.c) void;
 
 extern const kCFTypeDictionaryKeyCallBacks: CFCallBacks;
 extern const kCFTypeDictionaryValueCallBacks: CFCallBacks;
@@ -191,6 +267,12 @@ extern fn CFNumberCreate(allocator: ?*const CFAllocator, number_type: CFIndex, v
 extern fn CFRunLoopGetCurrent() *CFRunLoop;
 extern fn CFRunLoopRun() void;
 extern fn CFRunLoopStop(run_loop: *CFRunLoop) void;
+extern fn CFRunLoopAddSource(rl: *CFRunLoop, source: *CFRunLoopSource, mode: *const CFString) void;
+extern fn CFRunLoopRemoveSource(rl: *CFRunLoop, source: *CFRunLoopSource, mode: *const CFString) void;
+extern fn CFFileDescriptorCreate(allocator: ?*const CFAllocator, fd: c_int, close_on_invalidate: bool, callout: FileDescriptorCallback, context: ?*const anyopaque) ?*CFFileDescriptor;
+extern fn CFFileDescriptorEnableCallBacks(f: *CFFileDescriptor, callback_types: CFOptionFlags) void;
+extern fn CFFileDescriptorInvalidate(f: *CFFileDescriptor) void;
+extern fn CFFileDescriptorCreateRunLoopSource(allocator: ?*const CFAllocator, f: *CFFileDescriptor, order: CFIndex) ?*CFRunLoopSource;
 
 extern fn IOHIDManagerCreate(allocator: ?*const CFAllocator, options: u32) ?*IOHIDManager;
 extern fn IOHIDManagerSetDeviceMatching(manager: *IOHIDManager, matching: *const CFDictionary) void;

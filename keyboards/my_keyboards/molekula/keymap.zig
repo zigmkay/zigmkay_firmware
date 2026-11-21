@@ -261,7 +261,7 @@ pub const DISABLE_GAMING = 2;
 // =============================================================================
 // SIDES ARRAY
 // =============================================================================
-// This array maps each key index (0-39) to its PHYSICAL POSITION on the keyboard.
+// This array maps each key index (0-37) to its PHYSICAL POSITION on the keyboard.
 // This tells the firmware which half of the split keyboard each key belongs to.
 //
 // VALUES:
@@ -294,7 +294,7 @@ pub const sides = [key_count]core.Side{
 // =============================================================================
 // The core keymap definition - a 2D array where:
 //   - First dimension = layer index (0 = base, 1 = arrows, etc.)
-//   - Second dimension = key position (0-39, must equal key_count)
+//   - Second dimension = key position (0-37, must equal key_count)
 //
 // HOW TO READ THE KEYMAP:
 //   keymap[LAYER_INDEX][KEY_POSITION]
@@ -345,12 +345,12 @@ pub const keymap = [_][key_count]?core.KeyDef{
     // ACTIVATION: Always active (base layer, index 0)
     //
     // SPECIAL KEYS ON THIS LAYER:
-    //   - Index 34: COM_TOG (toggle companion overlay)
-    //   - Index 35: LT(L_LEFT, SPC) - Left thumb: tap=Space, hold=NUM layer
-    //   - Index 36: Enter (right thumb)
-    //   - Index 37: Enter (right thumb, duplicate for symmetry)
-    //   - Index 38: LT(L_RIGHT, SPC) - Right thumb: tap=Space, hold=ARROWS layer
-    //   - Index 39: COM_TOG (toggle companion overlay)
+    //   - Index 32: COM_TOG (toggle companion overlay)
+    //   - Index 33: LT(L_LEFT, SPC) - Left thumb: tap=Space, hold=NUM layer
+    //   - Index 34: Enter (left thumb)
+    //   - Index 35: Enter (right thumb, duplicate for symmetry)
+    //   - Index 36: LT(L_RIGHT, SPC) - Right thumb: tap=Space, hold=ARROWS layer
+    //   - Index 37: COM_TOG (toggle companion overlay)
     //   - Encoder: Media volume up/down (encoder_actions, on every layer)
     .{
                  T(us.Q),   T(us.W),   T(us.E),   T(us.R), T(us.T),                  T(us.Y),   T(us.U), T(us.I),     T(us.O),    T(us.P),
@@ -368,9 +368,8 @@ pub const keymap = [_][key_count]?core.KeyDef{
     // ACTIVATION: Hold L_LEFT thumb key (NUM layer) or L_RIGHT thumb key (ARROWS)
     //
     // SPECIAL KEYS ON THIS LAYER:
-    //   - Index 34: COM_TOG
-    //   - Index 35: LT(L_BOTH, SPC) - hold activates BOTH (function keys)
-    //   - Encoder: WheelDown/WheelUp (mouse action on encoder)
+    //   - Index 32: COM_TOG
+    //   - Index 33: LT(L_BOTH, SPC) - hold activates BOTH (function keys)
     .{
                   T(us.LBRC), T(us.RBRC), T(us.LCBR), T(us.RCBR), T(us.HASH),           T(us.AT),    T(kc.HOME),  AF(kc.UP),    T(kc.END),   T(us.PLUS),
     SIG(COM_OFF), T(us.LABK), T(us.RABK), T(us.LPRN), T(us.RPRN), T(us.SLSH),           T(kc.PGUP), AF(kc.LEFT),  AF(kc.DOWN), AF(kc.RIGHT), T(kc.PGDN), _______,
@@ -384,10 +383,7 @@ pub const keymap = [_][key_count]?core.KeyDef{
     // Numpad-style input with numbers, basic editing keys, and the Euro symbol.
     // Designed for data entry and calculations.
     //
-    // ACTIVATION: Hold L_LEFT thumb key (index 35 on BASE layer)
-    //
-    // SPECIAL KEYS ON THIS LAYER:
-    //   - Encoder: Media volume controls
+    // ACTIVATION: Hold L_LEFT thumb key (index 33 on BASE layer)
     .{
                T(kc.ESC), T(kc.PSCR), T(us.PERC),  T(us.DCIR), T(kc.GRV),             T(kc.MINUS), T(us.N7), T(us.N8), T(us.N9), T(us.PLUS),
     _______, AF(kc.BSPC), T(kc.UNDO), T(kc.AGAIN), T(kc.ENT),  T(kc.TAB),                T(us.UNDS),  T(us.N4), T(us.N5), T(us.N6), T(us.EQL),  MS(core.MouseAction.WheelUp),
@@ -404,8 +400,8 @@ pub const keymap = [_][key_count]?core.KeyDef{
     // ACTIVATION: Hold either thumb LT key while on NUM or ARROWS layer
     //
     // SPECIAL KEYS ON THIS LAYER:
-    //   - Index 34: COM_TOG
-    //   - Index 39: COM_TOG
+    //   - Index 32: COM_TOG
+    //   - Index 37: COM_TOG
     //   - Contains many transparent keys to pass through to underlying layer
     .{
                   T(kc.ESC),  T(kc.F7), T(kc.F8), T(kc.F9), T(kc.F10),              T(kc.GRV),  T(kc.SPC),  T(kc.SPC),  T(kc.SPC),  T(kc.TAB),
@@ -459,7 +455,7 @@ pub const encoder_actions = [_]core.EncoderAction{
 //   - Add more layers by adding entries to the keymap array above
 
 pub const dimensions = core.KeymapDimensions{
-    .key_count = key_count, // Total number of keys (40 for Molekula)
+    .key_count = key_count, // Total number of keys (38 for Molekula)
     .layer_count = keymap.len, // Number of layers (calculated from array length)
 };
 
