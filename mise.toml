@@ -8,6 +8,7 @@ config_roots = ["zigmkay", "keyboards", "zkeycodes", "companion"]
 
 [tools]
 zig = "0.17.0"
+zls = "0.17.0"
 
 [tasks.test]
 description = "Run every offline firmware and companion test (no device access)"

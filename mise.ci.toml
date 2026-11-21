@@ -1,0 +1,4 @@
+# CI environment overlay (MISE_ENV=ci or `mise -E ci ...`).
+# Skips editor-only tools like ZLS while keeping the pinned Zig toolchain.
+[settings]
+disable_tools = ["zls"]
