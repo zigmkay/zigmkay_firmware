@@ -51,7 +51,7 @@ fn checkImports(
     init: std.process.Init,
     resources: jobs.application_bundle.Bundle,
     cache: []const u8,
-    representative_only: bool,
+    comptime representative_only: bool,
 ) !void {
     const importer = desktop.onboarding.importer;
     const a = init.arena.allocator();

@@ -374,7 +374,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/generate_application_icons.zig"),
             .target = b.graph.host,
-            .optimize = .debug,
+            .optimize = .ReleaseSafe,
             .imports = &.{.{ .name = "svg2tvg", .module = svg2tvg }},
         }),
     });
