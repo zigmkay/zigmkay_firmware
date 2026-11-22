@@ -186,7 +186,7 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, params: Params) !void {
         else
             false;
 
-        drawKeycap(theme, pal, layer_color, item, .{
+        try drawKeycap(arena, theme, pal, layer_color, item, .{
             .is_tutor = is_tutor,
             .show_finger_zones = is_tutor and params.show_finger_zones and params.profile != null and params.profile.?.fidelity == .schematic,
             .finger = finger,
@@ -277,12 +277,13 @@ fn splitCaption(caption: []const u8) struct { tap: []const u8, hold: []const u8 
 }
 
 fn drawKeycap(
+    arena: std.mem.Allocator,
     theme: ui.Theme,
     pal: Palette,
     layer_color: dvui.Color,
     item: desktop.physical_view.DrawKey,
     ks: KeyState,
-) void {
+) !void {
     const rect = ui.rect(item.placed.rect);
     if (rect.w < 6 or rect.h < 6) return;
 
@@ -418,11 +419,11 @@ fn drawKeycap(
     else if (is_tap)
         "TAP"
     else if (is_hold)
-        if (ks.is_one_shot) "1-SHOT" else "HOLD"
+        try formatHoldCue(arena, item.content, parts.hold, ks.is_one_shot)
     else
         parts.hold;
 
-    const show_layer_colors = !is_transparent and !ks.locked and !item.pressed;
+    const show_layer_colors = !is_transparent and !ks.locked and !item.pressed and !is_hold;
     ui.drawKeycapLegends(
         theme,
         rect,
@@ -437,6 +438,33 @@ fn drawKeycap(
         show_layer_colors,
         if (has_finger_strip) 4.0 else 0.0,
     );
+}
+
+fn formatHoldCue(
+    arena: std.mem.Allocator,
+    content: desktop.label_cache.CachedKeyContent,
+    existing_hold: []const u8,
+    is_one_shot: bool,
+) ![]const u8 {
+    const prefix = if (is_one_shot) "1S" else "HOLD";
+    if (existing_hold.len > 0 and existing_hold.len <= 12) {
+        return try std.fmt.allocPrint(arena, "{s} {s}", .{ prefix, existing_hold });
+    }
+    if (content.one_shot_layer orelse content.hold_layer) |layer_idx| {
+        return try std.fmt.allocPrint(arena, "{s} L{d}", .{ prefix, layer_idx });
+    }
+    const mods = content.one_shot_mods orelse content.hold_mods;
+    if (mods) |m| {
+        if (m.left_shift or m.right_shift) {
+            return try std.fmt.allocPrint(arena, "{s} ⇧", .{prefix});
+        }
+    }
+    if (content.hid_code) |code| {
+        if (code == 225 or code == 229) {
+            return try std.fmt.allocPrint(arena, "{s} ⇧", .{prefix});
+        }
+    }
+    return if (is_one_shot) "1-SHOT" else "HOLD";
 }
 
 fn drawMotionChevron(anchor: dvui.Rect, target: dvui.Rect, tint: dvui.Color) void {

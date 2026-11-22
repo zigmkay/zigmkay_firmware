@@ -10,6 +10,7 @@ const practice = desktop.practice;
 const view = desktop.practice_view;
 const control = desktop.practice_controller;
 const lp = desktop.practice_layout_profile;
+const keyboard_view = @import("practice_keyboard_ui.zig");
 
 pub const Scroll = struct { position: f32 = 0, at: ?u64 = null };
 
@@ -252,6 +253,7 @@ pub fn typingCard(
     bounds: dvui.Rect,
     focus: usize,
     hint: ?practice.Hint,
+    labels: ?*const desktop.label_cache.LabelCache,
     now_us: u64,
     status_note: []const u8,
     same_hand_shift_nudge: bool,
@@ -331,7 +333,7 @@ pub fn typingCard(
 
     // 2. Main stage region: either Inline Round Rundown or 3-line Monospace Text Stage
     const stage_y: f32 = 42;
-    const footer_h: f32 = 38;
+    const footer_h: f32 = 42;
     const stage_h = @max(90.0, bounds.h - stage_y - footer_h - 6);
     const stage_rect: dvui.Rect = .{ .x = pad_x, .y = stage_y, .w = inner_w, .h = stage_h };
 
@@ -368,11 +370,55 @@ pub fn typingCard(
         fill.deinit();
     }
 
-    // 4. Footer row: next-key / finger hint pill (left) + shortcut hints & word counter (right)
+    // 4. Footer row: Next-key / finger hint pill (left) + shortcut hints & word counter (right)
     const foot_y = prog_y + 8;
-    const foot_h: f32 = 22;
-    const hint_text = try formatNextKeyHint(arena, owner, focus, hint, same_hand_shift_nudge);
-    label(hint_text, .{ .x = pad_x, .y = foot_y, .w = @max(0, inner_w * 0.62), .h = foot_h }, 14, if (s.current_error) theme.danger else if (same_hand_shift_nudge) theme.warning else theme.muted, "practice.next");
+    const foot_h: f32 = 26;
+    const next_info = try formatNextKeyHint(arena, owner, theme, focus, hint, labels, same_hand_shift_nudge);
+    const max_pill_w = @max(120.0, inner_w * 0.64);
+    const pill_text_w = ui.editorFont(next_info.text, 13.5).textSize(next_info.text).w;
+    const pill_w = @min(max_pill_w, pill_text_w + 34.0);
+    const pill_fill = if (s.current_error)
+        ui.mix(theme.bg, theme.danger, 0.14)
+    else if (same_hand_shift_nudge)
+        ui.mix(theme.bg, theme.warning, 0.14)
+    else
+        theme.bg;
+    const pill_border = if (s.current_error)
+        ui.mix(theme.border, theme.danger, 0.55)
+    else if (same_hand_shift_nudge)
+        ui.mix(theme.border, theme.warning, 0.55)
+    else
+        theme.border;
+
+    const hint_pill = dvui.box(@src(), .{}, .{
+        .rect = .{ .x = pad_x, .y = foot_y, .w = pill_w, .h = foot_h },
+        .background = true,
+        .color_fill = .{ .color = pill_fill },
+        .color_border = .{ .color = pill_border },
+        .border = .all(1),
+        .corners = .all(6),
+        .padding = .{},
+        .margin = .{},
+    });
+    hint_pill.deinit();
+
+    const dot = dvui.box(@src(), .{}, .{
+        .rect = .{ .x = pad_x + 10, .y = foot_y + (foot_h - 8) * 0.5, .w = 8, .h = 8 },
+        .background = true,
+        .color_fill = .{ .color = next_info.dot_color },
+        .corners = .all(4),
+        .padding = .{},
+        .margin = .{},
+    });
+    dot.deinit();
+
+    label(
+        next_info.text,
+        .{ .x = pad_x + 24, .y = foot_y, .w = @max(0, pill_w - 32), .h = foot_h },
+        13.5,
+        next_info.text_color,
+        "practice.next",
+    );
 
     const words_total = countWords(s.reference[0..s.reference_len]);
     const words_done = countWords(s.reference[0..@min(focus, s.reference_len)]);
@@ -384,7 +430,7 @@ pub fn typingCard(
         try std.fmt.allocPrint(arena, "Esc Pause  ·  Tab New  ·  {d} / {d} words", .{ words_done, words_total });
 
     dvui.labelNoFmt(@src(), shortcuts, .{ .align_x = 1, .align_y = 0.5 }, .{
-        .rect = .{ .x = pad_x + inner_w * 0.62, .y = foot_y, .w = @max(0, inner_w * 0.38), .h = foot_h },
+        .rect = .{ .x = pad_x + inner_w * 0.64, .y = foot_y, .w = @max(0, inner_w * 0.36), .h = foot_h },
         .font = ui.editorFont(shortcuts, 13.5),
         .color_text = .{ .color = theme.muted },
         .padding = .{},
@@ -426,10 +472,11 @@ fn drawThreeLineTextStage(
     const text_region_h = if (has_banner) @max(56.0, bounds.h - banner_h - 10) else bounds.h;
     const max_lines: usize = if (has_banner and text_region_h < 108) 2 else 3;
 
-    const font_size: f32 = if (zig_code) 20.0 else @min(@as(f32, 28.0), @max(@as(f32, 18.0), text_region_h * 0.21));
+    const max_font_for_lines = (text_region_h - 10.0) / (@as(f32, @floatFromInt(max_lines)) * 1.48);
+    const font_size: f32 = @min(if (zig_code) @as(f32, 20.0) else @as(f32, 28.0), @max(@as(f32, 16.0), max_font_for_lines));
     const mono_font = dvui.Font.theme(.mono).withSize(font_size);
     const cell_w = mono_font.textSize("M").w + 1.5;
-    const line_h = @min((text_region_h - 12.0) / @as(f32, @floatFromInt(max_lines)), font_size * 1.48);
+    const line_h = @min((text_region_h - 8.0) / @as(f32, @floatFromInt(max_lines)), font_size * 1.54);
     const gutter_x: f32 = if (zig_code) 48.0 else 20.0;
     const columns: usize = @intFromFloat(@max(8.0, @floor((bounds.w - gutter_x - 24.0) / cell_w)));
 
@@ -441,6 +488,7 @@ fn drawThreeLineTextStage(
     const visible_count = win_end - win_raw.start;
     const total_text_h = @as(f32, @floatFromInt(visible_count)) * line_h;
     const top_y = @max(6.0, (text_region_h - total_text_h) * 0.5);
+    const parent = dvui.parentGet();
 
     for (win_raw.start..win_end, 0..) |row_idx, slot| {
         const range = ranges[row_idx];
@@ -467,7 +515,7 @@ fn drawThreeLineTextStage(
 
         for (range.start..range.end, 0..) |idx, col| {
             const cx = start_x + @as(f32, @floatFromInt(col)) * cell_w;
-            const char_rect: dvui.Rect = .{ .x = cx, .y = y + 2, .w = cell_w, .h = @max(12.0, line_h - 4) };
+            const char_rect: dvui.Rect = .{ .x = cx, .y = y + 1, .w = cell_w, .h = @max(14.0, line_h - 3) };
             const is_cur = (idx == focus);
             const is_wrong = (idx < s.len and s.typed[idx] != s.reference[idx]) or (is_cur and s.current_error);
             const is_typed_ok = idx < s.len and !is_wrong;
@@ -490,23 +538,30 @@ fn drawThreeLineTextStage(
             else
                 null;
 
+            if (bg_fill != null or is_cur) {
+                const cell_box = dvui.box(@src(), .{}, .{
+                    .id_extra = 0x7000 + idx,
+                    .rect = char_rect,
+                    .background = bg_fill != null,
+                    .color_fill = .{ .color = bg_fill orelse theme.bg },
+                    .corners = .all(4),
+                    .padding = .{},
+                    .margin = .{},
+                    .tag = if (is_cur) "practice.current" else null,
+                });
+                cell_box.deinit();
+            }
+
             var gbuf: [4]u8 = undefined;
             const cp = s.reference[idx];
             const is_ws = view.whitespace(cp);
             const text = view.glyph(cp, is_cur or (zig_code and cp == '\n'), &gbuf);
-
-            dvui.labelNoFmt(@src(), text, .{ .align_x = 0.5, .align_y = 0.5, .ellipsize = false }, .{
-                .id_extra = 0x7000 + idx,
-                .rect = char_rect,
-                .font = dvui.Font.theme(if (is_ws) .body else .mono).withSize(font_size).withWeight(if (is_cur) .bold else .normal),
-                .color_text = .{ .color = fg },
-                .background = bg_fill != null,
-                .color_fill = .{ .color = bg_fill orelse theme.bg },
-                .corners = .all(4),
-                .padding = .{},
-                .margin = .{},
-                .tag = if (is_cur) "practice.current" else null,
-            });
+            if (text.len > 0) {
+                const char_font = dvui.Font.theme(if (is_ws) .body else .mono)
+                    .withSize(font_size)
+                    .withWeight(if (is_cur) .bold else .normal);
+                renderUncroppedGlyph(parent, char_rect, char_font, text, fg);
+            }
         }
     }
 
@@ -573,10 +628,39 @@ fn drawInlineRundown(
     label(headline, .{ .x = 18, .y = 12, .w = @max(0, bounds.w - 310), .h = 30 }, 21, theme.success, "practice.result");
 
     if (rd) |r| {
+        var weak_buf: [160]u8 = undefined;
+        var w_writer: std.Io.Writer = .fixed(&weak_buf);
+        if (r.weak_key_len > 0) {
+            w_writer.writeAll("Weakest keys: ") catch {};
+            for (r.weak_keys[0..r.weak_key_len], 0..) |wk, i| {
+                if (i > 0) w_writer.writeAll(", ") catch {};
+                var cb: [4]u8 = undefined;
+                const cn = std.unicode.utf8Encode(wk.cp, &cb) catch 0;
+                if (cn == 1) cb[0] = std.ascii.toUpper(cb[0]);
+                w_writer.print("{s} ({d:.0}%)", .{ cb[0..cn], wk.confidence * 100.0 }) catch {};
+            }
+        }
+        if (r.weak_bigram_len > 0) {
+            if (r.weak_key_len > 0) w_writer.writeAll("  ·  ") catch {};
+            w_writer.writeAll("Slowest: ") catch {};
+            for (r.weak_bigrams[0..r.weak_bigram_len], 0..) |wb, i| {
+                if (i > 0) w_writer.writeAll(", ") catch {};
+                var b1: [4]u8 = undefined;
+                var b2: [4]u8 = undefined;
+                const n1 = std.unicode.utf8Encode(wb.prev, &b1) catch 0;
+                const n2 = std.unicode.utf8Encode(wb.cur, &b2) catch 0;
+                w_writer.print("{s}{s} ({d:.0}ms)", .{ b1[0..n1], b2[0..n2], wb.ema_ms }) catch {};
+            }
+        }
+        const weak_summary = w_writer.buffered();
+        const right_reserve: f32 = if (bounds.w >= 540) 320.0 else 160.0;
+        const avail_w = @max(0.0, bounds.w - right_reserve - 18.0);
+
         if (r.newly_unlocked) |u| {
             const unlock_msg = try std.fmt.allocPrint(arena, "Newly unlocked: {c}", .{std.ascii.toUpper(u)});
+            const pill_w: f32 = @min(avail_w, @max(@as(f32, 166), ui.editorFont(unlock_msg, 13.5).textSize(unlock_msg).w + 24));
             const pill = dvui.box(@src(), .{}, .{
-                .rect = .{ .x = 18, .y = 48, .w = 210, .h = 26 },
+                .rect = .{ .x = 18, .y = 48, .w = pill_w, .h = 26 },
                 .background = true,
                 .color_fill = .{ .color = ui.mix(theme.panel, theme.success, 0.22) },
                 .color_border = .{ .color = theme.success },
@@ -586,34 +670,20 @@ fn drawInlineRundown(
                 .margin = .{},
             });
             pill.deinit();
-            caption(unlock_msg, .{ .x = 18, .y = 48, .w = 210, .h = 26 }, 14, theme.success, "practice.unlock");
+            caption(unlock_msg, .{ .x = 18, .y = 48, .w = pill_w, .h = 26 }, 13.5, theme.success, "practice.unlock");
+
+            if (weak_summary.len > 0) {
+                const beside_x = 18.0 + pill_w + 12.0;
+                const beside_w = bounds.w - right_reserve - beside_x;
+                if (beside_w >= 160.0) {
+                    label(weak_summary, .{ .x = beside_x, .y = 48, .w = beside_w, .h = 26 }, 13.5, theme.muted, null);
+                } else if (bounds.h >= 122.0) {
+                    label(weak_summary, .{ .x = 18, .y = 78, .w = avail_w, .h = 20 }, 13, theme.muted, null);
+                }
+            }
         } else {
-            var weak_buf: [160]u8 = undefined;
-            var w_writer: std.Io.Writer = .fixed(&weak_buf);
-            if (r.weak_key_len > 0) {
-                w_writer.writeAll("Weakest keys: ") catch {};
-                for (r.weak_keys[0..r.weak_key_len], 0..) |wk, i| {
-                    if (i > 0) w_writer.writeAll(", ") catch {};
-                    var cb: [4]u8 = undefined;
-                    const cn = std.unicode.utf8Encode(wk.cp, &cb) catch 0;
-                    if (cn == 1) cb[0] = std.ascii.toUpper(cb[0]);
-                    w_writer.print("{s} ({d:.0}%)", .{ cb[0..cn], wk.confidence * 100.0 }) catch {};
-                }
-            }
-            if (r.weak_bigram_len > 0) {
-                if (r.weak_key_len > 0) w_writer.writeAll("   ·   ") catch {};
-                w_writer.writeAll("Slowest: ") catch {};
-                for (r.weak_bigrams[0..r.weak_bigram_len], 0..) |wb, i| {
-                    if (i > 0) w_writer.writeAll(", ") catch {};
-                    var b1: [4]u8 = undefined;
-                    var b2: [4]u8 = undefined;
-                    const n1 = std.unicode.utf8Encode(wb.prev, &b1) catch 0;
-                    const n2 = std.unicode.utf8Encode(wb.cur, &b2) catch 0;
-                    w_writer.print("{s}{s} ({d:.0}ms)", .{ b1[0..n1], b2[0..n2], wb.ema_ms }) catch {};
-                }
-            }
-            const sub = if (w_writer.buffered().len > 0) w_writer.buffered() else "Round complete — keep your steady rhythm";
-            label(sub, .{ .x = 18, .y = 50, .w = @max(0, bounds.w - 320), .h = 22 }, 14, theme.muted, null);
+            const sub = if (weak_summary.len > 0) weak_summary else "Round complete — keep your steady rhythm";
+            label(sub, .{ .x = 18, .y = 50, .w = avail_w, .h = 22 }, 14, theme.muted, null);
         }
     }
 
@@ -825,6 +895,7 @@ pub fn testLayoutScratchpad(
     const total_h = @as(f32, @floatFromInt(vis.len)) * line_h;
     const top_y = @max(6.0, (stage_h - total_h) * 0.5);
 
+    const parent = dvui.parentGet();
     var caret_x: f32 = 18;
     var caret_y: f32 = top_y;
     for (vis, 0..) |r, slot| {
@@ -836,14 +907,9 @@ pub fn testLayoutScratchpad(
             const cx = 18.0 + @as(f32, @floatFromInt(col)) * cell_w;
             var gbuf: [4]u8 = undefined;
             const g = view.glyph(cp, false, &gbuf);
-            dvui.labelNoFmt(@src(), g, .{ .align_x = 0.5, .align_y = 0.5, .ellipsize = false }, .{
-                .id_extra = 0x8800 + idx,
-                .rect = .{ .x = cx, .y = y, .w = cell_w, .h = line_h },
-                .font = mono_font,
-                .color_text = .{ .color = theme.text },
-                .padding = .{},
-                .margin = .{},
-            });
+            if (g.len > 0) {
+                renderUncroppedGlyph(parent, .{ .x = cx, .y = y, .w = cell_w, .h = line_h }, mono_font, g, theme.text);
+            }
             col += 1;
         }
         caret_x = 18.0 + @as(f32, @floatFromInt(col)) * cell_w;
@@ -863,60 +929,160 @@ pub fn testLayoutScratchpad(
     caret.deinit();
 }
 
+/// Renders a single glyph centered inside `cell` via `dvui.renderText` without
+/// `LabelWidget`'s tight `textHeight()` clip rect so deep descenders (`j`, `g`,
+/// `p`, `q`, `y`) are never chopped off.
+fn renderUncroppedGlyph(
+    parent: dvui.Widget,
+    cell: dvui.Rect,
+    font: dvui.Font,
+    text: []const u8,
+    color: dvui.Color,
+) void {
+    const text_size = font.textSize(text);
+    const visual_h = text_size.h * 1.14;
+    const gx = cell.x + (cell.w - text_size.w) * 0.5;
+    const gy = cell.y + (cell.h - visual_h) * 0.5;
+    const rs = parent.screenRectScale(.{ .x = gx, .y = gy, .w = text_size.w, .h = visual_h });
+    dvui.renderText(.{
+        .font = font,
+        .text = text,
+        .rs = rs,
+        .color = color,
+    }) catch {};
+}
+
+const NextKeyInfo = struct {
+    text: []const u8,
+    dot_color: dvui.Color,
+    text_color: dvui.Color,
+};
+
+fn keyBaseTapLabel(arena: std.mem.Allocator, labels: ?*const desktop.label_cache.LabelCache, key_index: usize) !?[]const u8 {
+    const cache = labels orelse return null;
+    if (cache.layer_count == 0 or key_index >= cache.key_count) return null;
+    const raw = cache.lookup(0, key_index, .{}).label orelse return null;
+    const trimmed = std.mem.trim(u8, raw, " \t");
+    if (trimmed.len == 0 or trimmed.len > 6) return null;
+    for (trimmed) |c| {
+        if (c < 0x21 or c > 0x7e) return null;
+    }
+    if (trimmed.len == 1 and std.ascii.isAlphabetic(trimmed[0])) {
+        const up = try arena.alloc(u8, 1);
+        up[0] = std.ascii.toUpper(trimmed[0]);
+        return up;
+    }
+    return trimmed;
+}
+
 fn formatNextKeyHint(
     arena: std.mem.Allocator,
     owner: *const control.Controller,
+    theme: ui.Theme,
     focus: usize,
     hint: ?practice.Hint,
+    labels: ?*const desktop.label_cache.LabelCache,
     same_hand_shift_nudge: bool,
-) ![]const u8 {
+) !NextKeyInfo {
     const s = &owner.session;
-    if (s.state == .complete) return "Round complete";
+    if (s.state == .complete) {
+        return .{ .text = "Round complete", .dot_color = theme.success, .text_color = theme.success };
+    }
     if (s.current_error) {
         if (focus < s.reference_len) {
             var gb: [4]u8 = undefined;
             const g = view.glyph(s.reference[focus], true, &gb);
-            return std.fmt.allocPrint(arena, "Type «{s}» to continue (Stop on error)", .{g});
+            return .{
+                .text = try std.fmt.allocPrint(arena, "Type «{s}» to continue (Stop on error)", .{g}),
+                .dot_color = theme.danger,
+                .text_color = theme.danger,
+            };
         }
-        return "Type the highlighted key to continue";
+        return .{ .text = "Type the highlighted key to continue", .dot_color = theme.danger, .text_color = theme.danger };
     }
-    if (focus >= s.reference_len) return "";
+    if (focus >= s.reference_len) {
+        return .{ .text = "", .dot_color = theme.muted, .text_color = theme.muted };
+    }
     const cp = s.reference[focus];
     var gbuf: [4]u8 = undefined;
     const glyph_str = view.glyph(cp, true, &gbuf);
+    const display_key: []const u8 = if (glyph_str.len == 1 and std.ascii.isAlphabetic(glyph_str[0])) blk: {
+        const up = try arena.alloc(u8, 1);
+        up[0] = std.ascii.toUpper(glyph_str[0]);
+        break :blk up;
+    } else glyph_str;
 
     if (hint) |h| {
         if (h.combo_key != null) {
-            return std.fmt.allocPrint(arena, "Combo: press both highlighted keys → {s}", .{glyph_str});
+            return .{
+                .text = try std.fmt.allocPrint(arena, "Combo: press both highlighted keys → {s}", .{glyph_str}),
+                .dot_color = ui.layerColor(theme, 4),
+                .text_color = theme.text,
+            };
         }
         if (owner.profile_bound) {
             const p = &owner.profile;
             const finger = p.fingerFor(h.key);
+            const fcol = if (finger != .unknown) keyboard_view.fingerColor(theme, finger) else theme.accent;
+
             if (h.layer != 0) {
-                return std.fmt.allocPrint(arena, "Next: {s} · Hold Layer {d} + {s}", .{ glyph_str, h.layer, finger.name() });
+                return .{
+                    .text = try std.fmt.allocPrint(arena, "Next: {s} · Hold Layer {d} + {s}", .{ glyph_str, h.layer, finger.name() }),
+                    .dot_color = ui.mix(ui.layerColor(theme, 5), theme.accent, 0.35),
+                    .text_color = theme.text,
+                };
             }
             if ((h.modifiers & 0x22) != 0) {
-                const shift_side = if (p.preferredShiftFor(h.key)) |sp| switch (sp.hand) {
+                const sp_opt = p.preferredShiftFor(h.key);
+                const shift_side = if (sp_opt) |sp| switch (sp.hand) {
                     .left => "Left Shift",
                     .right => "Right Shift",
                     .neutral => "Shift",
                 } else "Shift";
+                const shift_key_lbl = if (sp_opt) |sp| try keyBaseTapLabel(arena, labels, sp.key_index) else null;
+                const shift_desc = if (shift_key_lbl) |sk|
+                    try std.fmt.allocPrint(arena, "{s} ({s})", .{ shift_side, sk })
+                else
+                    shift_side;
                 if (same_hand_shift_nudge) {
-                    return std.fmt.allocPrint(arena, "Next: {s} · Hold {s} + {s} · Tip: try opposite-hand Shift", .{ glyph_str, shift_side, finger.name() });
+                    return .{
+                        .text = try std.fmt.allocPrint(arena, "Next: {s} · Hold {s} + {s} · Tip: opposite-hand Shift", .{ glyph_str, shift_desc, finger.name() }),
+                        .dot_color = theme.warning,
+                        .text_color = theme.warning,
+                    };
                 }
-                return std.fmt.allocPrint(arena, "Next: {s} · Hold {s} + {s}", .{ glyph_str, shift_side, finger.name() });
+                return .{
+                    .text = try std.fmt.allocPrint(arena, "Next: {s} · Hold {s} + {s}", .{ glyph_str, shift_desc, finger.name() }),
+                    .dot_color = ui.mix(ui.layerColor(theme, 5), theme.accent, 0.35),
+                    .text_color = theme.text,
+                };
             }
             if (finger != .unknown) {
                 const row_str: []const u8 = if (h.key < p.key_count) switch (p.keys[h.key].row_offset) {
-                    -1 => " (top row)",
-                    1 => " (bottom row)",
-                    else => " (home row)",
+                    -1 => "top row",
+                    1 => "bottom row",
+                    else => "home row",
                 } else "";
-                return std.fmt.allocPrint(arena, "Next key: {s} · {s}{s}", .{ glyph_str, finger.name(), row_str });
+                const anchor_lbl: ?[]const u8 = if (p.homeAnchorFor(finger)) |ak|
+                    (if (ak != h.key) try keyBaseTapLabel(arena, labels, ak) else null)
+                else
+                    null;
+
+                const txt = if (anchor_lbl) |al|
+                    try std.fmt.allocPrint(arena, "Next: {s} · {s} ({s} · Home anchor: {s})", .{ display_key, finger.name(), row_str, al })
+                else if (row_str.len > 0)
+                    try std.fmt.allocPrint(arena, "Next: {s} · {s} ({s})", .{ display_key, finger.name(), row_str })
+                else
+                    try std.fmt.allocPrint(arena, "Next: {s} · {s}", .{ display_key, finger.name() });
+                return .{ .text = txt, .dot_color = fcol, .text_color = theme.text };
             }
         }
     }
-    return std.fmt.allocPrint(arena, "Next key: {s}", .{glyph_str});
+    return .{
+        .text = try std.fmt.allocPrint(arena, "Next key: {s}", .{display_key}),
+        .dot_color = theme.accent,
+        .text_color = theme.muted,
+    };
 }
 
 fn countWords(cps: []const u21) usize {

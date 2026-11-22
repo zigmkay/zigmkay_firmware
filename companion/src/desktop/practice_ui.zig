@@ -618,6 +618,7 @@ fn drawTutorWorkspace(
         .{ .x = bounds.x, .y = rem_y, .w = bounds.w, .h = card_h },
         focus,
         resolved_hint,
+        if (input.frame) |f| f.labels else null,
         input.now_us,
         runnerStatus(owner, input),
         shift_nudge,
