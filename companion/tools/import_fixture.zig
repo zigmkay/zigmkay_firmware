@@ -35,6 +35,11 @@ pub fn main(init: std.process.Init) !void {
     );
     defer prepared.deinit();
     const destination = try std.fs.path.join(a, &.{ output, "project" });
+    const export_path = try std.fs.path.join(a, &.{ output, "export" });
+    // Zig reuses the output directory path across warm-cache reruns; clear
+    // prior fixture outputs before committing and exporting again.
+    std.Io.Dir.cwd().deleteTree(init.io, destination) catch {};
+    std.Io.Dir.cwd().deleteTree(init.io, export_path) catch {};
     try importer.commit(init.gpa, init.io, prepared, captured, destination);
     var project_dir = try std.Io.Dir.cwd().openDir(init.io, destination, .{});
     defer project_dir.close(init.io);
@@ -42,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
     defer loaded.deinit();
     var export_dir = try std.Io.Dir.cwd().createDirPathOpen(
         init.io,
-        try std.fs.path.join(a, &.{ output, "export" }),
+        export_path,
         .{},
     );
     defer export_dir.close(init.io);
