@@ -83,7 +83,7 @@ fn checkImports(
         "global",
     });
     inline for (.{ "us", "de" }) |name| {
-        if (representative_only and !std.mem.eql(u8, name, "us")) continue;
+        if (comptime representative_only and !std.mem.eql(u8, name, "us")) continue;
         const source_path = try std.fs.path.join(a, &.{ root_path, name });
         try writeImportFixture(
             init.io,
