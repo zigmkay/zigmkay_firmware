@@ -5,6 +5,7 @@ const ui = @import("editor-ui");
 const desktop = @import("desktop-core");
 const model = @import("layout-model");
 const geometry = @import("physical-ui");
+const keyboard_view = @import("practice_keyboard_ui.zig");
 const presentation = @import("practice_presentation.zig");
 const control = desktop.practice_controller;
 const generator = desktop.practice_generator;
@@ -148,8 +149,7 @@ fn handleKey(owner: *control.Controller, effect: *control.Effect, key: dvui.Even
     }
 }
 
-/// Draws the keyboard guide. Draft guides show the layer and modifiers that
-/// produce the next character instead of the reported live state.
+/// Draws the unified Tap/Hold physical keyboard using `practice_keyboard_ui`.
 fn keyboard(
     owner: *const control.Controller,
     frame: Frame,
@@ -159,13 +159,7 @@ fn keyboard(
     resources: geometry.Resources,
     guided: bool,
 ) !void {
-    const panel = keyboardPanel(bounds, theme, "practice.keyboard");
-    defer panel.deinit();
-    if (frame.geometry.len == 0) {
-        const source: dvui.Rect = .{ .x = 8, .y = bounds.h - 22, .w = bounds.w - 16, .h = 20 };
-        presentation.label("Keyboard view unavailable", source, 11, theme.muted, null);
-        return;
-    }
+    _ = resources;
     const labels = frame.labels;
     const practice_labels = labels.practiceLabels();
     var layer = @min(frame.layer, labels.layer_count - 1);
@@ -185,6 +179,7 @@ fn keyboard(
     const arena = dvui.currentWindow().arena();
     const tap = try arena.alloc(bool, labels.key_count);
     const hold = try arena.alloc(bool, labels.key_count);
+    const one_shot = try arena.alloc(bool, labels.key_count);
     try desktop.practice.guidanceWithProfile(
         if (owner.profile_bound) &owner.profile else null,
         practice_labels,
@@ -192,75 +187,44 @@ fn keyboard(
         layer,
         mods.toByte(),
         next,
-        .{ .tap = tap, .hold = hold },
+        .{ .tap = tap, .hold = hold, .one_shot = one_shot },
     );
     const hold_source_layer = layer;
-    if (guided and frame.source == .draft) if (next) |hint| {
+    if (guided and (frame.source == .draft or (next != null and next.?.layer != layer))) if (next) |hint| {
         layer = hint.layer;
         mods = @bitCast(hint.modifiers);
         active = 1 | (@as(u16, 1) << @intCast(layer));
     };
-    try drawKeyboardLegend(frame, theme, bounds, layer, guided);
     const neutral_pressed = try arena.alloc(bool, labels.key_count);
     @memset(neutral_pressed, false);
-    const output = try arena.alloc(desktop.physical_view.DrawKey, frame.geometry.len);
-    const area: desktop.physical_view.Rect = .{ .x = 18, .y = 0, .w = @max(0, bounds.w - 36), .h = @max(0, bounds.h - 34) };
-    const plan = try desktop.physical_view.plan(output, frame.geometry, labels, layer, mods, area, .{
-        // Presses stay visible while trying the keyboard, and during a run
-        // only with guided assistance.
-        .pressed = if (guided or !running(owner)) frame.pressed else neutral_pressed,
-        .targets = tap,
-        .holds = hold,
-        .hold_source_layer = hold_source_layer,
-        .active_layers = active,
-        .stale = frame.stale,
-    });
-    try geometry.draw(layer, plan, resources);
-}
-
-/// The source line and hold/tap swatches along the bottom of the keyboard guide.
-fn drawKeyboardLegend(
-    frame: Frame,
-    theme: ui.Theme,
-    bounds: dvui.Rect,
-    layer: usize,
-    guided: bool,
-) !void {
-    const title = switch (frame.source) {
-        .live => if (frame.stale) "Live companion · stale / reconnecting" else "Live companion",
+    const source_title = switch (frame.source) {
+        .live => if (frame.stale) "Live companion · stale" else "Live companion",
         .simulated => "Draft simulation",
         .draft => if (guided) "Draft guide" else "Draft reference",
     };
-    const source = try std.fmt.allocPrint(dvui.currentWindow().arena(), "{s} · {s} · layer {d}", .{
-        title,
-        frame.profile,
-        layer,
+    const src_caption = try std.fmt.allocPrint(arena, "{s} · {s}", .{ source_title, frame.profile });
+    const dim_locked = owner.config.mode == .tutor and (owner.config.stage == .home_row or owner.config.stage == .all_letters);
+    try keyboard_view.draw(theme, bounds, .{
+        .mode = owner.config.mode,
+        .profile = if (owner.profile_bound) &owner.profile else null,
+        .geometry = frame.geometry,
+        .labels = labels,
+        .layer = layer,
+        .active_layers = active,
+        .modifiers = mods,
+        .pressed = if (guided or !running(owner) or owner.config.mode == .test_keys) frame.pressed else neutral_pressed,
+        .stale = frame.stale,
+        .show_guidance = guided,
+        .unlocked_mask = owner.learning.unlockedMask(),
+        .dim_locked = dim_locked,
+        .hint = next,
+        .tap_targets = tap,
+        .hold_targets = hold,
+        .one_shot_targets = one_shot,
+        .hold_source_layer = hold_source_layer,
+        .combo_output_cp = if (next != null and next.?.combo_key != null and focus < owner.session.reference_len) owner.session.reference[focus] else null,
+        .source_caption = src_caption,
     });
-    dvui.labelNoFmt(@src(), source, .{ .align_x = 0 }, .{
-        .rect = .{ .x = 8, .y = bounds.h - 22, .w = @max(0, bounds.w - 200), .h = 20 },
-        .font = dvui.Font.theme(.body).withSize(11),
-        .color_text = .{ .color = theme.muted },
-        .padding = .{},
-        .tag = "practice.keyboard.source",
-    });
-    for ([_][]const u8{ "Hold", "Tap" }, [_]u24{ 0x50D2FF, 0xFFC953 }, 0..) |label, hex, index| {
-        const x = bounds.w - 182 + @as(f32, @floatFromInt(index)) * 92;
-        const swatch = dvui.box(@src(), .{}, .{
-            .rect = .{ .x = x, .y = bounds.h - 19, .w = 10, .h = 10 },
-            .background = true,
-            .color_fill = .{ .color = ui.color(hex) },
-            .padding = .{},
-            .id_extra = index,
-        });
-        swatch.deinit();
-        dvui.labelNoFmt(@src(), label, .{}, .{
-            .rect = .{ .x = x + 16, .y = bounds.h - 24, .w = 65, .h = 22 },
-            .font = dvui.Font.theme(.body).withSize(13),
-            .color_text = .{ .color = theme.muted },
-            .padding = .{},
-            .id_extra = index,
-        });
-    }
 }
 
 pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dvui.Rect, input: Input) !DrawResult {
