@@ -480,6 +480,101 @@ fn auditPe(io: std.Io, path: []const u8, inventory: *std.Io.Writer) !void {
     }
 }
 
+/// The download's compression: LZMA, readable since macOS 10.15.
+const disk_image_format = "ULMO";
+
+/// Create the compressed disk image `destination` from `stage`. Compressing
+/// while copying the folder (`hdiutil create -format UDZO -srcfolder`) left
+/// about half of earlier downloads as data no block table references, so the
+/// folder is copied into a read-write image first and then converted.
+fn diskImage(io: std.Io, stage: []const u8, destination: []const u8) !void {
+    const writable = try std.fmt.allocPrint(a, "{s}.rw.dmg", .{destination});
+    const start = std.Io.Clock.awake.now(io);
+    _ = try run(io, &.{
+        "hdiutil",
+        "create",
+        "-ov",
+        "-format",
+        "UDRW",
+        "-fs",
+        "APFS",
+        "-volname",
+        "Zigmkay unsigned preview",
+        "-srcfolder",
+        stage,
+        writable,
+    });
+    const created = std.Io.Clock.awake.now(io);
+    _ = try run(io, &.{ "hdiutil", "convert", writable, "-ov", "-format", disk_image_format, "-o", destination });
+    const converted = std.Io.Clock.awake.now(io);
+    try std.Io.Dir.cwd().deleteFile(io, writable);
+    const bytes = try read(io, destination);
+    defer a.free(bytes);
+    const sizes = try diskImageSizes(bytes);
+    std.log.info("disk image {s}: {d} bytes, {d} referenced, {d} expanded; create {d} ms, convert {d} ms", .{
+        disk_image_format,
+        bytes.len,
+        sizes.referenced,
+        sizes.expanded,
+        start.durationTo(created).toMilliseconds(),
+        created.durationTo(converted).toMilliseconds(),
+    });
+    try sizes.check();
+}
+
+/// What the block tables of a UDIF disk image describe.
+const DiskImageSizes = struct {
+    /// Length of the data fork that holds the image's chunks.
+    data: u64,
+    /// Bytes of the data fork that chunks reference.
+    referenced: u64,
+    /// Size of the image once expanded.
+    expanded: u64,
+
+    /// Refuse an image whose data fork is noticeably larger than its chunks.
+    fn check(sizes: DiskImageSizes) !void {
+        if (sizes.referenced > sizes.data) return error.InvalidDiskImage;
+        if (sizes.data - sizes.referenced > @max(1024 * 1024, sizes.data / 100)) return error.UnreferencedDiskImageData;
+    }
+};
+
+/// Read the trailer (`koly`) and the block tables (`mish`) of a UDIF image.
+fn diskImageSizes(bytes: []const u8) !DiskImageSizes {
+    if (bytes.len < 512) return error.InvalidDiskImage;
+    const trailer = bytes[bytes.len - 512 ..];
+    if (!std.mem.eql(u8, trailer[0..4], "koly")) return error.InvalidDiskImage;
+    const data_offset = std.mem.readInt(u64, trailer[0x18..0x20], .big);
+    const data_length = std.mem.readInt(u64, trailer[0x20..0x28], .big);
+    const xml_offset = std.mem.readInt(u64, trailer[0xD8..0xE0], .big);
+    const xml_length = std.mem.readInt(u64, trailer[0xE0..0xE8], .big);
+    const limit = bytes.len - 512;
+    if (data_offset > limit or data_length > limit - data_offset or
+        xml_offset > limit or xml_length > limit - xml_offset) return error.InvalidDiskImage;
+    var rest = bytes[xml_offset..][0..xml_length];
+    var sizes: DiskImageSizes = .{ .data = data_length, .referenced = 0, .expanded = 0 };
+    var encoded: std.ArrayList(u8) = .empty;
+    defer encoded.deinit(a);
+    while (std.mem.indexOf(u8, rest, "<data>")) |start| {
+        const end = std.mem.indexOfPos(u8, rest, start, "</data>") orelse return error.InvalidDiskImage;
+        encoded.clearRetainingCapacity();
+        for (rest[start + "<data>".len .. end]) |c| if (!std.ascii.isWhitespace(c)) try encoded.append(a, c);
+        rest = rest[end + "</data>".len ..];
+        const decoder = std.base64.standard.Decoder;
+        const table = try a.alloc(u8, try decoder.calcSizeForSlice(encoded.items));
+        defer a.free(table);
+        try decoder.decode(table, encoded.items);
+        if (table.len < 0xCC or !std.mem.eql(u8, table[0..4], "mish")) continue;
+        const count = std.mem.readInt(u32, table[0xC8..0xCC], .big);
+        if ((table.len - 0xCC) / 40 < count) return error.InvalidDiskImage;
+        for (0..count) |index| {
+            const chunk = table[0xCC + 40 * index ..][0..40];
+            sizes.expanded += std.mem.readInt(u64, chunk[16..24], .big) * 512;
+            sizes.referenced += std.mem.readInt(u64, chunk[32..40], .big);
+        }
+    }
+    return sizes;
+}
+
 fn seal(io: std.Io, root: []const u8, resources: []const u8) !jobs.application_bundle.Manifest {
     var bundle = try jobs.application_bundle.Bundle.open(a, io, resources);
     defer bundle.deinit();
@@ -524,18 +619,7 @@ fn package(io: std.Io, root: []const u8, output: []const u8, revision: []const u
                 try join(&.{ stage, "Applications" }),
                 .{ .is_directory = true },
             );
-            _ = try run(io, &.{
-                "hdiutil",
-                "create",
-                "-ov",
-                "-format",
-                "UDZO",
-                "-volname",
-                "Zigmkay unsigned preview",
-                "-srcfolder",
-                stage,
-                destination,
-            });
+            try diskImage(io, stage, destination);
             try std.Io.Dir.cwd().deleteTree(io, stage);
         },
         .windows => {
@@ -684,6 +768,11 @@ pub fn main(init: std.process.Init) !void {
         var bundle = try jobs.application_bundle.Bundle.fromExecutable(a, init.io, args[2], args[3]);
         defer bundle.deinit();
         try jobs.bundle_payload.materialize(a, init.io, args[2], bundle.root);
+    } else if (args.len == 3 and std.mem.eql(u8, args[1], "inspect-disk-image")) {
+        const sizes = try diskImageSizes(try read(init.io, args[2]));
+        var stdout = std.Io.File.stdout().writer(init.io, &.{});
+        try stdout.interface.print("data {d} referenced {d} expanded {d}\n", .{ sizes.data, sizes.referenced, sizes.expanded });
+        try sizes.check();
     } else if (args.len == 4 and std.mem.eql(u8, args[1], "finalize")) {
         try finalize(init.io, args[2], args[3]);
     } else return error.InvalidReleaseArguments;
@@ -747,4 +836,50 @@ test "release inventory refuses missing assets mismatched commits and changed ha
     defer t.allocator.free(changed);
     try temp.dir.writeFile(t.io, .{ .sub_path = changed, .data = "changed package" });
     try t.expectError(error.ReleaseAssetHashMismatch, finalize(t.io, root, "commit"));
+}
+
+/// A UDIF image with one block table: `chunks` compressed lengths in a data
+/// fork of `data` bytes.
+fn testDiskImage(data: u64, chunks: []const u64) ![]u8 {
+    var table: std.ArrayList(u8) = .empty;
+    defer table.deinit(std.testing.allocator);
+    try table.appendSlice(std.testing.allocator, "mish");
+    try table.appendNTimes(std.testing.allocator, 0, 0xC8 - 4);
+    var count: [4]u8 = undefined;
+    std.mem.writeInt(u32, &count, @intCast(chunks.len), .big);
+    try table.appendSlice(std.testing.allocator, &count);
+    for (chunks) |length| {
+        var chunk: [40]u8 = @splat(0);
+        std.mem.writeInt(u64, chunk[16..24], 8, .big);
+        std.mem.writeInt(u64, chunk[32..40], length, .big);
+        try table.appendSlice(std.testing.allocator, &chunk);
+    }
+    const encoder = std.base64.standard.Encoder;
+    const encoded = try std.testing.allocator.alloc(u8, encoder.calcSize(table.items.len));
+    defer std.testing.allocator.free(encoded);
+    _ = encoder.encode(encoded, table.items);
+    const xml = try std.fmt.allocPrint(std.testing.allocator, "<plist><key>blkx</key><array><dict><key>Data</key>\n\t<data>\n\t{s}\n\t</data></dict></array><data>cGxzdA==</data></plist>", .{encoded});
+    defer std.testing.allocator.free(xml);
+    const image = try std.testing.allocator.alloc(u8, data + xml.len + 512);
+    @memset(image, 0);
+    @memcpy(image[data..][0..xml.len], xml);
+    const trailer = image[image.len - 512 ..];
+    @memcpy(trailer[0..4], "koly");
+    std.mem.writeInt(u64, trailer[0x20..0x28], data, .big);
+    std.mem.writeInt(u64, trailer[0xD8..0xE0], data, .big);
+    std.mem.writeInt(u64, trailer[0xE0..0xE8], xml.len, .big);
+    return image;
+}
+
+test "disk images must not carry data their block tables leave unreferenced" {
+    const t = std.testing;
+    const whole = try testDiskImage(3 * 1024 * 1024, &.{ 1024 * 1024, 2 * 1024 * 1024 });
+    defer t.allocator.free(whole);
+    const sizes = try diskImageSizes(whole);
+    try t.expectEqual(DiskImageSizes{ .data = 3 * 1024 * 1024, .referenced = 3 * 1024 * 1024, .expanded = 2 * 8 * 512 }, sizes);
+    try sizes.check();
+    const padded = try testDiskImage(6 * 1024 * 1024, &.{ 1024 * 1024, 2 * 1024 * 1024 });
+    defer t.allocator.free(padded);
+    try t.expectError(error.UnreferencedDiskImageData, (try diskImageSizes(padded)).check());
+    try t.expectError(error.InvalidDiskImage, diskImageSizes("not a disk image"));
 }
