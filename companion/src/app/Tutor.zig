@@ -320,12 +320,16 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
         practice.test_keys.modifiers = modifiers.toByte();
     }
 
+    const doc = model.document();
+    const layer_name = if (layer < doc.layers.len) doc.layers[layer].name else "";
     return .{ .labels = labels, .live = live, .metadata = metadata, .keyboard = .{
         .source = if (live) .live else if (draft.owner != null) .simulated else .draft,
         .labels = labels,
         .geometry = geometry,
         .metadata = metadata,
-        .profile = model.document().name,
+        .board_name = active_board.entry.display.name,
+        .profile = doc.name,
+        .layer_name = layer_name,
         .layer = layer,
         .active_layers = active_layers,
         .modifiers = modifiers,
@@ -345,7 +349,6 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
     });
     defer canvas.deinit();
     var outcome: Outcome = .{};
-    outcome.leave = ui.button(theme, "Back to editor", "practice.back", .{ .x = 24, .y = 12, .w = 160, .h = 36 });
     // A run on the OS source waits for the live keyboard to verify itself.
     const waiting_for_live = practice.config.source == .os and app.live_enabled and !frame.live;
     const input: tutor.Input = .{
@@ -358,11 +361,12 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
         .event_times = app.events.times[0..app.events.time_count],
     };
     const rect = app.window.data().rect;
-    const bounds: dvui.Rect = .{ .x = 24, .y = 64, .w = @max(300, rect.w - 48), .h = @max(300, rect.h - 88) };
+    const bounds: dvui.Rect = .{ .x = 0, .y = 0, .w = @max(300, rect.w), .h = @max(300, rect.h) };
     const drawn = tutor.draw(practice, &self.view, theme, bounds, input) catch |err| failed: {
         app.view.report(err);
         break :failed tutor.DrawResult{};
     };
+    outcome.leave = drawn.leave;
     outcome.action = drawn.action;
     outcome.input_effect = drawn.input_effect;
     return outcome;
