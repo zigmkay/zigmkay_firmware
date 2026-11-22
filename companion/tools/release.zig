@@ -555,6 +555,9 @@ fn package(io: std.Io, root: []const u8, output: []const u8, revision: []const u
                 inventory.written(),
             );
             try std.Io.Dir.cwd().deleteTree(io, extracted);
+            // materialize leaves its extraction lock beside the directory; it must
+            // not become an (empty, unuploadable) release asset.
+            try std.Io.Dir.cwd().deleteFile(io, try std.fmt.allocPrint(a, "{s}.lock", .{extracted}));
             try std.Io.Dir.cwd().copyFile(root, .cwd(), destination, io, .{});
         },
         .linux => {
