@@ -156,7 +156,7 @@ for the same firmware, written in Zig and living in [`companion/`](companion/).
     <td align="center"><sub>Combos on the PCB schematic</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="assets/screenshots/tutor.png" alt="Typing tutor during an English test at 47 WPM with the next key highlighted on the keyboard"></td>
+    <td width="50%"><img src="assets/screenshots/tutor.png" alt="Adaptive typing tutor with key-confidence strip, 3-line text stage, and Tap/Hold split keyboard guidance"></td>
     <td width="50%">
       <img src="assets/screenshots/companion-overlay.png" alt="Live companion overlay on the base layer of a Leonardo Keycaprio: home-row modifiers, layer holds on the thumbs and a verified running profile">
     </td>

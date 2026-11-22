@@ -58,11 +58,11 @@ keyboard icon in the tray.
   shows the device status and opens the editor, shows or hides the companion,
   binds the saved editor project to the live companion, zooms the editor and
   quits Zigmkay.
-- **Typing tutor.** Choose **Open tutor** in the editor. Before a test the tutor
-  shows your layout and highlights each key you press, so you can check a
-  freshly flashed layout key by key. Then run an English test of 1, 3, 5 or 10
-  sentences or one of three short Zig lessons, with words per minute and
-  accuracy. The tutor saves nothing between sessions; see the
+- **Typing tutor & Test keys.** Choose **Open tutor** in the editor for an
+  adaptive 6-stage typing tutor (home row, all letters with focus-key unlocks,
+  opposite-hand Shift, punctuation/numbers, layers & 2-key combos, and free
+  text / Zig code) with local per-profile progress, or switch to **Test keys**
+  to verify switches, layers, holds, and combos unscored; see the
   [typing practice guide](docs/typing-practice.md).
 
 <table>
@@ -75,7 +75,7 @@ keyboard icon in the tray.
     <td align="center"><sub>Combos on the PCB schematic</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="../assets/screenshots/tutor.png" alt="Typing tutor during an English test at 47 WPM with the next key highlighted on the keyboard"></td>
+    <td width="50%"><img src="../assets/screenshots/tutor.png" alt="Adaptive typing tutor with key-confidence strip, 3-line text stage, and Tap/Hold split keyboard guidance"></td>
     <td width="50%"><img src="../assets/screenshots/companion-overlay.png" alt="Live companion overlay on the base layer of a Leonardo Keycaprio: home-row modifiers, layer holds on the thumbs and a verified running profile"></td>
   </tr>
   <tr>

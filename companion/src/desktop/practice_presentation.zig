@@ -41,7 +41,7 @@ pub fn caption(text: []const u8, bounds: dvui.Rect, size: f32, color: dvui.Color
     });
 }
 
-/// Key-confidence strip (keybr DNA): header row + single-row chip strip grouped
+/// Key-confidence strip (adaptive per-key progression): header row + single-row chip strip grouped
 /// into Home row | Unlocked | Locked.
 pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds: dvui.Rect) !void {
     const card = dvui.box(@src(), .{}, .{
