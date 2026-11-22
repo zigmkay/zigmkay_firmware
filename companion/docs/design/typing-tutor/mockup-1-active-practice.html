@@ -1,0 +1,609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Typing Tutor Mockup 1 — Active Practice</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    font-family: var(--font-sans, Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+    background: #0F1115;
+    color: #EDEFF2;
+    line-height: 1.4;
+    padding: 16px;
+  }
+  .app-window {
+    width: 100%;
+    max-width: 780px;
+    margin: 0 auto;
+    background: #15171B;
+    border: 1px solid #383D46;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  }
+  /* Top bar matching Editor design */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 8px 12px;
+    background: #1E2126;
+    border-bottom: 1px solid #383D46;
+    flex-wrap: wrap;
+  }
+  .topbar-left, .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    background: #2A2E35;
+    border: 1px solid #383D46;
+    color: #EDEFF2;
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .seg {
+    display: inline-flex;
+    align-items: center;
+    background: #15171B;
+    border: 1px solid #383D46;
+    border-radius: 6px;
+    padding: 2px;
+    gap: 2px;
+  }
+  .seg-item {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    color: #9AA3B0;
+    white-space: nowrap;
+  }
+  .seg-item.active {
+    background: #2A2E35;
+    color: #EDEFF2;
+  }
+  .btn-stage {
+    background: rgba(59, 130, 246, 0.14);
+    border-color: rgba(59, 130, 246, 0.45);
+    color: #93C5FD;
+    font-weight: 600;
+  }
+  .breadcrumb {
+    font-size: 11.5px;
+    color: #9AA3B0;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .breadcrumb strong { color: #EDEFF2; font-weight: 600; }
+  .live-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: rgba(110, 197, 154, 0.14);
+    color: #6EC59A;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .live-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #6EC59A;
+  }
+
+  .workspace {
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  /* Key confidence strip (keybr DNA) */
+  .confidence-card {
+    background: #1E2126;
+    border: 1px solid #383D46;
+    border-radius: 10px;
+    padding: 9px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .conf-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    color: #9AA3B0;
+    flex-wrap: wrap;
+  }
+  .conf-focus {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #EDEFF2;
+    font-weight: 500;
+  }
+  .focus-tag {
+    background: rgba(245, 158, 11, 0.18);
+    border: 1px solid rgba(245, 158, 11, 0.55);
+    color: #FCD34D;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-weight: 700;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 5px;
+  }
+  .key-strip {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 3px;
+    justify-content: space-between;
+  }
+  .kchip {
+    flex: 1 1 0;
+    min-width: 19px;
+    height: 24px;
+    border-radius: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 10.5px;
+    font-weight: 600;
+    position: relative;
+    border: 1px solid transparent;
+  }
+  .kchip.done {
+    background: rgba(110, 197, 154, 0.16);
+    border-color: rgba(110, 197, 154, 0.35);
+    color: #6EC59A;
+  }
+  .kchip.mid {
+    background: rgba(59, 130, 246, 0.16);
+    border-color: rgba(59, 130, 246, 0.42);
+    color: #93C5FD;
+  }
+  .kchip.focus {
+    background: rgba(245, 158, 11, 0.22);
+    border: 1.5px solid #F59E0B;
+    color: #FEF3C7;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+  }
+  .kchip.focus::after {
+    content: "";
+    position: absolute;
+    bottom: 2px;
+    width: 8px;
+    height: 2px;
+    border-radius: 2px;
+    background: #F59E0B;
+  }
+  .kchip.locked {
+    background: #23272E;
+    border-color: #2E333C;
+    color: #565F6D;
+  }
+  .strip-sep {
+    width: 1px;
+    height: 18px;
+    background: #383D46;
+    align-self: center;
+    margin: 0 2px;
+  }
+
+  /* Main typing panel */
+  .typing-card {
+    background: #1E2126;
+    border: 1px solid #383D46;
+    border-radius: 10px;
+    padding: 12px 16px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .metrics-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11.5px;
+    color: #9AA3B0;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .metrics-vals {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .metric strong {
+    color: #EDEFF2;
+    font-size: 13px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .goal-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10.5px;
+  }
+  .goal-bar {
+    width: 68px;
+    height: 5px;
+    border-radius: 99px;
+    background: #2A2E35;
+    overflow: hidden;
+  }
+  .goal-fill {
+    width: 58%;
+    height: 100%;
+    background: #6EC59A;
+    border-radius: 99px;
+  }
+
+  .text-stage {
+    background: #15171B;
+    border: 1px solid #2D323B;
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    font-size: 19px;
+    line-height: 1.65;
+    letter-spacing: 0.03em;
+    color: #8A94A3;
+  }
+  .c-ok { color: #6EC59A; }
+  .c-err {
+    color: #F06B73;
+    background: rgba(240, 107, 115, 0.16);
+    border-radius: 3px;
+    text-decoration: underline wavy #F06B73;
+  }
+  .c-cur {
+    color: #15171B;
+    background: #F59E0B;
+    border-radius: 4px;
+    padding: 0 2px;
+    font-weight: 700;
+    box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.25);
+  }
+  .c-rest { color: #C7CED8; }
+  .c-dim { color: #5E6775; }
+
+  .run-progress-track {
+    height: 4px;
+    border-radius: 99px;
+    background: #2A2E35;
+    overflow: hidden;
+  }
+  .run-progress-fill {
+    width: 44%;
+    height: 100%;
+    background: #3B82F6;
+    border-radius: 99px;
+  }
+  .typing-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 11px;
+    color: #9AA3B0;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .kbd-hint-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 6px;
+    background: #272B32;
+    border: 1px solid #383D46;
+    color: #EDEFF2;
+    font-size: 11px;
+  }
+  .finger-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+
+  /* Keyboard card */
+  .kb-card {
+    background: #1E2126;
+    border: 1px solid #383D46;
+    border-radius: 10px;
+    padding: 10px 12px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .kb-svg-wrap {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+  }
+  .kb-svg-wrap svg {
+    width: 100%;
+    max-width: 630px;
+    height: auto;
+    display: block;
+  }
+  .kb-legend {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10.5px;
+    color: #9AA3B0;
+    padding-top: 2px;
+    border-top: 1px solid #2A2E35;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .legend-items {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .lg {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .sw {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+</style>
+</head>
+<body>
+<div class="app-window">
+  <div class="topbar">
+    <div class="topbar-left">
+      <span class="btn">← Back to editor</span>
+      <span class="breadcrumb"><strong>Keycaprio</strong> › Colemak-DH</span>
+      <span class="seg" role="tablist" aria-label="Mode">
+        <span class="seg-item active">Tutor</span>
+        <span class="seg-item">Test keys</span>
+      </span>
+      <span class="btn btn-stage">Stage 2 · All letters (12/26) ▾</span>
+    </div>
+    <div class="topbar-right">
+      <span class="live-pill"><span class="live-dot"></span>On keyboard</span>
+      <span class="btn">Progress</span>
+      <span class="btn">Guided ▾</span>
+      <span class="btn">⚙</span>
+    </div>
+  </div>
+
+  <div class="workspace">
+    <!-- Key confidence strip -->
+    <div class="confidence-card">
+      <div class="conf-head">
+        <div class="conf-focus">
+          <span>Active focus:</span>
+          <span class="focus-tag">L</span>
+          <span>29 / 35 WPM · 96% · ~3 rounds to unlock <strong>U</strong></span>
+        </div>
+        <span>Target speed: <strong>35 WPM</strong> · Home row + 4</span>
+      </div>
+      <div class="key-strip" aria-label="Key confidence">
+        <!-- Home Row 8 -->
+        <span class="kchip done" title="A · 100%">A</span>
+        <span class="kchip done" title="R · 100%">R</span>
+        <span class="kchip done" title="S · 100%">S</span>
+        <span class="kchip done" title="T · 100%">T</span>
+        <span class="kchip done" title="N · 100%">N</span>
+        <span class="kchip done" title="E · 100%">E</span>
+        <span class="kchip done" title="I · 100%">I</span>
+        <span class="kchip done" title="O · 100%">O</span>
+        <span class="strip-sep"></span>
+        <!-- Unlocked beyond Home Row -->
+        <span class="kchip done" title="D · 100%">D</span>
+        <span class="kchip done" title="H · 100%">H</span>
+        <span class="kchip mid" title="P · 88%">P</span>
+        <span class="kchip focus" title="L · 74% (Focus)">L</span>
+        <span class="strip-sep"></span>
+        <!-- Locked -->
+        <span class="kchip locked">U</span>
+        <span class="kchip locked">F</span>
+        <span class="kchip locked">C</span>
+        <span class="kchip locked">M</span>
+        <span class="kchip locked">G</span>
+        <span class="kchip locked">W</span>
+        <span class="kchip locked">Y</span>
+        <span class="kchip locked">B</span>
+        <span class="kchip locked">V</span>
+        <span class="kchip locked">K</span>
+        <span class="kchip locked">J</span>
+        <span class="kchip locked">X</span>
+        <span class="kchip locked">Q</span>
+        <span class="kchip locked">Z</span>
+      </div>
+    </div>
+
+    <!-- Typing panel -->
+    <div class="typing-card">
+      <div class="metrics-row">
+        <div class="metrics-vals">
+          <span class="metric"><strong>42</strong> WPM</span>
+          <span class="metric"><strong>97.4%</strong> Accuracy</span>
+          <span class="metric"><strong>14.2s</strong></span>
+        </div>
+        <div class="goal-wrap">
+          <span>Daily goal 8 / 15 min</span>
+          <div class="goal-bar"><div class="goal-fill"></div></div>
+        </div>
+      </div>
+
+      <div class="text-stage">
+        <div><span class="c-ok">taler steln holar p</span><span class="c-err">e</span><span class="c-ok">len dalt s</span><span class="c-cur">l</span><span class="c-rest">one larst</span></div>
+        <div class="c-dim">paler nolt shald telor plint dales norst</div>
+        <div class="c-dim">haled lern pasto drale stilo panel tler</div>
+      </div>
+
+      <div class="run-progress-track"><div class="run-progress-fill"></div></div>
+
+      <div class="typing-foot">
+        <span class="kbd-hint-pill">
+          <span class="finger-dot" style="background:#22C55E"></span>
+          <span>Next key: <strong>L</strong> · Right index (top row) · Home anchor: N</span>
+        </span>
+        <span>Esc Pause · Tab New · 11 / 25 words</span>
+      </div>
+    </div>
+
+    <!-- Physical Keyboard Visualization (Keycaprio 34 Colemak-DH) -->
+    <div class="kb-card">
+      <div class="kb-svg-wrap" id="kb-container"></div>
+      <div class="kb-legend">
+        <span>Live · Leonardo Keycaprio 0.7 (34 keys) · Base layer</span>
+        <div class="legend-items">
+          <span class="lg"><span class="sw" style="background:#F59E0B"></span>Tap</span>
+          <span class="lg"><span class="sw" style="background:#50D2FF"></span>Hold</span>
+          <span class="lg"><span class="sw" style="background:#A855F7"></span>Pinky</span>
+          <span class="lg"><span class="sw" style="background:#3B82F6"></span>Ring</span>
+          <span class="lg"><span class="sw" style="background:#38BDF8"></span>Middle</span>
+          <span class="lg"><span class="sw" style="background:#22C55E"></span>Index</span>
+          <span class="lg"><span class="sw" style="background:#94A3B8"></span>Thumb</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Exact schematic geometry from companion/src/catalog/schematic/keycaprio_34.zon
+const keys = [
+  // Top row L
+  { i:0,  x:0,    y:1,    tap:'Q', hold:'',   f:'p', unlocked:false },
+  { i:1,  x:1,    y:0.25, tap:'W', hold:'',   f:'r', unlocked:false },
+  { i:2,  x:2,    y:0,    tap:'F', hold:'',   f:'m', unlocked:false },
+  { i:3,  x:3,    y:0.25, tap:'P', hold:'',   f:'i', unlocked:true  },
+  { i:4,  x:4,    y:0.5,  tap:'B', hold:'',   f:'i', unlocked:false },
+  // Top row R
+  { i:5,  x:6.25, y:0.5,  tap:'J', hold:'',   f:'i', unlocked:false },
+  { i:6,  x:7.25, y:0.25, tap:'L', hold:'',   f:'i', unlocked:true, target:true },
+  { i:7,  x:8.25, y:0,    tap:'U', hold:'',   f:'m', unlocked:false },
+  { i:8,  x:9.25, y:0.25, tap:'Y', hold:'',   f:'r', unlocked:false },
+  { i:9,  x:10.25,y:1,    tap:';', hold:'',   f:'p', unlocked:false },
+  // Home row L
+  { i:10, x:0,    y:2,    tap:'A', hold:'⌃',  f:'p', home:true, unlocked:true },
+  { i:11, x:1,    y:1.25, tap:'R', hold:'⌥',  f:'r', home:true, unlocked:true },
+  { i:12, x:2,    y:1,    tap:'S', hold:'⌘',  f:'m', home:true, unlocked:true },
+  { i:13, x:3,    y:1.25, tap:'T', hold:'⇧',  f:'i', home:true, unlocked:true },
+  { i:14, x:4,    y:1.5,  tap:'G', hold:'',   f:'i', home:true, unlocked:false },
+  // Home row R
+  { i:15, x:6.25, y:1.5,  tap:'M', hold:'',   f:'i', home:true, unlocked:false },
+  { i:16, x:7.25, y:1.25, tap:'N', hold:'⇧',  f:'i', home:true, unlocked:true },
+  { i:17, x:8.25, y:1,    tap:'E', hold:'⌘',  f:'m', home:true, unlocked:true },
+  { i:18, x:9.25, y:1.25, tap:'I', hold:'⌥',  f:'r', home:true, unlocked:true },
+  { i:19, x:10.25,y:2,    tap:'O', hold:'⌃',  f:'p', home:true, unlocked:true },
+  // Bottom row L
+  { i:20, x:0,    y:3,    tap:'Z', hold:'',   f:'p', unlocked:false },
+  { i:21, x:1,    y:2.25, tap:'X', hold:'',   f:'r', unlocked:false },
+  { i:22, x:2,    y:2,    tap:'C', hold:'',   f:'m', unlocked:false },
+  { i:23, x:3,    y:2.25, tap:'D', hold:'',   f:'i', unlocked:true  },
+  { i:24, x:4,    y:2.5,  tap:'V', hold:'',   f:'i', unlocked:false },
+  // Bottom row R
+  { i:25, x:6.25, y:2.5,  tap:'K', hold:'',   f:'i', unlocked:false },
+  { i:26, x:7.25, y:2.25, tap:'H', hold:'',   f:'i', unlocked:true  },
+  { i:27, x:8.25, y:2,    tap:',', hold:'',   f:'m', unlocked:false },
+  { i:28, x:9.25, y:2.25, tap:'.', hold:'',   f:'r', unlocked:false },
+  { i:29, x:10.25,y:3,    tap:'/', hold:'',   f:'p', unlocked:false },
+  // Thumbs
+  { i:30, x:3.26, y:3.97, rot:0,   tap:'⇥', hold:'L1', holdCol:'#3B82F6', f:'t', unlocked:true },
+  { i:31, x:4.35, y:4.06, rot:10,  tap:'␣', hold:'L2', holdCol:'#F59E0B', f:'t', unlocked:true },
+  { i:32, x:5.9,  y:4.06, rot:-10, tap:'↩', hold:'L3', holdCol:'#22C55E', f:'t', unlocked:true },
+  { i:33, x:6.99, y:3.97, rot:0,   tap:'⌫', hold:'',   f:'t', unlocked:true },
+];
+
+const fingerColor = { p:'#A855F7', r:'#3B82F6', m:'#38BDF8', i:'#22C55E', t:'#94A3B8' };
+const U = 54, pad = 3, ox = 10, oy = 8;
+const W = 11.25 * U + ox * 2, H = 5.15 * U + oy * 2;
+
+let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+
+// Subtle motion indicator from right index home (N, key 16) to target (L, key 6)
+const nx = ox + 7.25 * U + U/2, ny = oy + 1.25 * U + U/2;
+const lx = ox + 7.25 * U + U/2, ly = oy + 0.25 * U + U/2;
+
+for (const k of keys) {
+  const kx = ox + k.x * U + pad;
+  const ky = oy + k.y * U + pad;
+  const kw = U - pad * 2;
+  const kh = U - pad * 2;
+  const cx = kx + kw / 2, cy = ky + kh / 2;
+  const rot = k.rot ? ` transform="rotate(${k.rot} ${cx} ${cy})"` : '';
+
+  const isTarget = !!k.target;
+  const isAnchor = k.i === 16; // Home anchor of target finger (N)
+  const fill = isTarget ? '#4A3918' : (k.unlocked ? '#272B32' : '#1B1E23');
+  const lowerFill = isTarget ? '#3A2C12' : (k.unlocked ? '#21252C' : '#181A1F');
+  const stroke = isTarget ? '#FFC953' : (isAnchor ? '#22C55E' : (k.unlocked ? '#6B3438' : '#2C3038'));
+  const sw = isTarget ? 2.5 : (isAnchor ? 1.8 : 1.2);
+  const textCol = isTarget ? '#FFFBEB' : (k.unlocked ? '#EDEFF2' : '#525A67');
+  const holdCol = k.holdCol || (isTarget ? '#FDE68A' : '#7E8796');
+  const fc = fingerColor[k.f];
+
+  svg += `<g${rot}>`;
+  // Keycap body
+  svg += `<rect x="${kx}" y="${ky}" width="${kw}" height="${kh}" rx="7" fill="${fill}" stroke="${stroke}" stroke-width="${sw}"/>`;
+  // Lower hold band (matching editor keycap anatomy)
+  const bandY = ky + kh * 0.63;
+  const bandH = kh * 0.37;
+  svg += `<path d="M ${kx+1} ${bandY} H ${kx+kw-1} V ${ky+kh-7} Q ${kx+kw-1} ${ky+kh-1} ${kx+kw-7} ${ky+kh-1} H ${kx+7} Q ${kx+1} ${ky+kh-1} ${kx+1} ${ky+kh-7} Z" fill="${lowerFill}"/>`;
+  svg += `<line x1="${kx+2}" y1="${bandY}" x2="${kx+kw-2}" y2="${bandY}" stroke="${isTarget ? '#7A5B22' : '#323741'}" stroke-width="0.8"/>`;
+
+  // Finger zone accent strip at bottom
+  if (k.unlocked || isTarget) {
+    svg += `<rect x="${kx + kw*0.26}" y="${ky + kh - 3.2}" width="${kw*0.48}" height="2.2" rx="1.1" fill="${fc}" opacity="${isTarget ? '1' : '0.65'}"/>`;
+  }
+
+  // Tactile home-row bump on index anchors (T=13, N=16)
+  if (k.i === 13 || k.i === 16) {
+    svg += `<rect x="${cx - 5}" y="${bandY - 4}" width="10" height="1.8" rx="0.9" fill="${isAnchor ? '#22C55E' : '#9AA3B0'}" opacity="0.85"/>`;
+  }
+
+  // Tap legend
+  svg += `<text x="${cx}" y="${ky + kh*0.37}" text-anchor="middle" dominant-baseline="central" fill="${textCol}" font-family="Inter, sans-serif" font-size="${k.tap.length > 1 ? 13 : 16}" font-weight="${isTarget ? 700 : 600}">${k.tap}</text>`;
+
+  // Hold legend or TAP pill
+  if (isTarget) {
+    svg += `<text x="${cx}" y="${bandY + bandH*0.46}" text-anchor="middle" dominant-baseline="central" fill="#FFC953" font-family="Inter, sans-serif" font-size="8.5" font-weight="700" letter-spacing="0.06em">TAP</text>`;
+  } else if (k.hold) {
+    svg += `<text x="${cx}" y="${bandY + bandH*0.44}" text-anchor="middle" dominant-baseline="central" fill="${holdCol}" font-family="Inter, sans-serif" font-size="10.5" font-weight="600">${k.hold}</text>`;
+  }
+  svg += `</g>`;
+}
+
+// Clean subtle chevron right in the gap between N (home) and L (target)
+const gapY = (ny - U/2 + pad + ly + U/2 - pad) / 2;
+svg += `<circle cx="${nx}" cy="${gapY}" r="7" fill="#15171B" stroke="#22C55E" stroke-width="1.4"/>`;
+svg += `<path d="M ${nx-3} ${gapY+1.5} L ${nx} ${gapY-2} L ${nx+3} ${gapY+1.5}" fill="none" stroke="#22C55E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`;
+
+svg += `</svg>`;
+document.getElementById('kb-container').innerHTML = svg;
+</script>
+</body>
+</html>
