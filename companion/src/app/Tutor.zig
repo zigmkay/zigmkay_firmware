@@ -320,6 +320,26 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
         practice.test_keys.active_layers = active_layers;
         practice.test_keys.highest_layer = layer;
         practice.test_keys.modifiers = modifiers.toByte();
+        var count_down: usize = 0;
+        for (pressed) |is_down| {
+            if (is_down) count_down += 1;
+        }
+        practice.test_keys.pressed_count = count_down;
+        var matched_combo: ?u21 = null;
+        if (practice.profile_bound and count_down >= 2) {
+            for (practice.profile.comboSlice()) |c| {
+                if (c.combo_key_index) |k1| {
+                    if (c.layer == layer and
+                        c.key_index < pressed.len and k1 < pressed.len and
+                        pressed[c.key_index] and pressed[k1])
+                    {
+                        matched_combo = c.cp;
+                        break;
+                    }
+                }
+            }
+        }
+        practice.test_keys.active_combo_cp = matched_combo;
     }
 
     const doc = model.document();
@@ -364,7 +384,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
                 } else |_| {}
             }
         }
-    } else if (self.loaded_runs != null) {
+    } else if (app.frame_limit == null and self.loaded_runs != null) {
         self.loaded_runs.?.deinit();
         self.loaded_runs = null;
     }

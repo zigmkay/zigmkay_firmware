@@ -59,6 +59,7 @@ pub const View = struct {
     custom_text_seeded: bool = false,
     last_pressed_error_key: ?usize = null,
     last_error_flash_us: u64 = 0,
+    same_hand_shift_until_us: u64 = 0,
 };
 
 pub const DrawResult = struct {
@@ -407,17 +408,17 @@ fn drawTopBar(
     if (owner.config.mode == .tutor) {
         const st = owner.config.stage;
         const stage_lbl = if (st == .all_letters or st == .home_row)
-            try std.fmt.allocPrint(arena, "{s} ({d}/{d}) ▾", .{ st.title(), owner.learning.unlocked_count, owner.learning.unlock_len })
+            try std.fmt.allocPrint(arena, "{s} ({d}/{d})", .{ st.title(), owner.learning.unlocked_count, owner.learning.unlock_len })
         else
-            try std.fmt.allocPrint(arena, "{s} ▾", .{st.title()});
-        const pill_w = @min(@as(f32, 240), @max(@as(f32, 150), ui.editorFont(stage_lbl, 12.5).textSize(stage_lbl).w + 24));
-        if (lx + pill_w < bounds.w - 300) {
+            st.title();
+        const pill_w = @min(@as(f32, 272), @max(@as(f32, 164), ui.editorFont(stage_lbl, 12.5).textSize(stage_lbl).w + 52));
+        if (lx + pill_w < bounds.w - 280) {
             var sopts = ui.options(theme, .{ .x = lx, .y = y, .w = pill_w, .h = 32 }, 12.5);
             sopts.tag = "practice.stage_pill";
             sopts.background = true;
             sopts.border = .all(1);
             sopts.corners = .all(8);
-            sopts.padding = .{};
+            sopts.padding = .{ .x = 10, .w = 24 };
             sopts.color_fill = .{ .color = ui.mix(theme.panel, theme.accent, 0.16) };
             sopts.color_border = .{ .color = ui.mix(theme.panel, theme.accent, 0.5) };
             sopts.color_text = .{ .color = theme.accent };
@@ -425,15 +426,21 @@ fn drawTopBar(
                 view.sheet = if (view.sheet == .stages) .none else .stages;
                 view.settings_open = false;
             }
+            dvui.icon(@src(), "stage_chevron", ui.control_icons.expand, .{}, .{
+                .color_text = .{ .color = theme.accent },
+                .rect = .{ .x = lx + pill_w - 20, .y = y + 9, .w = 14, .h = 14 },
+                .padding = .{},
+                .margin = .{},
+            });
         }
     }
 
     // Right group (right-to-left placement)
     var rx: f32 = bounds.w - 16;
 
-    // Settings gear button ⚙
+    // Settings gear button
     rx -= 34;
-    if (ui.button(theme, "⚙", "practice.settings_btn", .{ .x = rx, .y = y, .w = 34, .h = 32 })) {
+    if (ui.iconButton(theme, ui.control_icons.settings, "", "practice.settings_btn", .{ .x = rx, .y = y, .w = 34, .h = 32 }, false)) {
         view.settings_open = !view.settings_open;
         view.confirm_reset = false;
         if (view.settings_open) view.sheet = .none;
@@ -441,13 +448,22 @@ fn drawTopBar(
 
     // Guidance selector pill (Tutor mode)
     if (owner.config.mode == .tutor) {
-        rx -= 114;
+        rx -= 118;
         const g_lbl: []const u8 = switch (owner.config.guidance) {
-            .guided => "Guided ▾",
-            .on_hesitation => "Hesitation ▾",
-            .free => "Free ▾",
+            .guided => "Guided",
+            .on_hesitation => "Hesitation",
+            .free => "Free",
         };
-        if (ui.button(theme, g_lbl, "practice.assistance", .{ .x = rx, .y = y, .w = 106, .h = 32 }) and pending.* == null) {
+        var gopts = ui.options(theme, .{ .x = rx, .y = y, .w = 110, .h = 32 }, 13);
+        gopts.tag = "practice.assistance";
+        gopts.background = true;
+        gopts.border = .all(1);
+        gopts.corners = .all(8);
+        gopts.padding = .{ .x = 10, .w = 24 };
+        gopts.color_fill = .{ .color = theme.control };
+        gopts.color_border = .{ .color = theme.border };
+        gopts.color_text = .{ .color = theme.text };
+        if (dvui.button(@src(), g_lbl, .{}, gopts) and pending.* == null) {
             const next_g: storage.GuidanceMode = switch (owner.config.guidance) {
                 .guided => .on_hesitation,
                 .on_hesitation => .free,
@@ -455,6 +471,12 @@ fn drawTopBar(
             };
             pending.* = .{ .set_guidance = next_g };
         }
+        dvui.icon(@src(), "guidance_chevron", ui.control_icons.expand, .{}, .{
+            .color_text = .{ .color = theme.muted },
+            .rect = .{ .x = rx + 110 - 20, .y = y + 9, .w = 14, .h = 14 },
+            .padding = .{},
+            .margin = .{},
+        });
     }
 
     // Progress sheet button
@@ -531,6 +553,25 @@ fn drawTutorWorkspace(
     else
         @min(rem_h, 340.0);
 
+    // Detect optional subtle opposite-hand Shift nudge in Stage 3 on Live-HID.
+    if (owner.config.stage == .shift and owner.profile_bound) {
+        if (input.frame) |frame| {
+            if (frame.source == .live) {
+                if (resolved_hint) |h| {
+                    if ((h.modifiers & 0x22) != 0 and h.key < owner.profile.key_count) {
+                        const target_hand = owner.profile.keys[h.key].hand;
+                        const same_left = target_hand == .left and frame.modifiers.left_shift and !frame.modifiers.right_shift;
+                        const same_right = target_hand == .right and frame.modifiers.right_shift and !frame.modifiers.left_shift;
+                        if (same_left or same_right) {
+                            view.same_hand_shift_until_us = input.now_us + 2_000_000;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    const shift_nudge = owner.config.stage == .shift and input.now_us < view.same_hand_shift_until_us;
+
     try presentation.typingCard(
         owner,
         theme,
@@ -539,6 +580,7 @@ fn drawTutorWorkspace(
         resolved_hint,
         input.now_us,
         runnerStatus(owner, input),
+        shift_nudge,
         pending,
     );
 

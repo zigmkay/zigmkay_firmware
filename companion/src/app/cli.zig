@@ -73,6 +73,10 @@ pub const Mode = union(enum) {
         return mode.is(.drawers) or mode.is(.native_drawers);
     }
 
+    pub fn isTutorGallery(mode: Mode) bool {
+        return mode.is(.tutor) or mode.is(.native_tutor);
+    }
+
     /// Draft fixtures feed key events through the native runner processor.
     pub fn isDraft(mode: Mode) bool {
         return mode.is(.draft) or mode.is(.build);
@@ -113,7 +117,9 @@ pub const Fixture = struct {
         native_drawers,
         native_onboarding,
         practice,
-        /// `--native-tutor-frames`: screenshots of the tutor's typing tests.
+        /// `--offline-tutor-frames`: software-rendered screenshots of the tutor gallery.
+        tutor,
+        /// `--native-tutor-frames`: native screenshots of the tutor gallery.
         native_tutor,
         companion,
         native_tray,
@@ -124,7 +130,7 @@ pub const Fixture = struct {
 
         fn minimumFrames(kind: Kind) usize {
             return switch (kind) {
-                .native_tutor => 16,
+                .tutor, .native_tutor => 32,
                 .companion => 9,
                 .practice, .native_tray, .source_refresh => 3,
                 .build => 2,
@@ -227,6 +233,7 @@ fn parseKind(flag: []const u8) error{Usage}!Fixture.Kind {
         .{ "--native-drawers-frames", .native_drawers },
         .{ "--native-onboarding-frames", .native_onboarding },
         .{ "--offline-practice-frames", .practice },
+        .{ "--offline-tutor-frames", .tutor },
         .{ "--native-tutor-frames", .native_tutor },
         .{ "--offline-companion-frames", .companion },
         .{ "--native-tray-frames", .native_tray },
@@ -281,10 +288,11 @@ test "fixture modes keep their frame bounds and video requirements" {
         &.{ "app", "--offline-draft-frames", "600", "/m.zon" },
         dummy_video,
     );
-    try expectFixture(.{ .kind = .native_tutor, .frames = 16 }, &.{ "app", "--native-tutor-frames", "16" }, .{});
-    try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--native-tutor-frames", "15" }, .{}));
+    try expectFixture(.{ .kind = .tutor, .frames = 32 }, &.{ "app", "--offline-tutor-frames", "32" }, dummy_video);
+    try expectFixture(.{ .kind = .native_tutor, .frames = 32 }, &.{ "app", "--native-tutor-frames", "32" }, .{});
+    try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--native-tutor-frames", "31" }, .{}));
     try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--offline-frames", "101" }, dummy_video));
-    try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tutor-frames", "16" }, dummy_video));
+    try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tutor-frames", "32" }, dummy_video));
     try t.expectError(error.AbsoluteRunnerManifestRequired, parse(&.{ "app", "--offline-draft-frames", "9", "m" }, dummy_video));
     try t.expectError(error.DummyVideoRequired, parse(&.{ "app", "--offline-frames", "3" }, .{}));
     try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tray-frames", "3" }, dummy_video));

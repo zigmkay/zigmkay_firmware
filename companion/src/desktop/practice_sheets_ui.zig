@@ -425,7 +425,7 @@ fn drawProgressSheet(
 
     // Primary Continue CTA in sheet header
     const cont_lbl = try std.fmt.allocPrint(arena, "Continue Stage {d}", .{owner.config.stage.number()});
-    if (ui.iconButton(theme, null, cont_lbl, "practice.sheet.continue", .{ .x = w - 216, .y = 24, .w = 148, .h = 32 }, true)) {
+    if (ui.iconButton(theme, null, cont_lbl, "practice.sheet.continue", .{ .x = w - 224, .y = 24, .w = 156, .h = 32 }, true)) {
         sheet.* = .none;
         return;
     }
@@ -779,8 +779,8 @@ fn drawWeakSpotsPanel(
         .margin = .{},
     });
     cta_box.deinit();
-    presentation.label("Target bottlenecks (~20 words)", .{ .x = pad + 10, .y = cta_y + 10, .w = @max(0, rect.w - pad * 2 - 140), .h = 22 }, 11.5, theme.text, null);
-    if (ui.iconButton(theme, null, "Weak-spot drill", "practice.sheet.weak_spot", .{ .x = rect.w - pad - 124, .y = cta_y + 6, .w = 116, .h = 30 }, true) and pending.* == null) {
+    presentation.label("Target bottlenecks (~20 words)", .{ .x = pad + 10, .y = cta_y + 10, .w = @max(0, rect.w - pad * 2 - 160), .h = 22 }, 11.5, theme.text, null);
+    if (ui.iconButton(theme, null, "Weak-spot drill", "practice.sheet.weak_spot", .{ .x = rect.w - pad - 146, .y = cta_y + 6, .w = 138, .h = 30 }, true) and pending.* == null) {
         pending.* = .start_weak_spot;
         sheet.* = .none;
     }

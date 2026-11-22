@@ -28,44 +28,188 @@ pub fn beforeFrame(app: *App) !void {
     // The native gallery draws each page twice in the dark, then twice in the light theme.
     if (app.mode.is(.native_onboarding)) app.view.toolbar.light = app.count % 4 >= 2;
     if (app.mode.isDrawers()) try showDrawer(app);
-    if (app.mode.is(.native_tutor)) try showTutor(app);
+    if (app.mode.isTutorGallery()) try showTutor(app);
 }
 
-/// The tutor gallery shows four scenes for four frames each, twice in the
-/// dark and then twice in the light theme: trying the keyboard, an English
-/// test, a Zig lesson and a finished English test.
+/// The tutor gallery renders 8 scenes for 4 frames each (2 Dark + 2 Light):
+/// 0: Active Stage 2 · All letters (with populated confidences & focus key)
+/// 1: Stage 3 · Shift & capitals (opposite-hand Shift hold + tap bridge)
+/// 2: Stage 5 · Layers & combos (layer auto-preview / 2-key combo arc)
+/// 3: Inline round rundown (with newly unlocked key banner)
+/// 4: Stages sheet (6-stage learning path)
+/// 5: Progress sheet (KPI cards, WPM trend chart, weakest keys)
+/// 6: Test keys mode (clean keyboard + telemetry bar)
+/// 7: Narrow viewport responsive audit (960x640, Stage 2 active)
 fn showTutor(app: *App) !void {
     app.view.toolbar.light = app.count % 4 >= 2;
-    if (app.count % 4 != 0) return;
+    const is_scene_start = (app.count == 1) or (app.count >= 4 and app.count % 4 == 0);
+    if (!is_scene_start) return;
     const practice = &app.tutor.controller;
     const now: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
     const scene = app.count / 4;
-    if (scene == 0) return;
-    const config: desktop.practice_controller.Config = if (scene == 2)
-        .{ .stage = .free_text, .stage6_source = .zig_code, .zig_lesson_index = 0 }
-    else
-        .{ .stage = .all_letters };
-    app.applyPractice(try practice.choose(config, now), &app.model, now);
-    app.applyPractice(try practice.start(true, null, now), &app.model, now);
-    const session = &practice.session;
-    const count = switch (scene) {
-        1 => 41,
-        2 => 64,
-        else => session.reference_len,
-    };
-    // Typed over the last seconds so that the live speed is plausible.
+
+    app.tutor.view.sheet = .none;
+    app.tutor.view.settings_open = false;
+    app.tutor.view.confirm_reset = false;
+
+    // Seed realistic learning progress & synthetic history once profile is bound (frame 1).
+    if (scene == 0) {
+        try seedTutorGalleryState(app);
+    }
+
+    switch (scene) {
+        0, 7 => {
+            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now), &app.model, now);
+            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            try typeSessionPrefix(&practice.session, @min(36, practice.session.reference_len / 2), now, true);
+        },
+        1 => {
+            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .shift, .guidance = .guided }, now), &app.model, now);
+            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            // Advance until the focus character is an uppercase letter so Shift guidance is active.
+            const target = findFirstUppercase(&practice.session) orelse @min(10, practice.session.reference_len / 2);
+            try typeSessionPrefix(&practice.session, target, now, false);
+        },
+        2 => {
+            app.applyPractice(try practice.choose(.{
+                .mode = .tutor,
+                .stage = .layers_combos,
+                .stage5_filter = .mixed,
+                .guidance = .guided,
+            }, now), &app.model, now);
+            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            const target = findFirstLayerOrCombo(practice) orelse findFirstNonAlpha(&practice.session) orelse @min(12, practice.session.reference_len / 2);
+            try typeSessionPrefix(&practice.session, target, now, false);
+        },
+        3 => {
+            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now), &app.model, now);
+            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            try typeSessionPrefix(&practice.session, practice.session.reference_len, now, false);
+            _ = practice.finish(now);
+            // Highlight an unlock celebration banner in the rundown showcase.
+            if (practice.rundown) |*rd| {
+                rd.wpm = 41.2;
+                rd.prev_wpm = 38.4;
+                rd.wpm_delta = 2.8;
+                rd.accuracy = 97.6;
+                rd.newly_unlocked = 'p';
+            }
+        },
+        4 => {
+            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now), &app.model, now);
+            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            app.tutor.view.sheet = .stages;
+        },
+        5 => {
+            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now), &app.model, now);
+            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            practice.persisted.streak_days = 5;
+            practice.persisted.daily_active_seconds = 420;
+            app.tutor.view.sheet = .progress;
+        },
+        6 => {
+            app.applyPractice(try practice.choose(.{ .mode = .test_keys }, now), &app.model, now);
+            practice.test_keys.setLastText("hello");
+        },
+        else => {},
+    }
+}
+
+fn seedTutorGalleryState(app: *App) !void {
+    const practice = &app.tutor.controller;
+    const lm = &practice.learning;
+    lm.unlocked_count = @min(14, lm.unlock_len);
+    lm.stat_len = lm.unlocked_count;
+    for (0..lm.unlocked_count) |i| {
+        const ch = lm.unlock_order[i];
+        if (i + 1 < lm.unlocked_count) {
+            lm.stats[i] = .{
+                .cp = ch,
+                .samples = 45,
+                .ema_ms = if (i < 11) 250.0 + @as(f32, @floatFromInt(i * 6)) else 390.0 + @as(f32, @floatFromInt((i - 11) * 18)),
+                .ema_acc = 0.975,
+                .acc_initialized = true,
+            };
+        } else {
+            // Focus key actively being trained (~62% confidence)
+            lm.stats[i] = .{
+                .cp = ch,
+                .samples = 24,
+                .ema_ms = 510.0,
+                .ema_acc = 0.96,
+                .acc_initialized = true,
+            };
+            lm.focus_cp = ch;
+        }
+    }
+    lm.total_rounds = 14;
+    lm.bigrams[0] = .{ .prev = 't', .cur = 'h', .ema_ms = 390.0, .samples = 14 };
+    lm.bigrams[1] = .{ .prev = 'n', .cur = 'e', .ema_ms = 345.0, .samples = 12 };
+    lm.bigram_len = 2;
+    practice.persisted.daily_active_seconds = 420;
+    practice.persisted.streak_days = 5;
+    practice.persisted.total_rounds = 14;
+    practice.persisted.unlocked_count = @intCast(lm.unlocked_count);
+
+    // Populate synthetic runs.jsonl history in memory for the Progress sheet WPM chart.
+    if (app.tutor.loaded_runs) |*old| old.deinit();
+    var arena = std.heap.ArenaAllocator.init(app.gpa);
+    errdefer arena.deinit();
+    const a = arena.allocator();
+    const runs = try a.alloc(desktop.practice_storage.RunRecord, 14);
+    const wpms = [_]f32{ 24.5, 26.0, 25.2, 28.4, 30.1, 29.5, 32.0, 34.2, 33.8, 36.1, 37.5, 39.0, 38.4, 41.2 };
+    const accs = [_]f32{ 94.2, 95.1, 95.8, 96.0, 96.5, 95.9, 97.0, 97.2, 96.8, 97.4, 97.9, 98.1, 97.5, 98.2 };
+    for (runs, 0..) |*r, i| {
+        r.* = .{
+            .utc_timestamp = @intCast(1_763_700_000 + i * 300),
+            .stage = if (i < 4) 1 else 2,
+            .wpm = wpms[i],
+            .accuracy = accs[i],
+            .active_seconds = 34.0,
+            .unlocked_char = if (i == 6) 'p' else if (i == 11) 'l' else null,
+        };
+    }
+    app.tutor.loaded_runs = .{ .arena = arena, .runs = runs, .skipped_lines = 0 };
+}
+
+fn typeSessionPrefix(session: *desktop.practice.Session, count: usize, now: u64, with_mistake: bool) !void {
     const start = now -| 3_000_000 -| 180_000 * count;
     for (session.reference[0..count], 0..) |cp, index| {
         const at = start + 180_000 * index;
-        // The English test shows one corrected mistake.
-        if (scene == 1 and index == 30) {
-            try session.insert("x", at, false);
-            session.backspace();
+        if (with_mistake and index + 6 == count) {
+            // Trigger one stop-on-error mistake and then recover with the correct char.
+            const wrong: []const u8 = if (cp == 'z') "q" else "z";
+            try session.insert(wrong, at, false);
         }
         var bytes: [4]u8 = undefined;
         const len = try std.unicode.utf8Encode(cp, &bytes);
         try session.insert(bytes[0..len], at, false);
     }
+}
+
+fn findFirstUppercase(session: *const desktop.practice.Session) ?usize {
+    for (session.reference[0..session.reference_len], 0..) |cp, i| {
+        if (i >= 6 and cp >= 'A' and cp <= 'Z') return i;
+    }
+    return null;
+}
+
+fn findFirstLayerOrCombo(practice: *const desktop.practice_controller.Controller) ?usize {
+    if (!practice.profile_bound) return null;
+    for (practice.session.reference[0..practice.session.reference_len], 0..) |cp, i| {
+        if (i < 4) continue;
+        if (practice.profile.routeFor(cp)) |route| {
+            if (route.combo_key_index != null or route.layer > 0) return i;
+        }
+    }
+    return null;
+}
+
+fn findFirstNonAlpha(session: *const desktop.practice.Session) ?usize {
+    for (session.reference[0..session.reference_len], 0..) |cp, i| {
+        if (i >= 4 and cp > ' ' and !((cp >= 'a' and cp <= 'z') or (cp >= 'A' and cp <= 'Z'))) return i;
+    }
+    return null;
 }
 
 /// The drawers fixture shows the combo, callback and encoder drawers, each in
@@ -352,6 +496,10 @@ pub fn statusScene(app: *const App) usize {
 
 pub fn resizeStatusWindow(app: *App) void {
     if (app.mode.isDrawers() and app.count == 1) _ = c.SDL_SetWindowSize(app.native.window, 1440, 1000);
+    if (app.mode.isTutorGallery()) {
+        if (app.count == 1) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
+        if (app.count == 29) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
+    }
     if (!app.mode.isStatus() or (app.count != 1 and app.count != 21 and app.count != 25)) return;
     const narrow = app.count == 21;
     _ = c.SDL_SetWindowSize(app.native.window, if (narrow) 900 else 1440, if (narrow) 600 else 1000);
@@ -485,12 +633,21 @@ pub fn capture(app: *App) !void {
         const path = try std.fmt.allocPrintSentinel(app.window.arena(), ".zig-cache/editor-drawers/{d}.bmp", .{(app.count - 1) / 4}, 0);
         try screenshot(app, path, error.DrawerScreenshotRead, error.DrawerScreenshotSave);
     }
-    if (app.mode.is(.native_tutor) and app.count % 2 == 0) try captureTutor(app);
+    if (app.mode.isTutorGallery() and app.count % 2 == 0) try captureTutor(app);
     if (app.mode.isOnboarding() or app.mode.is(.catalog)) try captureOnboarding(app);
 }
 
 fn captureTutor(app: *App) !void {
-    if (dvui.tagGet("practice.word") == null or dvui.tagGet("practice.metrics") == null) return error.TutorNotDrawn;
+    if (dvui.tagGet("practice.topbar") == null) return error.TutorNotDrawn;
+    const is_test_keys = app.tutor.controller.config.mode == .test_keys;
+    if (is_test_keys) {
+        if (dvui.tagGet("practice.test_keys.bar") == null or dvui.tagGet("practice.keyboard") == null) return error.TutorNotDrawn;
+    } else if (dvui.tagGet("practice.word") == null or dvui.tagGet("practice.metrics") == null) {
+        return error.TutorNotDrawn;
+    }
+    if (app.tutor.view.sheet == .stages and dvui.tagGet("practice.sheet.stages") == null) return error.TutorSheetNotDrawn;
+    if (app.tutor.view.sheet == .progress and (dvui.tagGet("practice.sheet.progress") == null or dvui.tagGet("practice.chart.wpm") == null))
+        return error.TutorSheetNotDrawn;
     app.window.endRendering(.{ .manage_backend = false });
     const scene = (app.count - 1) / 4;
     const theme = if (app.view.toolbar.light) "light" else "dark";

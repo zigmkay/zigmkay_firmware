@@ -254,6 +254,7 @@ pub fn typingCard(
     hint: ?practice.Hint,
     now_us: u64,
     status_note: []const u8,
+    same_hand_shift_nudge: bool,
     pending: *?control.Intent,
 ) !void {
     const card = dvui.box(@src(), .{}, .{
@@ -370,8 +371,8 @@ pub fn typingCard(
     // 4. Footer row: next-key / finger hint pill (left) + shortcut hints & word counter (right)
     const foot_y = prog_y + 7;
     const foot_h: f32 = 20;
-    const hint_text = try formatNextKeyHint(arena, owner, focus, hint);
-    label(hint_text, .{ .x = pad_x, .y = foot_y, .w = @max(0, inner_w * 0.62), .h = foot_h }, 12, if (s.current_error) theme.danger else theme.muted, "practice.next");
+    const hint_text = try formatNextKeyHint(arena, owner, focus, hint, same_hand_shift_nudge);
+    label(hint_text, .{ .x = pad_x, .y = foot_y, .w = @max(0, inner_w * 0.62), .h = foot_h }, 12, if (s.current_error) theme.danger else if (same_hand_shift_nudge) theme.warning else theme.muted, "practice.next");
 
     const words_total = countWords(s.reference[0..s.reference_len]);
     const words_done = countWords(s.reference[0..@min(focus, s.reference_len)]);
@@ -615,11 +616,11 @@ fn drawInlineRundown(
 
     // Right actions: Weak-spot drill + primary Next round CTA
     const btn_y = @max(14.0, (bounds.h - 32.0) * 0.5);
-    if (ui.iconButton(theme, null, "Next round", "practice.next_round", .{ .x = bounds.w - 134, .y = btn_y, .w = 118, .h = 32 }, true) and pending.* == null) {
+    if (ui.iconButton(theme, null, "Next round", "practice.next_round", .{ .x = bounds.w - 138, .y = btn_y, .w = 122, .h = 32 }, true) and pending.* == null) {
         pending.* = .next_round;
     }
     if (bounds.w >= 540) {
-        if (ui.button(theme, "Weak-spot drill", "practice.weak_spot", .{ .x = bounds.w - 268, .y = btn_y, .w = 126, .h = 32 }) and pending.* == null) {
+        if (ui.button(theme, "Weak-spot drill", "practice.weak_spot", .{ .x = bounds.w - 288, .y = btn_y, .w = 142, .h = 32 }) and pending.* == null) {
             pending.* = .start_weak_spot;
         }
     }
@@ -652,9 +653,12 @@ pub fn testKeysTelemetryBar(
     const lc = ui.layerColor(theme, layer);
     const y: f32 = (bounds.h - 26) * 0.5;
 
-    // Layer badge
+    // Layer badge (avoid redundant "Layer 0 · Layer 1" when the keymap already names it "Layer ...")
     const ltext = if (layer_name.len > 0)
-        try std.fmt.allocPrint(arena, "Layer {d} · {s}", .{ layer, layer_name })
+        (if (std.mem.startsWith(u8, layer_name, "Layer"))
+            layer_name
+        else
+            try std.fmt.allocPrint(arena, "Layer {d} · {s}", .{ layer, layer_name }))
     else
         try std.fmt.allocPrint(arena, "Layer {d}", .{layer});
     const lpill = dvui.box(@src(), .{}, .{
@@ -696,13 +700,19 @@ pub fn testKeysTelemetryBar(
         mx += 52;
     }
 
-    // Last emitted text readout
+    // Last emitted text / simultaneous presses / combo readout
     const last_txt = owner.test_keys.textSlice();
-    const emitted = if (last_txt.len > 0)
+    const emitted = if (owner.test_keys.active_combo_cp) |ccp| blk: {
+        var gbuf: [4]u8 = undefined;
+        const g = view.glyph(ccp, true, &gbuf);
+        break :blk try std.fmt.allocPrint(arena, "Combo active → {s}", .{g});
+    } else if (owner.test_keys.pressed_count >= 2)
+        try std.fmt.allocPrint(arena, "{d} keys held simultaneously", .{owner.test_keys.pressed_count})
+    else if (last_txt.len > 0)
         try std.fmt.allocPrint(arena, "Last output: {s}", .{last_txt})
     else
         "Press switches on your keyboard to verify layers, holds, and combos";
-    label(emitted, .{ .x = mx + 10, .y = y, .w = @max(0, bounds.w - mx - 190), .h = 26 }, 12, theme.muted, "practice.metrics");
+    label(emitted, .{ .x = mx + 10, .y = y, .w = @max(0, bounds.w - mx - 190), .h = 26 }, 12, if (owner.test_keys.active_combo_cp != null) ui.layerColor(theme, 4) else theme.muted, "practice.metrics");
 
     // Source toggle on right
     const src_label = if (owner.config.source == .os) "Input: Keyboard" else "Input: Draft";
@@ -716,6 +726,7 @@ fn formatNextKeyHint(
     owner: *const control.Controller,
     focus: usize,
     hint: ?practice.Hint,
+    same_hand_shift_nudge: bool,
 ) ![]const u8 {
     const s = &owner.session;
     if (s.state == .complete) return "Round complete";
@@ -748,6 +759,9 @@ fn formatNextKeyHint(
                     .right => "Right Shift",
                     .neutral => "Shift",
                 } else "Shift";
+                if (same_hand_shift_nudge) {
+                    return std.fmt.allocPrint(arena, "Next: {s} · Hold {s} + {s} · Tip: try opposite-hand Shift", .{ glyph_str, shift_side, finger.name() });
+                }
                 return std.fmt.allocPrint(arena, "Next: {s} · Hold {s} + {s}", .{ glyph_str, shift_side, finger.name() });
             }
             if (finger != .unknown) {

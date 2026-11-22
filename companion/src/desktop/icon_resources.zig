@@ -55,6 +55,7 @@ pub const controls = struct {
     pub const autofire = lucide.repeat;
     pub const inherit = lucide.@"arrow-down";
     pub const nothing = lucide.ban;
+    pub const settings = lucide.settings;
 };
 const Entry = struct { name: []const u8, bytes: []const u8 };
 

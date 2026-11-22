@@ -78,6 +78,8 @@ pub const TestKeysTelemetry = struct {
     active_layers: u16 = 1,
     highest_layer: usize = 0,
     modifiers: u8 = 0,
+    pressed_count: usize = 0,
+    active_combo_cp: ?u21 = null,
 
     pub fn setLastText(self: *TestKeysTelemetry, text: []const u8) void {
         const n = @min(text.len, self.last_text.len);

@@ -136,7 +136,7 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
         .life = undefined,
         .events = undefined,
         .live = undefined,
-        .practicing = mode.is(.practice) or mode.is(.native_tutor) or mode.is(.draft) or mode.light() == .tutor,
+        .practicing = mode.is(.practice) or mode.isTutorGallery() or mode.is(.draft) or mode.light() == .tutor,
         .tutor = undefined,
         .draft_runtime = undefined,
     };
@@ -226,6 +226,13 @@ pub fn deinit(app: *App) void {
 }
 
 fn initialModel(gpa: std.mem.Allocator, mode: cli.Mode) !desktop.model.Model {
+    if (mode.isTutorGallery()) {
+        var selected = try boards.OwnedBoard.init(gpa, "keycaprio_colemak_0_7");
+        defer selected.deinit();
+        var template = try boards.createDefault(gpa, selected);
+        defer template.deinit();
+        return desktop.model.Model.init(gpa, selected.board, template.snapshot);
+    }
     var template = try project.profiles.create(gpa, if (mode.is(.draft)) .eurkey else .qwerty);
     defer template.deinit();
     return desktop.model.Model.init(gpa, project.profiles.board, template.snapshot);
@@ -395,7 +402,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     // DVUI rounds its render scale to hundredths. Keep the fitted editor
     // aligned with the exact pixel edge, including on Retina displays.
     if (!app.practicing and app.window.data().rect.w > 0) app.window.natural_scale = app.window.rect_pixels.w / app.window.data().rect.w;
-    if (!app.fonts_installed and (app.frame_limit == null or app.mode.is(.native_tutor) or app.mode.isStatus() or app.mode.isDrawers() or
+    if (!app.fonts_installed and (app.frame_limit == null or app.mode.isTutorGallery() or app.mode.isStatus() or app.mode.isDrawers() or
         app.mode.isOnboarding() or app.mode.is(.catalog)))
     {
         try editor_fonts.install(app.gpa, app.io);

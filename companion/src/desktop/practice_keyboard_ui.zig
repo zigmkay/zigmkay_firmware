@@ -567,16 +567,20 @@ fn drawFooterLegend(
     const arena = dvui.currentWindow().arena();
     const y = bounds.h - 22;
 
-    // Left: source + layer pill
-    const left_text = if (params.source_caption.len > 0)
-        try std.fmt.allocPrint(arena, "{s} · Layer {d}{s}{s}", .{
-            params.source_caption,
-            display_layer,
-            if (params.layer_name.len > 0) " " else "",
-            params.layer_name,
-        })
+    // Left: source + layer pill (avoid duplicating "Layer" when layer_name already starts with it)
+    const layer_tag = if (display_layer != params.hold_source_layer)
+        try std.fmt.allocPrint(arena, "Layer {d} preview", .{display_layer})
+    else if (params.layer_name.len > 0)
+        (if (std.mem.startsWith(u8, params.layer_name, "Layer"))
+            params.layer_name
+        else
+            try std.fmt.allocPrint(arena, "Layer {d} · {s}", .{ display_layer, params.layer_name }))
     else
         try std.fmt.allocPrint(arena, "Layer {d}", .{display_layer});
+    const left_text = if (params.source_caption.len > 0)
+        try std.fmt.allocPrint(arena, "{s} · {s}", .{ params.source_caption, layer_tag })
+    else
+        layer_tag;
 
     var muted = theme;
     muted.text = theme.muted;
