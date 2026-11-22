@@ -31,6 +31,16 @@ static void load_indices(LinuxKeyMap *km) {
     km->idx_caps  = xkb_keymap_mod_get_index(km->keymap, XKB_MOD_NAME_CAPS);
 }
 
+/// xkbcommon requires a locale name; resolve it the way libc does for LC_CTYPE.
+static const char *compose_locale(void) {
+    const char *vars[] = { "LC_ALL", "LC_CTYPE", "LANG" };
+    for (size_t i = 0; i < sizeof vars / sizeof vars[0]; i++) {
+        const char *value = getenv(vars[i]);
+        if (value && *value) return value;
+    }
+    return "C";
+}
+
 static void load_keymap(LinuxKeyMap *km) {
     if (km->state)  { xkb_state_unref(km->state);    km->state  = NULL; }
     if (km->keymap) { xkb_keymap_unref(km->keymap);  km->keymap = NULL; }
@@ -50,7 +60,7 @@ static void load_keymap(LinuxKeyMap *km) {
     }
     if (km->keymap) {
         km->state = xkb_state_new(km->keymap);
-        km->compose_table = xkb_compose_table_new_from_locale(km->ctx, NULL, XKB_COMPOSE_COMPILE_NO_FLAGS);
+        km->compose_table = xkb_compose_table_new_from_locale(km->ctx, compose_locale(), XKB_COMPOSE_COMPILE_NO_FLAGS);
         if (km->compose_table) {
             km->compose_state = xkb_compose_state_new(km->compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
         }
@@ -83,6 +93,12 @@ void linuxKeyMapDeinit(LinuxKeyMap *km) {
 
 void linuxKeyMapRefresh(LinuxKeyMap *km) {
     if (km) load_keymap(km);
+}
+
+/// Drops pending dead-key/compose input without recompiling the keymap.
+/// Modifier state needs no reset: every translation sets the full mask.
+void linuxKeyMapResetState(LinuxKeyMap *km) {
+    if (km && km->compose_state) xkb_compose_state_reset(km->compose_state);
 }
 
 static xkb_mod_mask_t mod_mask(xkb_mod_index_t idx) {

@@ -26,6 +26,13 @@ pub const LinuxKeyMap = opaque {
         linuxKeyMapRefresh(km);
     }
 
+    extern fn linuxKeyMapResetState(*LinuxKeyMap) void;
+
+    /// Clears pending dead-key input; far cheaper than refresh.
+    pub fn resetState(km: *LinuxKeyMap) void {
+        linuxKeyMapResetState(km);
+    }
+
     /// keycode is the xkbcommon keycode (evdev + 8).
     /// mods bit layout identical to MacOsKeyMap (see macos.zig).
     extern fn linuxKeyMapTranslate(
