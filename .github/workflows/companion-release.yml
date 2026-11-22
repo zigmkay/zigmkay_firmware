@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Companion version (e.g. 0.1.0-preview.1 or 0.1.0). Leave empty to use companion/build.zig.zon.
+        description: Companion version (e.g. 0.2.0 or 0.2.0-preview.1). Leave empty to use companion/build.zig.zon.
         required: false
         type: string
 

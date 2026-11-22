@@ -35,7 +35,7 @@ on:
   workflow_call:
     inputs:
       release_tag:
-        description: Companion release tag to build and publish (e.g. companion-v0.1.0-preview.1 or companion-v0.1.0)
+        description: Companion release tag to build and publish (e.g. companion-v0.2.0 or companion-v0.2.0-preview.1)
         required: true
         type: string
       commit_sha:
@@ -75,7 +75,7 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
-          use-tool-cache: true
+          use-tool-cache: false
           cache-key: tc1
           cache-size-limit: 4096
       - name: Build only the symbolized finalization reproduction
@@ -111,7 +111,9 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
-          use-tool-cache: true
+          # On Windows runners, the tool cache lives on the slower C: drive;
+          # keeping Zig on the ephemeral D: drive avoids slow tool-cache I/O.
+          use-tool-cache: ${{ runner.os != 'Windows' }}
           cache-key: tc1
           # Bundle builds + desktop tests reach ~4.7 GiB uncompressed (~1.1 GiB compressed).
           cache-size-limit: 6144

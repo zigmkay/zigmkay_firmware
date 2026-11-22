@@ -37,7 +37,8 @@ jobs:
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
-          use-tool-cache: true
+          # On Windows runners, the tool cache lives on the slower C: drive.
+          use-tool-cache: ${{ runner.os != 'Windows' }}
           cache-key: tc1
           cache-size-limit: 4096
       # Also the subprocess, flash-job and release tooling tests on macOS and Windows.
