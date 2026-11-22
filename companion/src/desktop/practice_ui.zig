@@ -344,6 +344,7 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     try sheets_ui.drawSheet(owner, &view.sheet, theme, .{
         .board_name = if (input.frame) |f| f.board_name else "",
         .profile_name = if (input.frame) |f| f.profile else "",
+        .labels = if (input.frame) |f| f.labels else null,
         .runs = input.runs,
         .custom_text_buf = &view.custom_text_buf,
         .custom_text_seeded = &view.custom_text_seeded,

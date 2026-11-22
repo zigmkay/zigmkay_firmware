@@ -18,6 +18,7 @@ pub const Sheet = enum { none, stages, progress };
 pub const SheetContext = struct {
     board_name: []const u8 = "",
     profile_name: []const u8 = "",
+    labels: ?*const desktop.label_cache.LabelCache = null,
     runs: []const storage.RunRecord = &.{},
     custom_text_buf: *[256]u8,
     custom_text_seeded: *bool,
@@ -49,8 +50,8 @@ pub fn drawSettingsPopover(
     pending: *?control.Intent,
 ) !void {
     if (!open.*) return;
-    const pop_w: f32 = 304;
-    const pop_h: f32 = if (confirm_reset.*) 324 else 300;
+    const pop_w: f32 = 324;
+    const pop_h: f32 = if (confirm_reset.*) 348 else 322;
     const screen = dvui.windowRect();
     const x = std.math.clamp(anchor_right - pop_w, 12.0, @max(12.0, screen.w - pop_w - 12.0));
     const y = std.math.clamp(anchor_top, 12.0, @max(12.0, screen.h - pop_h - 12.0));
@@ -68,51 +69,51 @@ pub fn drawSettingsPopover(
     defer fw.deinit();
 
     const arena = dvui.currentWindow().arena();
-    const pad: f32 = 14;
+    const pad: f32 = 16;
     const inner_w = pop_w - pad * 2;
 
     // Header
-    presentation.label("Tutor settings", .{ .x = pad, .y = 10, .w = inner_w - 30, .h = 22 }, 14, theme.text, null);
-    if (ui.iconButton(theme, ui.control_icons.remove, "", "practice.settings.close", .{ .x = pop_w - 36, .y = 8, .w = 24, .h = 24 }, false)) {
+    boldLabel("Tutor settings", .{ .x = pad, .y = 11, .w = inner_w - 30, .h = 22 }, 15, theme.text, 0xa000);
+    if (ui.iconButton(theme, ui.control_icons.remove, "", "practice.settings.close", .{ .x = pop_w - 38, .y = 9, .w = 26, .h = 26 }, false)) {
         open.* = false;
         confirm_reset.* = false;
         return;
     }
-    ui.divider(theme, .{ .x = 0, .y = 38, .w = pop_w, .h = 1 }, 0xa001);
+    ui.divider(theme, .{ .x = 0, .y = 42, .w = pop_w, .h = 1 }, 0xa001);
 
-    // 1. Target speed (WPM stepper + presets)
-    var cy: f32 = 48;
+    // 1. Target speed (WPM presets)
+    var cy: f32 = 52;
     const wpm_title = try std.fmt.allocPrint(arena, "Target speed: {d:.0} WPM", .{owner.config.target_wpm});
-    presentation.label(wpm_title, .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 12, theme.muted, null);
-    cy += 22;
+    presentation.label(wpm_title, .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
+    cy += 23;
     const wpm_presets = [_]f32{ 25, 35, 45, 60, 80 };
     const pw = (inner_w - 16) / 5.0;
     for (wpm_presets, 0..) |preset, i| {
         const active = @abs(owner.config.target_wpm - preset) < 0.5;
         const lbl = try std.fmt.allocPrint(arena, "{d:.0}", .{preset});
-        if (pillButton(theme, lbl, .{ .x = pad + @as(f32, @floatFromInt(i)) * (pw + 4), .y = cy, .w = pw, .h = 26 }, active, 0xa100 + i) and pending.* == null) {
+        if (pillButton(theme, lbl, .{ .x = pad + @as(f32, @floatFromInt(i)) * (pw + 4), .y = cy, .w = pw, .h = 28 }, active, 0xa100 + i) and pending.* == null) {
             pending.* = .{ .set_target_wpm = preset };
         }
     }
-    cy += 36;
+    cy += 38;
 
     // 2. Daily goal (minutes)
-    presentation.label("Daily goal", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 12, theme.muted, null);
-    cy += 22;
+    presentation.label("Daily goal", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
+    cy += 23;
     const goals = [_]u16{ 5, 10, 15, 30 };
     const gw = (inner_w - 12) / 4.0;
     for (goals, 0..) |mins, i| {
         const active = owner.config.daily_goal_minutes == mins;
         const lbl = try std.fmt.allocPrint(arena, "{d} min", .{mins});
-        if (pillButton(theme, lbl, .{ .x = pad + @as(f32, @floatFromInt(i)) * (gw + 4), .y = cy, .w = gw, .h = 26 }, active, 0xa200 + i) and pending.* == null) {
+        if (pillButton(theme, lbl, .{ .x = pad + @as(f32, @floatFromInt(i)) * (gw + 4), .y = cy, .w = gw, .h = 28 }, active, 0xa200 + i) and pending.* == null) {
             pending.* = .{ .set_daily_goal = mins };
         }
     }
-    cy += 36;
+    cy += 38;
 
     // 3. Guidance mode
-    presentation.label("Keyboard guidance", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 12, theme.muted, null);
-    cy += 22;
+    presentation.label("Keyboard guidance", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
+    cy += 23;
     const gmodes = [_]struct { m: storage.GuidanceMode, lbl: []const u8 }{
         .{ .m = .guided, .lbl = "Guided" },
         .{ .m = .on_hesitation, .lbl = "On hesitation" },
@@ -121,39 +122,39 @@ pub fn drawSettingsPopover(
     const gmw = (inner_w - 8) / 3.0;
     for (gmodes, 0..) |gm, i| {
         const active = owner.config.guidance == gm.m;
-        if (pillButton(theme, gm.lbl, .{ .x = pad + @as(f32, @floatFromInt(i)) * (gmw + 4), .y = cy, .w = gmw, .h = 26 }, active, 0xa300 + i) and pending.* == null) {
+        if (pillButton(theme, gm.lbl, .{ .x = pad + @as(f32, @floatFromInt(i)) * (gmw + 4), .y = cy, .w = gmw, .h = 28 }, active, 0xa300 + i) and pending.* == null) {
             pending.* = .{ .set_guidance = gm.m };
         }
     }
-    cy += 36;
+    cy += 38;
 
     // 4. Input source
-    presentation.label("Input source", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 12, theme.muted, null);
-    cy += 22;
+    presentation.label("Input source", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
+    cy += 23;
     const sw = (inner_w - 6) / 2.0;
-    if (pillButton(theme, "OS keyboard text", .{ .x = pad, .y = cy, .w = sw, .h = 26 }, owner.config.source == .os, 0xa400) and pending.* == null) {
+    if (pillButton(theme, "OS keyboard text", .{ .x = pad, .y = cy, .w = sw, .h = 28 }, owner.config.source == .os, 0xa400) and pending.* == null) {
         pending.* = .{ .set_source = .os };
     }
-    if (pillButton(theme, "Unflashed draft", .{ .x = pad + sw + 6, .y = cy, .w = sw, .h = 26 }, owner.config.source == .draft, 0xa401) and pending.* == null) {
+    if (pillButton(theme, "Unflashed draft", .{ .x = pad + sw + 6, .y = cy, .w = sw, .h = 28 }, owner.config.source == .draft, 0xa401) and pending.* == null) {
         pending.* = .{ .set_source = .draft };
     }
-    cy += 38;
+    cy += 40;
 
     // 5. Reset progress (inline two-step confirmation)
     ui.divider(theme, .{ .x = pad, .y = cy - 6, .w = inner_w, .h = 1 }, 0xa002);
     if (!confirm_reset.*) {
-        if (ui.dangerButton(theme, null, "Reset profile progress", "practice.settings.reset", .{ .x = pad, .y = cy + 2, .w = inner_w, .h = 28 })) {
+        if (ui.dangerButton(theme, null, "Reset profile progress", "practice.settings.reset", .{ .x = pad, .y = cy + 4, .w = inner_w, .h = 30 })) {
             confirm_reset.* = true;
         }
     } else {
-        presentation.label("Clear all stats & round history?", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 11.5, theme.danger, null);
+        presentation.label("Clear all stats & round history?", .{ .x = pad, .y = cy + 1, .w = inner_w, .h = 18 }, 12.5, theme.danger, null);
         const bw = (inner_w - 6) / 2.0;
-        if (ui.dangerButton(theme, null, "Confirm reset", "practice.settings.confirm_reset", .{ .x = pad, .y = cy + 22, .w = bw, .h = 28 }) and pending.* == null) {
+        if (ui.dangerButton(theme, null, "Confirm reset", "practice.settings.confirm_reset", .{ .x = pad, .y = cy + 24, .w = bw, .h = 30 }) and pending.* == null) {
             pending.* = .reset_progress;
             confirm_reset.* = false;
             open.* = false;
         }
-        if (ui.button(theme, "Cancel", "practice.settings.cancel_reset", .{ .x = pad + bw + 6, .y = cy + 22, .w = bw, .h = 28 })) {
+        if (ui.button(theme, "Cancel", "practice.settings.cancel_reset", .{ .x = pad + bw + 6, .y = cy + 24, .w = bw, .h = 30 })) {
             confirm_reset.* = false;
         }
     }
@@ -168,19 +169,45 @@ fn drawStagesSheet(
 ) !void {
     const screen = dvui.windowRect();
     const w: f32 = @min(@as(f32, 920), screen.w - 40);
-    const h: f32 = @min(@as(f32, 620), screen.h - 40);
+    const pad: f32 = 24;
+    const grid_top: f32 = 120;
+    const narrow = w < 680;
+    const cols: usize = if (narrow) 2 else 3;
+    const rows: usize = if (narrow) 3 else 2;
+    const gap: f32 = 12;
+    const card_w = (w - pad * 2 - gap * @as(f32, @floatFromInt(cols - 1))) / @as(f32, @floatFromInt(cols));
+    const card_h: f32 = 124;
+
+    const show_s5 = owner.config.stage == .layers_combos;
+    const show_s6 = owner.config.stage == .free_text;
+    const footer_h: f32 = if (show_s6) 106 else if (show_s5) 60 else 44;
+    const grid_h = @as(f32, @floatFromInt(rows)) * card_h + @as(f32, @floatFromInt(rows - 1)) * gap;
+    const content_h = grid_top + grid_h + 16 + footer_h;
+    const h: f32 = @min(content_h, screen.h - 40);
 
     var fw = dvui.floatingWindow(@src(), .{ .modal = true }, .{
         .rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h },
         .padding = .{},
         .background = true,
-        .color_fill = .{ .color = theme.panel },
+        .color_fill = .{ .color = theme.bg },
         .color_border = .{ .color = theme.border },
         .border = .all(1),
         .corners = .all(14),
         .tag = "practice.sheet.stages",
     });
     defer fw.deinit();
+
+    // Elevated header strip matching Mockup 3 surface hierarchy
+    const header_bg = dvui.box(@src(), .{}, .{
+        .id_extra = 0xb090,
+        .rect = .{ .x = 1, .y = 1, .w = w - 2, .h = 99 },
+        .background = true,
+        .color_fill = .{ .color = theme.panel },
+        .corners = ui.topCorners(13),
+        .padding = .{},
+        .margin = .{},
+    });
+    header_bg.deinit();
 
     const arena = dvui.currentWindow().arena();
     const subtitle = try std.fmt.allocPrint(arena, "Derived from {s} · Any stage freely selectable", .{
@@ -190,16 +217,6 @@ fn drawStagesSheet(
         sheet.* = .none;
         return;
     }
-
-    const pad: f32 = 24;
-    const grid_top: f32 = 114;
-    const narrow = w < 680;
-    const cols: usize = if (narrow) 2 else 3;
-    const rows: usize = if (narrow) 3 else 2;
-    const gap: f32 = 12;
-    const card_w = (w - pad * 2 - gap * @as(f32, @floatFromInt(cols - 1))) / @as(f32, @floatFromInt(cols));
-    const footer_reserve: f32 = 96;
-    const card_h = @max(118.0, (h - grid_top - footer_reserve - gap * @as(f32, @floatFromInt(rows - 1))) / @as(f32, @floatFromInt(rows)));
 
     const lm = &owner.learning;
     const prof = if (owner.profile_bound) &owner.profile else null;
@@ -230,15 +247,15 @@ fn drawStagesSheet(
         const accent_col = stageAccentColor(theme, st);
 
         const fill = if (is_active)
-            ui.mix(theme.panel, theme.accent, 0.14)
+            ui.mix(theme.panel, theme.accent, 0.15)
         else if (is_done)
             ui.mix(theme.panel, theme.success, 0.09)
         else
-            theme.bg;
+            theme.panel;
         const border = if (is_active)
             theme.accent
         else if (is_done)
-            ui.mix(theme.panel, theme.success, 0.55)
+            ui.mix(theme.panel, theme.success, 0.50)
         else
             theme.border;
 
@@ -248,10 +265,10 @@ fn drawStagesSheet(
             .rect = rect,
             .background = true,
             .color_fill = .{ .color = fill },
-            .color_fill_hover = .{ .color = ui.mix(fill, theme.text, 0.06) },
-            .color_fill_press = .{ .color = ui.mix(fill, theme.text, 0.12) },
+            .color_fill_hover = .{ .color = ui.mix(fill, theme.text, 0.05) },
+            .color_fill_press = .{ .color = ui.mix(fill, theme.text, 0.11) },
             .color_border = .{ .color = border },
-            .border = .all(if (is_active) 1.8 else 1),
+            .border = .all(if (is_active) 1.6 else 1),
             .corners = .all(10),
             .padding = .{},
             .margin = .{},
@@ -261,11 +278,16 @@ fn drawStagesSheet(
             sheet.* = .none;
         }
 
-        // Top row: STAGE N + status badge
-        const num_str = try std.fmt.allocPrint(arena, "STAGE {d}", .{st.number()});
-        presentation.label(num_str, .{ .x = rx + 12, .y = ry + 10, .w = 72, .h = 16 }, 10.5, theme.muted, null);
+        const cx = rx + 14;
+        const cw = card_w - 28;
 
-        const state_str: []const u8 = if (is_active)
+        // Top row: STAGE N + right-aligned status badge
+        const num_str = try std.fmt.allocPrint(arena, "STAGE {d}", .{st.number()});
+        boldLabel(num_str, .{ .x = cx, .y = ry + 11, .w = 78, .h = 16 }, 11.5, theme.muted, 0xb080 + i);
+
+        const state_str: []const u8 = if (is_active and st == .all_letters and lm.unlock_len > 0)
+            try std.fmt.allocPrint(arena, "● Active · {d}/{d}", .{ lm.unlocked_count, lm.unlock_len })
+        else if (is_active)
             "● Active"
         else if (is_done)
             "✓ Mastered"
@@ -283,27 +305,27 @@ fn drawStagesSheet(
             theme.muted;
         dvui.labelNoFmt(@src(), state_str, .{ .align_x = 1, .align_y = 0.5 }, .{
             .id_extra = 0xb100 + i,
-            .rect = .{ .x = rx + card_w - 118, .y = ry + 10, .w = 106, .h = 16 },
-            .font = ui.editorFont(state_str, 10.5),
+            .rect = .{ .x = cx + 78, .y = ry + 11, .w = @max(40, cw - 78), .h = 16 },
+            .font = ui.editorFont(state_str, 11.5).withWeight(.bold),
             .color_text = .{ .color = state_col },
             .padding = .{},
             .margin = .{},
         });
 
-        // Stage title + layout-derived description + progress bar
-        presentation.label(st.shortName(), .{ .x = rx + 12, .y = ry + 30, .w = card_w - 24, .h = 22 }, 14.5, theme.text, null);
-        const desc = try stageDescription(arena, owner, prof, st);
-        presentation.label(desc, .{ .x = rx + 12, .y = ry + 54, .w = card_w - 24, .h = 34 }, 11.5, theme.muted, null);
+        // Stage title + wrapped 2-line layout-derived description
+        boldLabel(st.shortName(), .{ .x = cx, .y = ry + 32, .w = cw, .h = 22 }, 15.5, theme.text, 0xb140 + i);
+        const desc = try stageDescription(arena, owner, prof, ctx.labels, st);
+        drawWrappedTwoLines(desc, .{ .x = cx, .y = ry + 57, .w = cw, .h = 34 }, 12.5, theme.muted, 17, 0xb180 + i * 2);
 
+        // Sleek bottom progress bar
         const prog = stageProgress(owner, st, home_mastered);
-        const bar_y = ry + card_h - 16;
-        const bar_w = card_w - 24;
+        const bar_y = ry + card_h - 15;
         const track = dvui.box(@src(), .{}, .{
             .id_extra = 0xb200 + i,
-            .rect = .{ .x = rx + 12, .y = bar_y, .w = bar_w, .h = 5 },
+            .rect = .{ .x = cx, .y = bar_y, .w = cw, .h = 4.5 },
             .background = true,
             .color_fill = .{ .color = theme.control },
-            .corners = .all(2.5),
+            .corners = .all(2.25),
             .padding = .{},
             .margin = .{},
         });
@@ -311,10 +333,10 @@ fn drawStagesSheet(
         if (prog > 0.01) {
             const pfill = dvui.box(@src(), .{}, .{
                 .id_extra = 0xb300 + i,
-                .rect = .{ .x = rx + 12, .y = bar_y, .w = @max(6.0, bar_w * prog), .h = 5 },
+                .rect = .{ .x = cx, .y = bar_y, .w = @max(6.0, cw * prog), .h = 4.5 },
                 .background = true,
                 .color_fill = .{ .color = if (is_done) theme.success else accent_col },
-                .corners = .all(2.5),
+                .corners = .all(2.25),
                 .padding = .{},
                 .margin = .{},
             });
@@ -322,68 +344,88 @@ fn drawStagesSheet(
         }
     }
 
-    // Bottom Stage 5 / Stage 6 sub-options bar
-    const opt_y = h - footer_reserve + 10;
-    ui.divider(theme, .{ .x = pad, .y = opt_y - 8, .w = w - pad * 2, .h = 1 }, 0xb400);
+    // Contextual footer: compact hint for Stages 1-4, targeted controls when Stage 5 or Stage 6 is active.
+    const foot_top = grid_top + grid_h + 16;
+    ui.divider(theme, .{ .x = pad, .y = foot_top, .w = w - pad * 2, .h = 1 }, 0xb400);
 
-    // Left: Stage 5 filter (Mixed | Combos only | Layer 1)
-    presentation.label("Stage 5 mode:", .{ .x = pad, .y = opt_y + 4, .w = 94, .h = 24 }, 12, theme.muted, null);
-    const s5_x = pad + 96;
-    if (pillButton(theme, "Mixed", .{ .x = s5_x, .y = opt_y + 2, .w = 64, .h = 26 }, owner.config.stage5_filter == .mixed, 0xb501) and pending.* == null) {
-        pending.* = .{ .set_stage5_filter = .{ .filter = .mixed, .layer = null } };
-        sheet.* = .none;
-    }
-    if (pillButton(theme, "Combos", .{ .x = s5_x + 68, .y = opt_y + 2, .w = 72, .h = 26 }, owner.config.stage5_filter == .combos_only, 0xb502) and pending.* == null) {
-        pending.* = .{ .set_stage5_filter = .{ .filter = .combos_only, .layer = null } };
-        sheet.* = .none;
-    }
-    if (pillButton(theme, "Layer 1", .{ .x = s5_x + 144, .y = opt_y + 2, .w = 68, .h = 26 }, owner.config.stage5_filter == .specific_layer, 0xb503) and pending.* == null) {
-        pending.* = .{ .set_stage5_filter = .{ .filter = .specific_layer, .layer = 1 } };
-        sheet.* = .none;
-    }
-
-    // Right / Second row: Stage 6 source (English prose | Zig code | Custom text)
-    const s6_x = if (w >= 760) w - pad - 320 else pad;
-    const s6_y = if (w >= 760) opt_y else opt_y + 34;
-    presentation.label("Stage 6:", .{ .x = s6_x, .y = s6_y + 4, .w = 56, .h = 24 }, 12, theme.muted, null);
-    if (pillButton(theme, "Prose", .{ .x = s6_x + 58, .y = s6_y + 2, .w = 64, .h = 26 }, owner.config.stage6_source == .english_prose, 0xb601) and pending.* == null) {
-        pending.* = .{ .set_stage6_source = .{ .source = .english_prose } };
-        sheet.* = .none;
-    }
-    if (pillButton(theme, "Zig code", .{ .x = s6_x + 126, .y = s6_y + 2, .w = 76, .h = 26 }, owner.config.stage6_source == .zig_code, 0xb602) and pending.* == null) {
-        pending.* = .{ .set_stage6_source = .{ .source = .zig_code, .zig_lesson = owner.config.zig_lesson_index } };
-        sheet.* = .none;
-    }
-    if (pillButton(theme, "Custom", .{ .x = s6_x + 206, .y = s6_y + 2, .w = 72, .h = 26 }, owner.config.stage6_source == .custom_text, 0xb603) and pending.* == null) {
-        if (ctx.custom_text_buf[0] != 0) {
-            owner.setCustomText(std.mem.sliceTo(ctx.custom_text_buf, 0));
+    if (show_s5) {
+        const opt_y = foot_top + 14;
+        presentation.label("Stage 5 mode:", .{ .x = pad, .y = opt_y + 2, .w = 100, .h = 26 }, 13, theme.muted, null);
+        var px = pad + 104;
+        if (pillButton(theme, "Mixed", .{ .x = px, .y = opt_y, .w = 68, .h = 28 }, owner.config.stage5_filter == .mixed, 0xb501) and pending.* == null) {
+            pending.* = .{ .set_stage5_filter = .{ .filter = .mixed, .layer = null } };
+            sheet.* = .none;
         }
-        pending.* = .{ .set_stage6_source = .{ .source = .custom_text } };
-        sheet.* = .none;
-    }
+        px += 74;
+        if (pillButton(theme, "Combos", .{ .x = px, .y = opt_y, .w = 78, .h = 28 }, owner.config.stage5_filter == .combos_only, 0xb502) and pending.* == null) {
+            pending.* = .{ .set_stage5_filter = .{ .filter = .combos_only, .layer = null } };
+            sheet.* = .none;
+        }
+        px += 84;
 
-    // Compact custom text entry field at bottom row
-    const custom_y = opt_y + 38;
-    if (w >= 760) {
+        var layers_buf: [4]usize = undefined;
+        const sym_layers = collectSymbolLayers(prof, &layers_buf);
+        const display_layers: []const usize = if (sym_layers.len > 0) sym_layers else &.{1};
+        for (display_layers, 0..) |layer_idx, li| {
+            const lbl = try std.fmt.allocPrint(arena, "Layer {d}", .{layer_idx});
+            const active = owner.config.stage5_filter == .specific_layer and owner.config.stage5_layer == layer_idx;
+            if (px + 74 > w - pad) break;
+            if (pillButton(theme, lbl, .{ .x = px, .y = opt_y, .w = 74, .h = 28 }, active, 0xb510 + li) and pending.* == null) {
+                pending.* = .{ .set_stage5_filter = .{ .filter = .specific_layer, .layer = @intCast(layer_idx) } };
+                sheet.* = .none;
+            }
+            px += 80;
+        }
+    } else if (show_s6) {
+        const opt_y = foot_top + 14;
+        presentation.label("Stage 6 source:", .{ .x = pad, .y = opt_y + 2, .w = 108, .h = 26 }, 13, theme.muted, null);
+        const sx = pad + 112;
+        if (pillButton(theme, "Prose", .{ .x = sx, .y = opt_y, .w = 68, .h = 28 }, owner.config.stage6_source == .english_prose, 0xb601) and pending.* == null) {
+            pending.* = .{ .set_stage6_source = .{ .source = .english_prose } };
+            sheet.* = .none;
+        }
+        if (pillButton(theme, "Zig code", .{ .x = sx + 74, .y = opt_y, .w = 82, .h = 28 }, owner.config.stage6_source == .zig_code, 0xb602) and pending.* == null) {
+            pending.* = .{ .set_stage6_source = .{ .source = .zig_code, .zig_lesson = owner.config.zig_lesson_index } };
+            sheet.* = .none;
+        }
+        if (pillButton(theme, "Custom", .{ .x = sx + 162, .y = opt_y, .w = 76, .h = 28 }, owner.config.stage6_source == .custom_text, 0xb603) and pending.* == null) {
+            if (ctx.custom_text_buf[0] != 0) {
+                owner.setCustomText(std.mem.sliceTo(ctx.custom_text_buf, 0));
+            }
+            pending.* = .{ .set_stage6_source = .{ .source = .custom_text } };
+            sheet.* = .none;
+        }
+
+        const custom_y = opt_y + 40;
         if (!ctx.custom_text_seeded.*) {
             ctx.custom_text_buf.* = @splat(0);
             const n = @min(owner.custom_text_len, ctx.custom_text_buf.len - 1);
             @memcpy(ctx.custom_text_buf[0..n], owner.custom_text[0..n]);
             ctx.custom_text_seeded.* = true;
         }
-        var te_opts = ui.options(theme, .{ .x = pad, .y = custom_y, .w = w - pad * 2 - 120, .h = 30 }, 12);
+        const btn_w: f32 = 122;
+        var te_opts = ui.options(theme, .{ .x = pad, .y = custom_y, .w = @max(120, w - pad * 2 - btn_w - 8), .h = 32 }, 13);
         te_opts.border = .all(1);
-        te_opts.corners = .all(6);
+        te_opts.corners = .all(7);
+        te_opts.color_fill = .{ .color = theme.panel };
         te_opts.tag = "practice.sheet.custom_text";
         const te = dvui.textEntry(@src(), .{ .text = .{ .buffer = ctx.custom_text_buf }, .placeholder = "Paste custom text for Stage 6…" }, te_opts);
         const submitted = te.enter_pressed;
         te.deinit();
-        const use_clicked = ui.button(theme, "Practice text", "practice.sheet.use_custom", .{ .x = w - pad - 112, .y = custom_y, .w = 112, .h = 30 });
+        const use_clicked = ui.button(theme, "Practice text", "practice.sheet.use_custom", .{ .x = w - pad - btn_w, .y = custom_y, .w = btn_w, .h = 32 });
         if ((submitted or use_clicked) and pending.* == null) {
             owner.setCustomText(std.mem.sliceTo(ctx.custom_text_buf, 0));
             pending.* = .{ .set_stage6_source = .{ .source = .custom_text } };
             sheet.* = .none;
         }
+    } else {
+        presentation.label(
+            "Click any stage to switch immediately · Stage 5 & 6 options appear when selected",
+            .{ .x = pad, .y = foot_top + 11, .w = w - pad * 2, .h = 22 },
+            12.5,
+            theme.muted,
+            null,
+        );
     }
 }
 
@@ -396,13 +438,13 @@ fn drawProgressSheet(
 ) !void {
     const screen = dvui.windowRect();
     const w: f32 = @min(@as(f32, 920), screen.w - 40);
-    const h: f32 = @min(@as(f32, 620), screen.h - 40);
+    const h: f32 = @min(@as(f32, 580), screen.h - 40);
 
     var fw = dvui.floatingWindow(@src(), .{ .modal = true }, .{
         .rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h },
         .padding = .{},
         .background = true,
-        .color_fill = .{ .color = theme.panel },
+        .color_fill = .{ .color = theme.bg },
         .color_border = .{ .color = theme.border },
         .border = .all(1),
         .corners = .all(14),
@@ -410,7 +452,24 @@ fn drawProgressSheet(
     });
     defer fw.deinit();
 
+    // Elevated header strip matching Mockup 3 surface hierarchy
+    const header_bg = dvui.box(@src(), .{}, .{
+        .id_extra = 0xc090,
+        .rect = .{ .x = 1, .y = 1, .w = w - 2, .h = 99 },
+        .background = true,
+        .color_fill = .{ .color = theme.panel },
+        .corners = ui.topCorners(13),
+        .padding = .{},
+        .margin = .{},
+    });
+    header_bg.deinit();
+
     const arena = dvui.currentWindow().arena();
+    const cont_lbl = try std.fmt.allocPrint(arena, "Continue Stage {d}", .{owner.config.stage.number()});
+    const cta_w = @max(@as(f32, 154), ui.editorFont(cont_lbl, 15).textSize(cont_lbl).w + 34);
+    const close_x = w - 58;
+    const cta_x = close_x - 12 - cta_w;
+
     const title = try std.fmt.allocPrint(arena, "Progress · {s}", .{
         if (ctx.profile_name.len > 0) ctx.profile_name else "Active layout",
     });
@@ -418,25 +477,27 @@ fn drawProgressSheet(
         owner.learning.total_rounds,
         owner.persisted.streak_days,
     });
-    if (ui.sheetHeader(theme, w, title, subtitle, "practice.sheet.close")) {
+
+    boldLabel(title, .{ .x = 24, .y = 22, .w = @max(120, cta_x - 36), .h = 30 }, 21, theme.text, 0xc091);
+    presentation.label(subtitle, .{ .x = 24, .y = 58, .w = w - 48, .h = 22 }, 13.5, theme.muted, null);
+    ui.divider(theme, .{ .x = 0, .y = 100, .w = w, .h = 1 }, 0xc092);
+
+    if (ui.iconButton(theme, null, cont_lbl, "practice.sheet.continue", .{ .x = cta_x, .y = 21, .w = cta_w, .h = 34 }, true)) {
         sheet.* = .none;
         return;
     }
-
-    // Primary Continue CTA in sheet header
-    const cont_lbl = try std.fmt.allocPrint(arena, "Continue Stage {d}", .{owner.config.stage.number()});
-    if (ui.iconButton(theme, null, cont_lbl, "practice.sheet.continue", .{ .x = w - 224, .y = 24, .w = 156, .h = 32 }, true)) {
+    if (ui.iconButton(theme, ui.control_icons.remove, "", "practice.sheet.close", .{ .x = close_x, .y = 23, .w = 30, .h = 30 }, false)) {
         sheet.* = .none;
         return;
     }
 
     const pad: f32 = 24;
-    const body_top: f32 = 114;
+    const body_top: f32 = 118;
     const body_w = w - pad * 2;
-    const body_h = h - body_top - 20;
+    const body_h = h - body_top - 22;
 
-    // 1. Three KPI cards across top
-    const kpi_h: f32 = 76;
+    // 1. Three elevated KPI cards across top
+    const kpi_h: f32 = 84;
     const kpi_gap: f32 = 12;
     const kpi_w = (body_w - kpi_gap * 2) / 3.0;
 
@@ -488,17 +549,17 @@ fn drawKpiCard(
         .id_extra = id,
         .rect = rect,
         .background = true,
-        .color_fill = .{ .color = theme.bg },
+        .color_fill = .{ .color = theme.panel },
         .color_border = .{ .color = theme.border },
         .border = .all(1),
-        .corners = .all(9),
+        .corners = .all(10),
         .padding = .{},
         .margin = .{},
     });
     box.deinit();
-    presentation.label(title, .{ .x = rect.x + 12, .y = rect.y + 8, .w = rect.w - 24, .h = 16 }, 11, theme.muted, null);
-    presentation.label(value, .{ .x = rect.x + 12, .y = rect.y + 26, .w = rect.w - 24, .h = 26 }, 20, theme.text, null);
-    presentation.label(sub, .{ .x = rect.x + 12, .y = rect.y + 54, .w = rect.w - 24, .h = 16 }, 11, sub_color, null);
+    presentation.label(title, .{ .x = rect.x + 14, .y = rect.y + 10, .w = rect.w - 28, .h = 18 }, 13, theme.muted, null);
+    boldLabel(value, .{ .x = rect.x + 14, .y = rect.y + 30, .w = rect.w - 28, .h = 26 }, 22, theme.text, id + 0x10);
+    presentation.label(sub, .{ .x = rect.x + 14, .y = rect.y + 59, .w = rect.w - 28, .h = 18 }, 12.5, sub_color, null);
 }
 
 fn drawWpmTrendPanel(
@@ -510,7 +571,7 @@ fn drawWpmTrendPanel(
     const panel = dvui.box(@src(), .{}, .{
         .rect = rect,
         .background = true,
-        .color_fill = .{ .color = theme.bg },
+        .color_fill = .{ .color = theme.panel },
         .color_border = .{ .color = theme.border },
         .border = .all(1),
         .corners = .all(10),
@@ -521,18 +582,18 @@ fn drawWpmTrendPanel(
     defer panel.deinit();
 
     const arena = dvui.currentWindow().arena();
-    presentation.label("WPM trend & unlocks", .{ .x = 14, .y = 10, .w = rect.w - 130, .h = 20 }, 13, theme.text, null);
+    boldLabel("WPM trend & unlocks", .{ .x = 14, .y = 12, .w = rect.w - 140, .h = 20 }, 14, theme.text, 0xc101);
     const target_tag = try std.fmt.allocPrint(arena, "Target {d:.0} WPM", .{owner.config.target_wpm});
     dvui.labelNoFmt(@src(), target_tag, .{ .align_x = 1, .align_y = 0.5 }, .{
-        .rect = .{ .x = rect.w - 120, .y = 10, .w = 106, .h = 20 },
-        .font = ui.editorFont(target_tag, 11),
+        .rect = .{ .x = rect.w - 134, .y = 12, .w = 120, .h = 20 },
+        .font = ui.editorFont(target_tag, 12.5).withWeight(.bold),
         .color_text = .{ .color = theme.warning },
         .padding = .{},
         .margin = .{},
     });
 
     if (runs.len < 2) {
-        presentation.caption("Complete at least 2 rounds to plot your WPM curve", .{ .x = 16, .y = 40, .w = rect.w - 32, .h = rect.h - 56 }, 13, theme.muted, null);
+        presentation.caption("Complete at least 2 rounds to plot your WPM curve", .{ .x = 16, .y = 44, .w = rect.w - 32, .h = rect.h - 60 }, 13.5, theme.muted, null);
         return;
     }
 
@@ -551,10 +612,10 @@ fn drawWpmTrendPanel(
     const y_max = @max(y_min + 20.0, @ceil((max_wpm + 5.0) / 10.0) * 10.0);
     const y_span = y_max - y_min;
 
-    const plot_x: f32 = 42;
-    const plot_y: f32 = 38;
+    const plot_x: f32 = 44;
+    const plot_y: f32 = 42;
     const plot_w = @max(40.0, rect.w - plot_x - 16);
-    const plot_h = @max(40.0, rect.h - plot_y - 24);
+    const plot_h = @max(40.0, rect.h - plot_y - 30);
     const parent = dvui.parentGet();
 
     // Horizontal gridlines & Y-axis labels (4 ticks)
@@ -567,7 +628,7 @@ fn drawWpmTrendPanel(
         dvui.labelNoFmt(@src(), ylbl, .{ .align_x = 1, .align_y = 0.5 }, .{
             .id_extra = 0xc220 + ti,
             .rect = .{ .x = 4, .y = gy - 8, .w = plot_x - 10, .h = 16 },
-            .font = dvui.Font.theme(.mono).withSize(10.5),
+            .font = dvui.Font.theme(.mono).withSize(11.5),
             .color_text = .{ .color = theme.muted },
             .padding = .{},
             .margin = .{},
@@ -607,10 +668,10 @@ fn drawWpmTrendPanel(
         // Raw round dot
         const dot = dvui.box(@src(), .{}, .{
             .id_extra = 0xc300 + i,
-            .rect = .{ .x = px - 2.5, .y = raw_y - 2.5, .w = 5, .h = 5 },
+            .rect = .{ .x = px - 3, .y = raw_y - 3, .w = 6, .h = 6 },
             .background = true,
             .color_fill = .{ .color = if (r.unlocked_char != null) theme.success else theme.accent.opacity(0.45) },
-            .corners = .all(2.5),
+            .corners = .all(3),
             .padding = .{},
             .margin = .{},
         });
@@ -622,8 +683,8 @@ fn drawWpmTrendPanel(
                 const tag = try std.fmt.allocPrint(arena, "+{c}", .{std.ascii.toUpper(@intCast(ucp))});
                 dvui.labelNoFmt(@src(), tag, .{ .align_x = 0.5, .align_y = 0.5 }, .{
                     .id_extra = 0xc400 + i,
-                    .rect = .{ .x = px - 12, .y = @max(plot_y - 4, raw_y - 18), .w = 24, .h = 14 },
-                    .font = dvui.Font.theme(.mono).withSize(9.5).withWeight(.bold),
+                    .rect = .{ .x = px - 14, .y = @max(plot_y - 4, raw_y - 19), .w = 28, .h = 15 },
+                    .font = dvui.Font.theme(.mono).withSize(11).withWeight(.bold),
                     .color_text = .{ .color = theme.success },
                     .padding = .{},
                     .margin = .{},
@@ -648,7 +709,20 @@ fn drawWpmTrendPanel(
     var line: dvui.Path.Builder = .init(dvui.currentWindow().lifo());
     defer line.deinit();
     for (ema_pts[0..slice.len]) |pt| line.addPoint(pt);
-    line.build().stroke(.{ .thickness = 2.2, .color = .{ .color = theme.accent } });
+    line.build().stroke(.{ .thickness = 2.4, .color = .{ .color = theme.accent } });
+
+    // Subtle X-axis start/end labels
+    const first_lbl = try std.fmt.allocPrint(arena, "Round {d}", .{start_idx + 1});
+    const last_lbl = try std.fmt.allocPrint(arena, "Round {d}", .{runs.len});
+    presentation.label(first_lbl, .{ .x = plot_x, .y = plot_y + plot_h + 6, .w = 90, .h = 16 }, 11, theme.muted, null);
+    dvui.labelNoFmt(@src(), last_lbl, .{ .align_x = 1, .align_y = 0.5 }, .{
+        .id_extra = 0xc490,
+        .rect = .{ .x = plot_x + plot_w - 90, .y = plot_y + plot_h + 6, .w = 90, .h = 16 },
+        .font = ui.editorFont(last_lbl, 11),
+        .color_text = .{ .color = theme.muted },
+        .padding = .{},
+        .margin = .{},
+    });
 }
 
 fn drawWeakSpotsPanel(
@@ -661,7 +735,7 @@ fn drawWeakSpotsPanel(
     const panel = dvui.box(@src(), .{}, .{
         .rect = rect,
         .background = true,
-        .color_fill = .{ .color = theme.bg },
+        .color_fill = .{ .color = theme.panel },
         .color_border = .{ .color = theme.border },
         .border = .all(1),
         .corners = .all(10),
@@ -672,30 +746,41 @@ fn drawWeakSpotsPanel(
     defer panel.deinit();
 
     const arena = dvui.currentWindow().arena();
-    const pad: f32 = 12;
-    presentation.label("Weakest keys & transitions", .{ .x = pad, .y = 10, .w = rect.w - pad * 2, .h = 20 }, 13, theme.text, null);
+    const pad: f32 = 14;
+    boldLabel("Weakest keys & transitions", .{ .x = pad, .y = 12, .w = rect.w - pad * 2, .h = 20 }, 14, theme.text, 0xd090);
 
     var wk_buf: [4]model.KeySummary = undefined;
     const weak_keys = owner.learning.weakestKeys(&wk_buf);
     var wb_buf: [3]model.BigramStat = undefined;
     const weak_bigrams = owner.learning.slowestBigrams(2, &wb_buf);
 
-    var cy: f32 = 36;
+    const cta_h: f32 = 54;
+    const cta_y = rect.h - cta_h - 12;
+    const list_limit = cta_y - (if (weak_bigrams.len > 0) @as(f32, 30) else @as(f32, 10));
+
+    var cy: f32 = 40;
     if (weak_keys.len == 0 and weak_bigrams.len == 0) {
-        presentation.label("Complete a round to identify your slowest keys and transitions.", .{ .x = pad, .y = cy, .w = rect.w - pad * 2, .h = 36 }, 12, theme.muted, null);
+        drawWrappedTwoLines(
+            "Complete a round to identify your slowest keys and transitions.",
+            .{ .x = pad, .y = cy + 4, .w = rect.w - pad * 2, .h = 38 },
+            13,
+            theme.muted,
+            18,
+            0xd095,
+        );
     } else {
         const max_rows: usize = @min(weak_keys.len, 4);
         for (weak_keys[0..max_rows], 0..) |wk, i| {
-            const row_h: f32 = 32;
-            if (cy + row_h > rect.h - 68) break;
+            const row_h: f32 = 42;
+            if (cy + row_h > list_limit) break;
             const row = dvui.box(@src(), .{}, .{
                 .id_extra = 0xd000 + i,
                 .rect = .{ .x = pad, .y = cy, .w = rect.w - pad * 2, .h = row_h },
                 .background = true,
-                .color_fill = .{ .color = theme.panel },
+                .color_fill = .{ .color = theme.bg },
                 .color_border = .{ .color = theme.border },
                 .border = .all(1),
-                .corners = .all(7),
+                .corners = .all(8),
                 .padding = .{},
                 .margin = .{},
             });
@@ -704,18 +789,25 @@ fn drawWeakSpotsPanel(
             var cbuf: [4]u8 = undefined;
             const clen = std.unicode.utf8Encode(wk.cp, &cbuf) catch 0;
             if (clen == 1) cbuf[0] = std.ascii.toUpper(cbuf[0]);
-            const kbadge: dvui.Rect = .{ .x = pad + 6, .y = cy + 5, .w = 24, .h = 22 };
+            const kbadge: dvui.Rect = .{ .x = pad + 8, .y = cy + 7, .w = 28, .h = 28 };
             const kb = dvui.box(@src(), .{}, .{
                 .id_extra = 0xd100 + i,
                 .rect = kbadge,
                 .background = true,
                 .color_fill = .{ .color = ui.mix(theme.panel, theme.warning, 0.22) },
-                .corners = .all(5),
+                .corners = .all(6),
                 .padding = .{},
                 .margin = .{},
             });
             kb.deinit();
-            presentation.caption(cbuf[0..clen], kbadge, 12, theme.warning, null);
+            dvui.labelNoFmt(@src(), cbuf[0..clen], .{ .align_x = 0.5, .align_y = 0.5 }, .{
+                .id_extra = 0xd140 + i,
+                .rect = kbadge,
+                .font = dvui.Font.theme(.mono).withSize(14).withWeight(.bold),
+                .color_text = .{ .color = theme.warning },
+                .padding = .{},
+                .margin = .{},
+            });
 
             const key_wpm: f32 = if (wk.ema_ms > 0) 12_000.0 / wk.ema_ms else 0;
             const finger_str: []const u8 = if (owner.profile_bound) blk: {
@@ -726,14 +818,25 @@ fn drawWeakSpotsPanel(
                 try std.fmt.allocPrint(arena, "{d:.0} WPM · {d:.0}% · {s}", .{ key_wpm, wk.ema_acc * 100.0, finger_str })
             else
                 try std.fmt.allocPrint(arena, "{d:.0} WPM · {d:.0}%", .{ key_wpm, wk.ema_acc * 100.0 });
-            presentation.label(meta, .{ .x = pad + 38, .y = cy + 6, .w = @max(0, rect.w - pad * 2 - 108), .h = 20 }, 11, theme.muted, null);
+            const bar_w: f32 = 62;
+            const bx = rect.w - pad - bar_w - 10;
+            presentation.label(meta, .{ .x = pad + 44, .y = cy + 11, .w = @max(0, bx - (pad + 50)), .h = 20 }, 12.5, theme.muted, null);
 
-            // Mini confidence bar
-            const bw: f32 = 54;
-            const bx = rect.w - pad - bw - 8;
+            // Percentage readout directly above mini confidence bar
+            const pct_str = try std.fmt.allocPrint(arena, "{d:.0}%", .{wk.confidence * 100.0});
+            const bar_col = if (wk.confidence >= 1.0) theme.success else theme.warning;
+            dvui.labelNoFmt(@src(), pct_str, .{ .align_x = 1, .align_y = 0.5 }, .{
+                .id_extra = 0xd180 + i,
+                .rect = .{ .x = bx, .y = cy + 6, .w = bar_w, .h = 14 },
+                .font = ui.editorFont(pct_str, 11.5).withWeight(.bold),
+                .color_text = .{ .color = bar_col },
+                .padding = .{},
+                .margin = .{},
+            });
+
             const tr = dvui.box(@src(), .{}, .{
                 .id_extra = 0xd200 + i,
-                .rect = .{ .x = bx, .y = cy + 13, .w = bw, .h = 6 },
+                .rect = .{ .x = bx, .y = cy + 25, .w = bar_w, .h = 6 },
                 .background = true,
                 .color_fill = .{ .color = theme.control },
                 .corners = .all(3),
@@ -743,44 +846,46 @@ fn drawWeakSpotsPanel(
             tr.deinit();
             const bf = dvui.box(@src(), .{}, .{
                 .id_extra = 0xd300 + i,
-                .rect = .{ .x = bx, .y = cy + 13, .w = @max(3.0, bw * wk.confidence), .h = 6 },
+                .rect = .{ .x = bx, .y = cy + 25, .w = @max(3.0, bar_w * wk.confidence), .h = 6 },
                 .background = true,
-                .color_fill = .{ .color = if (wk.confidence >= 1.0) theme.success else theme.warning },
+                .color_fill = .{ .color = bar_col },
                 .corners = .all(3),
                 .padding = .{},
                 .margin = .{},
             });
             bf.deinit();
-            cy += row_h + 6;
+            cy += row_h + 7;
         }
 
-        if (weak_bigrams.len > 0 and cy + 24 < rect.h - 54) {
+        if (weak_bigrams.len > 0 and cy + 20 < cta_y - 4) {
             const bg = weak_bigrams[0];
             var b1: [4]u8 = undefined;
             var b2: [4]u8 = undefined;
             const n1 = std.unicode.utf8Encode(bg.prev, &b1) catch 0;
             const n2 = std.unicode.utf8Encode(bg.cur, &b2) catch 0;
             const bg_text = try std.fmt.allocPrint(arena, "Slowest transition: {s}{s} ({d:.0} ms avg)", .{ b1[0..n1], b2[0..n2], bg.ema_ms });
-            presentation.label(bg_text, .{ .x = pad, .y = cy + 2, .w = rect.w - pad * 2, .h = 20 }, 11.5, theme.muted, null);
+            presentation.label(bg_text, .{ .x = pad, .y = cy + 1, .w = rect.w - pad * 2, .h = 20 }, 12.5, theme.muted, null);
         }
     }
 
-    // 1-click Weak-spot drill CTA pinned at bottom of panel
-    const cta_h: f32 = 42;
-    const cta_y = rect.h - cta_h - 10;
+    // 1-click Weak-spot drill CTA pinned cleanly at bottom of panel
     const cta_box = dvui.box(@src(), .{}, .{
         .rect = .{ .x = pad, .y = cta_y, .w = rect.w - pad * 2, .h = cta_h },
         .background = true,
         .color_fill = .{ .color = ui.mix(theme.panel, theme.accent, 0.14) },
         .color_border = .{ .color = ui.mix(theme.panel, theme.accent, 0.45) },
         .border = .all(1),
-        .corners = .all(8),
+        .corners = .all(9),
         .padding = .{},
         .margin = .{},
     });
     cta_box.deinit();
-    presentation.label("Target bottlenecks (~20 words)", .{ .x = pad + 10, .y = cta_y + 10, .w = @max(0, rect.w - pad * 2 - 160), .h = 22 }, 11.5, theme.text, null);
-    if (ui.iconButton(theme, null, "Weak-spot drill", "practice.sheet.weak_spot", .{ .x = rect.w - pad - 146, .y = cta_y + 6, .w = 138, .h = 30 }, true) and pending.* == null) {
+
+    const start_w: f32 = 96;
+    const text_w = @max(0.0, rect.w - pad * 2 - start_w - 28);
+    boldLabel("Weak-spot drill", .{ .x = pad + 12, .y = cta_y + 8, .w = text_w, .h = 19 }, 13.5, theme.text, 0xd401);
+    presentation.label("Target bottlenecks (~20 words)", .{ .x = pad + 12, .y = cta_y + 28, .w = text_w, .h = 18 }, 12, theme.muted, null);
+    if (ui.iconButton(theme, null, "Start →", "practice.sheet.weak_spot", .{ .x = rect.w - pad - start_w - 10, .y = cta_y + 10, .w = start_w, .h = 34 }, true) and pending.* == null) {
         pending.* = .start_weak_spot;
         sheet.* = .none;
     }
@@ -868,55 +973,349 @@ fn stageDescription(
     arena: std.mem.Allocator,
     owner: *const control.Controller,
     prof: ?*const lp.LayoutProfile,
+    labels: ?*const desktop.label_cache.LabelCache,
     st: generator.Stage,
 ) ![]const u8 {
     return switch (st) {
-        .home_row => blk: {
-            if (prof) |p| {
-                const z1 = p.zone1Letters();
-                if (z1.len > 0) {
-                    var upper: [26]u8 = undefined;
-                    for (z1, 0..) |c, i| upper[i] = std.ascii.toUpper(c);
-                    break :blk try std.fmt.allocPrint(arena, "{s} + thumb Space", .{upper[0..z1.len]});
-                }
-            }
-            break :blk "Home-row anchor keys + thumb Space";
-        },
-        .all_letters => blk: {
-            const lm = &owner.learning;
-            const focus_c: u8 = if (lm.focus_cp) |f| (if (f <= 127) std.ascii.toUpper(@intCast(f)) else '?') else '-';
-            break :blk try std.fmt.allocPrint(arena, "{d}/{d} unlocked · Focus: {c}", .{ lm.unlocked_count, lm.unlock_len, focus_c });
-        },
-        .shift => blk: {
-            if (prof) |p| {
-                if (p.has_left_shift and p.has_right_shift) {
-                    break :blk "50/50 balanced opposite-hand Shift";
-                }
-            }
-            break :blk "Capitalization with opposite-hand Shift";
-        },
-        .punctuation_numbers => blk: {
-            if (prof) |p| {
-                break :blk try std.fmt.allocPrint(arena, "{d} punctuation & {d} digits reachable", .{ p.punctuation_len, p.digits_len });
-            }
-            break :blk "Punctuation groups & number patterns";
-        },
-        .layers_combos => blk: {
-            if (prof) |p| {
-                break :blk try std.fmt.allocPrint(arena, "{d} layer symbols & {d} project combos", .{ p.layer_symbols_len, p.combo_len });
-            }
-            break :blk "Programming symbols & 2-key combos";
-        },
-        .free_text => "English prose, Zig code & custom text",
+        .home_row => try describeHomeRow(arena, owner, prof),
+        .all_letters => try describeAllLetters(arena, owner),
+        .shift => try describeShift(arena, prof, labels),
+        .punctuation_numbers => try describePunctuationNumbers(arena, prof),
+        .layers_combos => try describeLayersCombos(arena, prof),
+        .free_text => "English prose, Zig code snippets & custom text",
     };
 }
 
+fn describeHomeRow(
+    arena: std.mem.Allocator,
+    owner: *const control.Controller,
+    prof: ?*const lp.LayoutProfile,
+) ![]const u8 {
+    const p = prof orelse return "Home-row anchor keys + thumb Space";
+    const z1 = p.zone1Letters();
+    if (z1.len == 0) return "Home-row anchor keys + thumb Space";
+
+    var left_buf: [24]u8 = undefined;
+    var left_len: usize = 0;
+    var right_buf: [24]u8 = undefined;
+    var right_len: usize = 0;
+    var wpm_sum: f32 = 0;
+    var wpm_count: usize = 0;
+
+    for (z1) |ch| {
+        const up = std.ascii.toUpper(ch);
+        const hand: lp.Hand = if (p.routeFor(ch)) |r| p.handFor(r.key_index) else .neutral;
+        if (hand == .right) {
+            if (right_len > 0 and right_len + 1 < right_buf.len) {
+                right_buf[right_len] = ' ';
+                right_len += 1;
+            }
+            if (right_len < right_buf.len) {
+                right_buf[right_len] = up;
+                right_len += 1;
+            }
+        } else {
+            if (left_len > 0 and left_len + 1 < left_buf.len) {
+                left_buf[left_len] = ' ';
+                left_len += 1;
+            }
+            if (left_len < left_buf.len) {
+                left_buf[left_len] = up;
+                left_len += 1;
+            }
+        }
+        if (owner.learning.getStat(ch)) |ks| {
+            const w = ks.wpm();
+            if (ks.samples > 0 and w > 0) {
+                wpm_sum += w;
+                wpm_count += 1;
+            }
+        }
+    }
+
+    const keys_part = if (left_len > 0 and right_len > 0)
+        try std.fmt.allocPrint(arena, "{s} · {s} + thumb Space", .{ left_buf[0..left_len], right_buf[0..right_len] })
+    else if (left_len > 0)
+        try std.fmt.allocPrint(arena, "{s} + thumb Space", .{left_buf[0..left_len]})
+    else
+        try std.fmt.allocPrint(arena, "{s} + thumb Space", .{right_buf[0..right_len]});
+
+    if (wpm_count > 0) {
+        const avg = wpm_sum / @as(f32, @floatFromInt(wpm_count));
+        return try std.fmt.allocPrint(arena, "{s} · {d:.0} WPM avg", .{ keys_part, avg });
+    }
+    return keys_part;
+}
+
+fn describeAllLetters(arena: std.mem.Allocator, owner: *const control.Controller) ![]const u8 {
+    const lm = &owner.learning;
+    if (lm.unlock_len == 0) return "Adaptive letter unlock · layout-ordered";
+    if (lm.unlocked_count >= lm.unlock_len) {
+        return try std.fmt.allocPrint(arena, "All {d}/{d} letters unlocked · Speed & accuracy polish", .{ lm.unlocked_count, lm.unlock_len });
+    }
+
+    const focus_c: u8 = if (lm.focus_cp) |f| (if (f <= 127) std.ascii.toUpper(@intCast(f)) else '?') else '-';
+    const rem = lm.unlock_order[lm.unlocked_count..lm.unlock_len];
+    var next_buf: [16]u8 = undefined;
+    var next_len: usize = 0;
+    const take = @min(rem.len, 3);
+    for (rem[0..take], 0..) |ch, idx| {
+        if (idx > 0 and next_len + 2 <= next_buf.len) {
+            next_buf[next_len] = ',';
+            next_buf[next_len + 1] = ' ';
+            next_len += 2;
+        }
+        if (next_len < next_buf.len) {
+            next_buf[next_len] = std.ascii.toUpper(ch);
+            next_len += 1;
+        }
+    }
+    if (next_len > 0) {
+        return try std.fmt.allocPrint(arena, "Adaptive · Focus: {c} · Next: {s}", .{ focus_c, next_buf[0..next_len] });
+    }
+    return try std.fmt.allocPrint(arena, "{d}/{d} unlocked · Focus: {c}", .{ lm.unlocked_count, lm.unlock_len, focus_c });
+}
+
+fn describeShift(
+    arena: std.mem.Allocator,
+    prof: ?*const lp.LayoutProfile,
+    labels: ?*const desktop.label_cache.LabelCache,
+) ![]const u8 {
+    const p = prof orelse return "Capitalization with opposite-hand Shift";
+    var left_sp: ?lp.ShiftProvider = null;
+    var right_sp: ?lp.ShiftProvider = null;
+    for (p.shiftSlice()) |sp| {
+        if (sp.hand == .left) {
+            if (left_sp == null or shiftRank(sp.kind) > shiftRank(left_sp.?.kind)) left_sp = sp;
+        } else if (sp.hand == .right) {
+            if (right_sp == null or shiftRank(sp.kind) > shiftRank(right_sp.?.kind)) right_sp = sp;
+        }
+    }
+
+    if (left_sp != null and right_sp != null) {
+        const home_row = left_sp.?.kind == .home_row_hold and right_sp.?.kind == .home_row_hold;
+        const l_lbl = try shortKeyLabel(arena, labels, left_sp.?.key_index);
+        const r_lbl = try shortKeyLabel(arena, labels, right_sp.?.key_index);
+        if (l_lbl != null and r_lbl != null) {
+            if (home_row) {
+                return try std.fmt.allocPrint(arena, "Opposite-hand home-row Shift ({s}/{s})", .{ l_lbl.?, r_lbl.? });
+            }
+            return try std.fmt.allocPrint(arena, "Balanced opposite-hand Shift ({s}/{s})", .{ l_lbl.?, r_lbl.? });
+        }
+        if (home_row) return "Opposite-hand home-row Shift (50/50 balanced)";
+        return "50/50 balanced opposite-hand Shift";
+    }
+    return "Capitalization with opposite-hand Shift";
+}
+
+fn shiftRank(kind: lp.ShiftKind) u8 {
+    return switch (kind) {
+        .home_row_hold => 5,
+        .thumb_hold => 4,
+        .one_shot => 3,
+        .dedicated => 2,
+        .hold => 1,
+    };
+}
+
+fn shortKeyLabel(arena: std.mem.Allocator, labels: ?*const desktop.label_cache.LabelCache, key_index: usize) !?[]const u8 {
+    const cache = labels orelse return null;
+    if (cache.layer_count == 0 or key_index >= cache.key_count) return null;
+    const raw = cache.lookup(0, key_index, .{}).label orelse return null;
+    const trimmed = std.mem.trim(u8, raw, " \t");
+    if (trimmed.len == 0 or trimmed.len > 6) return null;
+    for (trimmed) |c| {
+        if (c < 0x21 or c > 0x7e) return null;
+    }
+    if (trimmed.len == 1 and std.ascii.isAlphabetic(trimmed[0])) {
+        const up = try arena.alloc(u8, 1);
+        up[0] = std.ascii.toUpper(trimmed[0]);
+        return up;
+    }
+    return trimmed;
+}
+
+fn describePunctuationNumbers(arena: std.mem.Allocator, prof: ?*const lp.LayoutProfile) ![]const u8 {
+    const p = prof orelse return "Punctuation groups & number patterns";
+    const punc = p.punctuationSlice();
+    const digits = p.digitsSlice();
+
+    var punc_sample: [16]u8 = undefined;
+    var punc_len: usize = 0;
+    const take = @min(punc.len, 4);
+    for (punc[0..take], 0..) |ch, idx| {
+        if (idx > 0 and punc_len < punc_sample.len) {
+            punc_sample[punc_len] = ' ';
+            punc_len += 1;
+        }
+        if (punc_len < punc_sample.len) {
+            punc_sample[punc_len] = ch;
+            punc_len += 1;
+        }
+    }
+
+    var digit_layer: ?usize = null;
+    for (digits) |d| {
+        if (p.routeFor(d)) |r| {
+            if (r.layer > 0) {
+                digit_layer = r.layer;
+                break;
+            }
+        }
+    }
+
+    if (punc_len > 0 and digit_layer != null) {
+        return try std.fmt.allocPrint(arena, "Punctuation ({s}) & digits (Layer {d})", .{ punc_sample[0..punc_len], digit_layer.? });
+    }
+    if (punc_len > 0 and digits.len > 0) {
+        return try std.fmt.allocPrint(arena, "Punctuation ({s}) & {d} digits", .{ punc_sample[0..punc_len], digits.len });
+    }
+    return try std.fmt.allocPrint(arena, "{d} punctuation & {d} digits reachable", .{ p.punctuation_len, p.digits_len });
+}
+
+fn describeLayersCombos(arena: std.mem.Allocator, prof: ?*const lp.LayoutProfile) ![]const u8 {
+    const p = prof orelse return "Programming symbols & 2-key combos";
+    var layers_buf: [4]usize = undefined;
+    const sym_layers = collectSymbolLayers(p, &layers_buf);
+
+    const syms = p.layerSymbolsSlice();
+    var sample: [16]u8 = undefined;
+    var sample_len: usize = 0;
+    const take = @min(syms.len, 4);
+    for (syms[0..take], 0..) |ch, idx| {
+        if (idx > 0 and sample_len < sample.len) {
+            sample[sample_len] = ' ';
+            sample_len += 1;
+        }
+        if (sample_len < sample.len) {
+            sample[sample_len] = ch;
+            sample_len += 1;
+        }
+    }
+
+    if (sym_layers.len == 1 and sample_len > 0) {
+        if (p.combo_len > 0) {
+            return try std.fmt.allocPrint(arena, "Layer {d} symbols ({s}) & {d} project combos", .{ sym_layers[0], sample[0..sample_len], p.combo_len });
+        }
+        return try std.fmt.allocPrint(arena, "Layer {d} symbols ({s}) · {d} reachable", .{ sym_layers[0], sample[0..sample_len], p.layer_symbols_len });
+    }
+    if (sym_layers.len > 1 and sample_len > 0) {
+        if (p.combo_len > 0) {
+            return try std.fmt.allocPrint(arena, "{d} symbols ({d} layers) & {d} project combos", .{ p.layer_symbols_len, sym_layers.len, p.combo_len });
+        }
+        return try std.fmt.allocPrint(arena, "{d} symbols across {d} layers ({s})", .{ p.layer_symbols_len, sym_layers.len, sample[0..sample_len] });
+    }
+    return try std.fmt.allocPrint(arena, "{d} layer symbols & {d} project combos", .{ p.layer_symbols_len, p.combo_len });
+}
+
+fn collectSymbolLayers(prof: ?*const lp.LayoutProfile, out: []usize) []usize {
+    const p = prof orelse return out[0..0];
+    var mask: u16 = 0;
+    for (p.layerSymbolsSlice()) |ch| {
+        if (p.routeFor(ch)) |r| {
+            if (r.layer > 0 and r.layer < 16) {
+                mask |= @as(u16, 1) << @intCast(r.layer);
+            }
+        }
+    }
+    var count: usize = 0;
+    for (1..16) |layer_idx| {
+        if ((mask & (@as(u16, 1) << @intCast(layer_idx))) != 0) {
+            if (count >= out.len) break;
+            out[count] = layer_idx;
+            count += 1;
+        }
+    }
+    return out[0..count];
+}
+
+fn boldLabel(text: []const u8, bounds: dvui.Rect, size: f32, color: dvui.Color, id: usize) void {
+    dvui.labelNoFmt(@src(), text, .{ .align_x = 0, .align_y = 0.5, .ellipsize = true }, .{
+        .id_extra = id,
+        .rect = bounds,
+        .font = ui.editorFont(text, size).withWeight(.bold),
+        .color_text = .{ .color = color },
+        .padding = .{},
+        .margin = .{},
+    });
+}
+
+/// Renders `text` over 1 or 2 word-wrapped lines within `bounds.w`, ellipsizing only
+/// if the second line still exceeds width.
+fn drawWrappedTwoLines(
+    text: []const u8,
+    bounds: dvui.Rect,
+    size: f32,
+    color: dvui.Color,
+    line_h: f32,
+    id_base: usize,
+) void {
+    if (text.len == 0 or bounds.w <= 8) return;
+    const font = ui.editorFont(text, size);
+    if (font.textSize(text).w <= bounds.w) {
+        dvui.labelNoFmt(@src(), text, .{ .align_x = 0, .align_y = 0, .ellipsize = true }, .{
+            .id_extra = id_base,
+            .rect = .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = line_h },
+            .font = font,
+            .color_text = .{ .color = color },
+            .padding = .{},
+            .margin = .{},
+        });
+        return;
+    }
+
+    var split: usize = 0;
+    var i: usize = 0;
+    while (i < text.len) : (i += 1) {
+        if (text[i] == ' ') {
+            if (font.textSize(text[0..i]).w <= bounds.w) {
+                split = i;
+            } else {
+                break;
+            }
+        }
+    }
+
+    if (split == 0) {
+        dvui.labelNoFmt(@src(), text, .{ .align_x = 0, .align_y = 0, .ellipsize = true }, .{
+            .id_extra = id_base,
+            .rect = .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = line_h },
+            .font = font,
+            .color_text = .{ .color = color },
+            .padding = .{},
+            .margin = .{},
+        });
+        return;
+    }
+
+    const line1 = std.mem.trimEnd(u8, text[0..split], " ");
+    const line2 = std.mem.trimStart(u8, text[split + 1 ..], " ");
+    dvui.labelNoFmt(@src(), line1, .{ .align_x = 0, .align_y = 0, .ellipsize = true }, .{
+        .id_extra = id_base,
+        .rect = .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = line_h },
+        .font = font,
+        .color_text = .{ .color = color },
+        .padding = .{},
+        .margin = .{},
+    });
+    if (line2.len > 0) {
+        dvui.labelNoFmt(@src(), line2, .{ .align_x = 0, .align_y = 0, .ellipsize = true }, .{
+            .id_extra = id_base + 1,
+            .rect = .{ .x = bounds.x, .y = bounds.y + line_h, .w = bounds.w, .h = line_h },
+            .font = font,
+            .color_text = .{ .color = color },
+            .padding = .{},
+            .margin = .{},
+        });
+    }
+}
+
 fn pillButton(theme: ui.Theme, text: []const u8, rect: dvui.Rect, active: bool, id: usize) bool {
-    var opts = ui.options(theme, rect, 11.5);
+    var opts = ui.options(theme, rect, 12.5);
     opts.id_extra = id;
     opts.background = true;
     opts.border = .all(1);
-    opts.corners = .all(6);
+    opts.corners = .all(7);
     opts.padding = .{};
     opts.color_fill = .{ .color = if (active) ui.mix(theme.panel, theme.accent, 0.24) else theme.control };
     opts.color_border = .{ .color = if (active) theme.accent else theme.border };
