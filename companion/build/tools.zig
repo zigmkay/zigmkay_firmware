@@ -27,9 +27,17 @@ pub fn add(s: *tests.Suite, catalog_export: ?*Compile) Tools {
         Steps.unavailable(b, s.steps.analyze_keymap, "analyze-keymap is unavailable with -Donly=diagnostic");
         return .{ .bootsel = null };
     }
-    // Non-shipped host packaging/verification utilities: compile for the host
-    // in debug mode instead of spending minutes optimizing CI helpers.
-    const release = tests.host(b, "release", "tools/release.zig", core.jobs_only);
+    // Non-shipped host packaging/verification utilities: release hashes large
+    // bundles so keep it fast, while assemble/catalog-export stay debug.
+    const release = b.addExecutable(.{
+        .name = "release",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/release.zig"),
+            .target = b.graph.host,
+            .optimize = .ReleaseFast,
+            .imports = core.jobs_only,
+        }),
+    });
     release.root_module.addOptions("release-options", core.release_options);
     install(s, release);
     const bootsel = if (b.graph.host.result.os.tag == .windows)
@@ -43,7 +51,18 @@ pub fn add(s: *tests.Suite, catalog_export: ?*Compile) Tools {
         Steps.unavailable(b, s.steps.analyze_keymap, "analyze-keymap needs the firmware package; drop -Donly");
         return .{ .bootsel = bootsel };
     };
-    const bundle_check = tests.host(b, "check-application-bundle", "tools/check_application_bundle.zig", h.bundle_check_deps);
+    // Keep cfg.target (baseline CPU under -Drelease=true) because CI uploads
+    // check-application-bundle from ubuntu-22.04 to run on ubuntu-24.04, while
+    // debug mode avoids spending a minute optimizing a CI verification tool.
+    const bundle_check = b.addExecutable(.{
+        .name = "check-application-bundle",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/check_application_bundle.zig"),
+            .target = cfg.target,
+            .optimize = .debug,
+            .imports = h.bundle_check_deps,
+        }),
+    });
     for ([_][]const u8{ "us", "de" }) |name| {
         bundle_check.root_module.addAnonymousImport(b.fmt("import-{s}", .{name}), .{ .root_source_file = b.path(b.fmt("tests/fixtures/import/{s}/src/keymap.zig", .{name})) });
         bundle_check.root_module.addAnonymousImport(b.fmt("import-{s}-manifest", .{name}), .{ .root_source_file = b.path(b.fmt("tests/fixtures/import/{s}/build.zig.zon", .{name})) });

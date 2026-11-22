@@ -109,8 +109,8 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
-          # Windows exceeded the default 2 GiB limit and saved an empty cache.
-          cache-size-limit: 4096
+          # Bundle builds + desktop tests reach ~4.7 GiB uncompressed (~1.1 GiB compressed).
+          cache-size-limit: 6144
       - name: Install Linux desktop and package inspection dependencies
         if: runner.os == 'Linux'
         run: |
