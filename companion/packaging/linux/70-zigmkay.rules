@@ -1,0 +1,5 @@
+# Install manually in /etc/udev/rules.d; never installed by the application.
+# Companion HID interface (firmware USB VID/PID).
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="fafa", ATTRS{idProduct}=="00f0", TAG+="uaccess"
+# RP2040 ROM BOOTSEL, used by picotool on Linux.
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="0003", TAG+="uaccess"

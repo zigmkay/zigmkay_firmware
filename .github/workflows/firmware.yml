@@ -1,0 +1,37 @@
+name: Firmware tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig 0.17.0
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+          use-tool-cache: true
+          cache-key: tc1
+          cache-size-limit: 4096
+      - name: Verify Zig version
+        run: test "$(zig version)" = 0.17.0
+      - name: Firmware core tests (no device access)
+        run: zig build test -j4 --summary all
+      - name: Keyboard regression tests
+        working-directory: keyboards
+        run: zig build test -j4 --summary all
+      - name: Keycode generator tests
+        working-directory: zkeycodes
+        run: zig build test -j4 --summary all

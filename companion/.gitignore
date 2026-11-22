@@ -1,0 +1,15 @@
+.zig-cache/
+zig-out/
+.development/
+.slim/deepwork/
+.DS_Store
+zig-pkg/
+zig-cache/
+.cache/
+.env
+.env.*
+!.env.example
+# BEGIN oh-my-opencode-slim worktrees
+.slim/worktrees/
+.slim/worktrees.json
+# END oh-my-opencode-slim worktrees

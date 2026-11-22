@@ -1,0 +1,19 @@
+# Tasks for the whole repository. Run any project's task from here, for example
+# `mise run //keyboards:flash lk8` or `mise run //companion:editor`; `mise tasks
+# --all` lists them. `mise run test` runs every offline test.
+monorepo_root = true
+
+[monorepo]
+config_roots = ["zigmkay", "keyboards", "zkeycodes", "companion"]
+
+[tools]
+zig = "0.17.0"
+zls = "0.17.0"
+
+[tasks.test]
+description = "Run every offline firmware and companion test (no device access)"
+depends = ["//zigmkay:test", "//keyboards:test", "//zkeycodes:test", "//companion:test"]
+
+[tasks.check]
+description = "Compile every board and companion source; runs the keyboard regression tests, not the companion tests"
+depends = ["//keyboards:test", "//companion:check", "//companion:firmware:check"]

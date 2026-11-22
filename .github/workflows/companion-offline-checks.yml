@@ -1,0 +1,54 @@
+name: Offline source checks
+
+on:
+  push:
+    branches: [main]
+    paths: &paths
+      - "companion/**"
+      - "zigmkay/**"
+      - "keyboards/**"
+      - "zkeycodes/**"
+      - build.zig
+      - build.zig.zon
+      - .github/workflows/companion-offline-checks.yml
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    paths: *paths
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'full-ci' && format('-{0}', github.run_id) || '' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FULL_CI: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+
+defaults:
+  run:
+    working-directory: companion
+
+jobs:
+  check:
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-ci'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install Zig 0.17.0
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
+        with:
+          version: 0.17.0
+          use-tool-cache: true
+          cache-key: tc1
+          cache-size-limit: 4096
+      - name: Verify Zig version
+        run: test "$(zig version)" = 0.17.0
+      - name: Install xkbcommon development library
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
+      - name: Compile and test portable contracts and imported processor traces (no device access)
+        timeout-minutes: 20
+        run: zig build check test -j4 --test-timeout 180s --summary all
+      - name: Compile generated, synthetic, default and imported firmware matrices without devices
+        run: |
+          subset=()
+          if [ "$FULL_CI" != "true" ]; then subset=("-Dfirmware-subset=true"); fi
+          zig build check-firmware check-firmware-defaults -Dfirmware "${subset[@]}" -j4 --summary all

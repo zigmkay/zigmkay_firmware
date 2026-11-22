@@ -1,0 +1,99 @@
+name: Release Companion
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Companion version (e.g. 0.2.0 or 0.2.0-preview.1). Leave empty to use companion/build.zig.zon.
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-release-${{ inputs.version || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    outputs:
+      release_tag: ${{ steps.prepare.outputs.release_tag }}
+      commit_sha: ${{ steps.prepare.outputs.commit_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - name: Validate version and create release tag
+        id: prepare
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/main" ]; then
+            echo "::error::Companion releases must be run from the main branch (got ${GITHUB_REF})."
+            exit 1
+          fi
+
+          current_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)",/\1/p' companion/build.zig.zon | head -n1)
+          if [ -z "$current_version" ]; then
+            echo "::error::Could not read .version from companion/build.zig.zon."
+            exit 1
+          fi
+
+          version="${INPUT_VERSION:-$current_version}"
+          if ! [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-preview\.(0|[1-9][0-9]*))?$ ]]; then
+            echo "::error::Invalid companion version '$version'. Expected MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-preview.N."
+            exit 1
+          fi
+
+          tag="companion-v${version}"
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            echo "::error::Tag '${tag}' already exists."
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::Release '${tag}' already exists."
+            exit 1
+          fi
+
+          if [ "$version" != "$current_version" ]; then
+            python3 - "$version" <<'PY'
+          import pathlib, re, sys
+          version = sys.argv[1]
+          path = pathlib.Path("companion/build.zig.zon")
+          text = path.read_text(encoding="utf-8")
+          updated, count = re.subn(r'(\.version\s*=\s*")[^"]+(")', rf'\g<1>{version}\g<2>', text, count=1)
+          assert count == 1, "Failed to update .version in companion/build.zig.zon"
+          path.write_text(updated, encoding="utf-8")
+          PY
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add companion/build.zig.zon
+            git commit -m "release(companion): v${version}"
+            git push origin HEAD:main
+          fi
+
+          commit_sha=$(git rev-parse HEAD)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" "$commit_sha" -m "Zigmkay companion v${version}"
+          git push origin "refs/tags/${tag}"
+
+          echo "release_tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=${commit_sha}" >> "$GITHUB_OUTPUT"
+          echo "Created and pushed tag ${tag} at ${commit_sha}."
+
+  release:
+    needs: tag
+    permissions:
+      contents: write
+    uses: ./.github/workflows/companion-application-bundle.yml
+    with:
+      release_tag: ${{ needs.tag.outputs.release_tag }}
+      commit_sha: ${{ needs.tag.outputs.commit_sha }}

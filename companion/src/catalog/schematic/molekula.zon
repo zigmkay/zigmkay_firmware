@@ -1,0 +1,46 @@
+// Molekula. Drawn from the Molekula2 switch positions in
+// keyboards/Molekula2/production/positions.csv of
+// https://github.com/opendata-nuernberg/molekula at
+// 78ca099e9eb3d10618639eec493a3c0454c9b470 (MIT). Key indexes follow the
+// firmware `pin_mappings` of my_keyboards/molekula/main.zig; each switch was
+// matched through the PCB nets (switch column, diode row).
+.{
+    .{ .key_index = 0, .x = 1, .y = 0.5, .hand = .left },
+    .{ .key_index = 1, .x = 2, .y = 0.25, .hand = .left },
+    .{ .key_index = 2, .x = 3, .y = 0, .hand = .left },
+    .{ .key_index = 3, .x = 4, .y = 0.25, .hand = .left },
+    .{ .key_index = 4, .x = 5, .y = 0.5, .hand = .left },
+    .{ .key_index = 5, .x = 8.25, .y = 0.5, .hand = .right },
+    .{ .key_index = 6, .x = 9.25, .y = 0.25, .hand = .right },
+    .{ .key_index = 7, .x = 10.25, .y = 0, .hand = .right },
+    .{ .key_index = 8, .x = 11.25, .y = 0.25, .hand = .right },
+    .{ .key_index = 9, .x = 12.25, .y = 0.5, .hand = .right },
+    .{ .key_index = 10, .x = 0, .y = 1.5, .hand = .left, .home_row = true },
+    .{ .key_index = 11, .x = 1, .y = 1.5, .hand = .left, .home_row = true },
+    .{ .key_index = 12, .x = 2, .y = 1.25, .hand = .left, .home_row = true },
+    .{ .key_index = 13, .x = 3, .y = 1, .hand = .left, .home_row = true },
+    .{ .key_index = 14, .x = 4, .y = 1.25, .hand = .left, .home_row = true },
+    .{ .key_index = 15, .x = 5, .y = 1.5, .hand = .left, .home_row = true },
+    .{ .key_index = 16, .x = 8.25, .y = 1.5, .hand = .right, .home_row = true },
+    .{ .key_index = 17, .x = 9.25, .y = 1.25, .hand = .right, .home_row = true },
+    .{ .key_index = 18, .x = 10.25, .y = 1, .hand = .right, .home_row = true },
+    .{ .key_index = 19, .x = 11.25, .y = 1.25, .hand = .right, .home_row = true },
+    .{ .key_index = 20, .x = 12.25, .y = 1.5, .hand = .right, .home_row = true },
+    .{ .key_index = 21, .x = 13.25, .y = 1.5, .hand = .right, .home_row = true },
+    .{ .key_index = 22, .x = 1, .y = 2.5, .hand = .left },
+    .{ .key_index = 23, .x = 2, .y = 2.25, .hand = .left },
+    .{ .key_index = 24, .x = 3, .y = 2, .hand = .left },
+    .{ .key_index = 25, .x = 4, .y = 2.25, .hand = .left },
+    .{ .key_index = 26, .x = 5, .y = 2.5, .hand = .left },
+    .{ .key_index = 27, .x = 8.25, .y = 2.5, .hand = .right },
+    .{ .key_index = 28, .x = 9.25, .y = 2.25, .hand = .right },
+    .{ .key_index = 29, .x = 10.25, .y = 2, .hand = .right },
+    .{ .key_index = 30, .x = 11.25, .y = 2.25, .hand = .right },
+    .{ .key_index = 31, .x = 12.25, .y = 2.5, .hand = .right },
+    .{ .key_index = 32, .x = 3.79, .y = 3.75, .hand = .left, .group = .thumb },
+    .{ .key_index = 33, .x = 4.89, .y = 3.85, .rotation = 10, .hand = .left, .group = .thumb },
+    .{ .key_index = 34, .x = 5.95, .y = 4.13, .rotation = 20, .hand = .left, .group = .thumb },
+    .{ .key_index = 35, .x = 7.3, .y = 4.13, .rotation = -20, .hand = .right, .group = .thumb },
+    .{ .key_index = 36, .x = 8.36, .y = 3.85, .rotation = -10, .hand = .right, .group = .thumb },
+    .{ .key_index = 37, .x = 9.46, .y = 3.75, .hand = .right, .group = .thumb },
+}

@@ -8,7 +8,7 @@ pub const std_options = microzig.std_options(.{});
 const rp2xxx = microzig.hal;
 const time = rp2xxx.time;
 const gpio = rp2xxx.gpio;
-const rollercole_shared_keymap = @import("shared_keymap_28_1.zig");
+const rollercole_shared_keymap = @import("keymap");
 const zigmkay = @import("zigmkay");
 const zkeycodes = @import("zkeycodes");
 const core = zigmkay.core;
@@ -52,12 +52,15 @@ pub const pin_config = rp2xxx.pins.GlobalConfiguration{
     .GPIO8 = .{ .name = "GP8", .direction = .in, .pull = .up},
 };
 
-var encoder_actions = [_]core.EncoderAction{
-    .{ .tap = core.TapDef{ .media_key = .VolumeUp } },
-    .{ .tap = core.TapDef{ .media_key = .VolumeDown } },
-    .{ .tap = core.TapDef{ .key_press = .{ .tap_keycode = 10 } } },
-    .{ .tap = core.TapDef{ .key_press = .{ .tap_keycode = 11 } } },
-};
+var encoder_actions = if (@hasDecl(rollercole_shared_keymap, "encoder_actions"))
+    rollercole_shared_keymap.encoder_actions
+else
+    [_]core.EncoderAction{
+        .{ .tap = core.TapDef{ .media_key = .VolumeUp } },
+        .{ .tap = core.TapDef{ .media_key = .VolumeDown } },
+        .{ .tap = core.TapDef{ .key_press = .{ .tap_keycode = 10 } } },
+        .{ .tap = core.TapDef{ .key_press = .{ .tap_keycode = 11 } } },
+    };
 var encoder_pin_configs_left = [_]encoder_scanning.EncoderPinConfig{
     .{
     .pin_a = p.data1,
