@@ -37,6 +37,8 @@ jobs:
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
+          use-tool-cache: true
+          cache-key: tc1
           cache-size-limit: 4096
       - name: Verify Zig version
         run: test "$(zig version)" = 0.17.0

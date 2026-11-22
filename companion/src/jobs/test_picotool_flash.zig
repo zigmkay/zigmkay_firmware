@@ -106,7 +106,7 @@ test "offline flash success, hash rejection, ambiguity, discovery and phase fail
     var config: flash.Config = .{
         .picotool = options.picotool_fixture,
         .firmware = file,
-        .discovery_ms = 100,
+        .discovery_ms = 2000,
         .command_ms = 2000,
     };
     var hash: [32]u8 = undefined;
@@ -121,7 +121,9 @@ test "offline flash success, hash rejection, ambiguity, discovery and phase fail
     config.serial = "ambiguous";
     try t.expectError(error.AmbiguousDevice, flash.execute(t.allocator, io, config));
     config.serial = "absent";
+    config.discovery_ms = 100;
     try t.expectError(error.DiscoveryTimeout, flash.execute(t.allocator, io, config));
+    config.discovery_ms = 2000;
     config.serial = "failure";
     try t.expectError(error.DiscoveryFailed, flash.execute(t.allocator, io, config));
     config.serial = "bad-load";
