@@ -154,9 +154,43 @@ fn consumeInput(
         dvui.wantTextInput(data.borderRectScale().r.toNatural());
         for (dvui.events()) |*event| {
             if (event.handled) continue;
-            if (event.evt == .text and event.evt.text.action == .value and !event.evt.text.action.value.selected) {
-                owner.test_keys.setLastText(event.evt.text.action.value.txt);
-                event.handle(@src(), data);
+            switch (event.evt) {
+                .text => |text| {
+                    if (text.action == .value and !text.action.value.selected) {
+                        owner.test_keys.setLastText(text.action.value.txt);
+                        owner.test_keys.appendScratchpad(text.action.value.txt);
+                        event.handle(@src(), data);
+                    }
+                },
+                .key => |key| {
+                    if (key.action != .up) {
+                        if (key.matchBind("paste")) {
+                            const clip = dvui.clipboardText();
+                            if (clip.len > 0) {
+                                owner.test_keys.setLastText(clip);
+                                owner.test_keys.appendScratchpad(clip);
+                            }
+                            event.handle(@src(), data);
+                        } else if (!key.mod.control() and !key.mod.command()) {
+                            switch (key.code) {
+                                .backspace => {
+                                    owner.test_keys.backspaceScratchpad();
+                                    event.handle(@src(), data);
+                                },
+                                .enter => {
+                                    owner.test_keys.appendScratchpad("\n");
+                                    event.handle(@src(), data);
+                                },
+                                .tab => {
+                                    owner.test_keys.appendScratchpad("    ");
+                                    event.handle(@src(), data);
+                                },
+                                else => {},
+                            }
+                        }
+                    }
+                },
+                else => {},
             }
         }
         return effect;
@@ -289,16 +323,16 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     var input_effect = try consumeInput(owner, view, root.data(), input, &pending);
     if (focus_effect.runner != .none or focus_effect.reset_text) input_effect = focus_effect;
 
-    // 1. Unified Editor-style Top Bar (56px height)
-    const topbar_h: f32 = 54;
+    // 1. Unified Editor-style Top Bar (64px height matching Editor toolbar scale)
+    const topbar_h: f32 = 64;
     const leave = try drawTopBar(owner, view, theme, .{ .x = 0, .y = 0, .w = size.w, .h = topbar_h }, input, &pending);
 
-    // 2. Centered Workspace (clamped for calm visual proportions on ultrawide displays)
-    const max_content_w: f32 = 1140;
-    const pad_x: f32 = @max(16.0, (size.w - max_content_w) * 0.5);
+    // 2. Centered Workspace (Editor-proportioned width for readable fonts & full keyboard)
+    const max_content_w: f32 = 1440;
+    const pad_x: f32 = @max(18.0, (size.w - max_content_w) * 0.5);
     const content_w = @max(280.0, size.w - pad_x * 2);
-    const work_top = topbar_h + 12;
-    const work_h = @max(200.0, size.h - work_top - 14);
+    const work_top = topbar_h + 14;
+    const work_h = @max(200.0, size.h - work_top - 16);
 
     if (owner.config.mode == .test_keys) {
         try drawTestKeysWorkspace(owner, view, theme, .{ .x = pad_x, .y = work_top, .w = content_w, .h = work_h }, input, &pending);
@@ -348,48 +382,49 @@ fn drawTopBar(
     defer bar.deinit();
 
     const arena = dvui.currentWindow().arena();
-    const y: f32 = (bounds.h - 32) * 0.5;
-    var lx: f32 = 16;
+    const ctrl_h: f32 = 38;
+    const y: f32 = (bounds.h - ctrl_h) * 0.5;
+    var lx: f32 = 18;
 
     // ← Back to editor
-    const leave = ui.iconButton(theme, ui.control_icons.back, "Back to editor", "practice.back", .{ .x = lx, .y = y, .w = 144, .h = 32 }, false);
-    lx += 154;
+    const leave = ui.iconButton(theme, ui.control_icons.back, "Back to editor", "practice.back", .{ .x = lx, .y = y, .w = 152, .h = ctrl_h }, false);
+    lx += 164;
 
-    // Board › Profile breadcrumb (shown when viewport >= 980px)
-    if (bounds.w >= 980) {
+    // Board › Profile breadcrumb (shown when viewport >= 1120px)
+    if (bounds.w >= 1120) {
         if (input.frame) |frame| {
             const crumb = if (frame.board_name.len > 0)
                 try std.fmt.allocPrint(arena, "{s} › {s}", .{ frame.board_name, frame.profile })
             else
                 frame.profile;
-            const cw: f32 = @min(210.0, ui.editorFont(crumb, 12.5).textSize(crumb).w + 10);
-            presentation.label(crumb, .{ .x = lx, .y = y, .w = cw, .h = 32 }, 12.5, theme.muted, null);
-            lx += cw + 12;
+            const cw: f32 = @min(220.0, ui.editorFont(crumb, 14).textSize(crumb).w + 10);
+            presentation.label(crumb, .{ .x = lx, .y = y, .w = cw, .h = ctrl_h }, 14, theme.muted, null);
+            lx += cw + 14;
         }
     }
 
-    // Tutor | Test keys segmented control (editor style)
-    const seg_w: f32 = 168;
+    // Test layout | Tutor segmented control (Test layout first, matching "Try it out" default)
+    const seg_w: f32 = 194;
     const seg_track = dvui.box(@src(), .{}, .{
-        .rect = .{ .x = lx, .y = y, .w = seg_w, .h = 32 },
+        .rect = .{ .x = lx, .y = y, .w = seg_w, .h = ctrl_h },
         .background = true,
         .color_fill = .{ .color = theme.bg },
         .color_border = .{ .color = theme.border },
         .border = .all(1),
-        .corners = .all(8),
+        .corners = .all(9),
         .padding = .{},
         .margin = .{},
     });
     seg_track.deinit();
 
     const seg_items = [_]struct { mode: control.Mode, label: []const u8, tag: []const u8, w: f32 }{
-        .{ .mode = .tutor, .label = "Tutor", .tag = "practice.mode.tutor", .w = 70 },
-        .{ .mode = .test_keys, .label = "Test keys", .tag = "practice.mode.test_keys", .w = 90 },
+        .{ .mode = .test_keys, .label = "Test layout", .tag = "practice.mode.test_keys", .w = 108 },
+        .{ .mode = .tutor, .label = "Tutor", .tag = "practice.mode.tutor", .w = 78 },
     };
     var sx = lx + 3;
     for (seg_items, 0..) |item, i| {
         const active = owner.config.mode == item.mode;
-        var opts = ui.options(theme, .{ .x = sx, .y = y + 3, .w = item.w, .h = 26 }, 12.5);
+        var opts = ui.options(theme, .{ .x = sx, .y = y + 3, .w = item.w, .h = ctrl_h - 6 }, 14.5);
         opts.id_extra = 0x9000 + i;
         opts.tag = item.tag;
         opts.corners = .all(6);
@@ -402,23 +437,26 @@ fn drawTopBar(
         }
         sx += item.w + 2;
     }
-    lx += seg_w + 10;
+    lx += seg_w + 12;
 
-    // Stage pill (Tutor mode only)
+    // Stage pill (Tutor mode only) — reserve exact width for right-hand controls so items never overlap.
+    const right_fixed_w: f32 = if (owner.config.mode == .tutor) 18 + 38 + 130 + 104 + 12 else 18 + 38 + 104 + 12;
     if (owner.config.mode == .tutor) {
         const st = owner.config.stage;
         const stage_lbl = if (st == .all_letters or st == .home_row)
             try std.fmt.allocPrint(arena, "{s} ({d}/{d})", .{ st.title(), owner.learning.unlocked_count, owner.learning.unlock_len })
         else
             st.title();
-        const pill_w = @min(@as(f32, 272), @max(@as(f32, 164), ui.editorFont(stage_lbl, 12.5).textSize(stage_lbl).w + 52));
-        if (lx + pill_w < bounds.w - 280) {
-            var sopts = ui.options(theme, .{ .x = lx, .y = y, .w = pill_w, .h = 32 }, 12.5);
+        const max_pill_w = @max(@as(f32, 0), bounds.w - right_fixed_w - lx - 8);
+        const desired_w = @min(@as(f32, 310), @max(@as(f32, 180), ui.editorFont(stage_lbl, 14.5).textSize(stage_lbl).w + 54));
+        const pill_w = @min(desired_w, max_pill_w);
+        if (pill_w >= 130) {
+            var sopts = ui.options(theme, .{ .x = lx, .y = y, .w = pill_w, .h = ctrl_h }, 14.5);
             sopts.tag = "practice.stage_pill";
             sopts.background = true;
             sopts.border = .all(1);
             sopts.corners = .all(8);
-            sopts.padding = .{ .x = 10, .w = 24 };
+            sopts.padding = .{ .x = 12, .w = 28 };
             sopts.color_fill = .{ .color = ui.mix(theme.panel, theme.accent, 0.16) };
             sopts.color_border = .{ .color = ui.mix(theme.panel, theme.accent, 0.5) };
             sopts.color_text = .{ .color = theme.accent };
@@ -428,19 +466,20 @@ fn drawTopBar(
             }
             dvui.icon(@src(), "stage_chevron", ui.control_icons.expand, .{}, .{
                 .color_text = .{ .color = theme.accent },
-                .rect = .{ .x = lx + pill_w - 20, .y = y + 9, .w = 14, .h = 14 },
+                .rect = .{ .x = lx + pill_w - 22, .y = y + (ctrl_h - 15) * 0.5, .w = 15, .h = 15 },
                 .padding = .{},
                 .margin = .{},
             });
+            lx += pill_w + 10;
         }
     }
 
     // Right group (right-to-left placement)
-    var rx: f32 = bounds.w - 16;
+    var rx: f32 = bounds.w - 18;
 
     // Settings gear button
-    rx -= 34;
-    if (ui.iconButton(theme, ui.control_icons.settings, "", "practice.settings_btn", .{ .x = rx, .y = y, .w = 34, .h = 32 }, false)) {
+    rx -= 38;
+    if (ui.iconButton(theme, ui.control_icons.settings, "", "practice.settings_btn", .{ .x = rx, .y = y, .w = 38, .h = ctrl_h }, false)) {
         view.settings_open = !view.settings_open;
         view.confirm_reset = false;
         if (view.settings_open) view.sheet = .none;
@@ -448,18 +487,18 @@ fn drawTopBar(
 
     // Guidance selector pill (Tutor mode)
     if (owner.config.mode == .tutor) {
-        rx -= 118;
+        rx -= 130;
         const g_lbl: []const u8 = switch (owner.config.guidance) {
             .guided => "Guided",
             .on_hesitation => "Hesitation",
             .free => "Free",
         };
-        var gopts = ui.options(theme, .{ .x = rx, .y = y, .w = 110, .h = 32 }, 13);
+        var gopts = ui.options(theme, .{ .x = rx, .y = y, .w = 122, .h = ctrl_h }, 14.5);
         gopts.tag = "practice.assistance";
         gopts.background = true;
         gopts.border = .all(1);
         gopts.corners = .all(8);
-        gopts.padding = .{ .x = 10, .w = 24 };
+        gopts.padding = .{ .x = 12, .w = 26 };
         gopts.color_fill = .{ .color = theme.control };
         gopts.color_border = .{ .color = theme.border };
         gopts.color_text = .{ .color = theme.text };
@@ -473,40 +512,40 @@ fn drawTopBar(
         }
         dvui.icon(@src(), "guidance_chevron", ui.control_icons.expand, .{}, .{
             .color_text = .{ .color = theme.muted },
-            .rect = .{ .x = rx + 110 - 20, .y = y + 9, .w = 14, .h = 14 },
+            .rect = .{ .x = rx + 122 - 22, .y = y + (ctrl_h - 15) * 0.5, .w = 15, .h = 15 },
             .padding = .{},
             .margin = .{},
         });
     }
 
     // Progress sheet button
-    rx -= 94;
-    if (ui.button(theme, "Progress", "practice.progress_btn", .{ .x = rx, .y = y, .w = 86, .h = 32 })) {
+    rx -= 104;
+    if (ui.button(theme, "Progress", "practice.progress_btn", .{ .x = rx, .y = y, .w = 96, .h = ctrl_h })) {
         view.sheet = if (view.sheet == .progress) .none else .progress;
         view.settings_open = false;
     }
 
-    // Live / Draft status pill
-    if (bounds.w >= 760) {
+    // Live / Draft status pill (only shown when guaranteed not to collide with left controls)
+    const status_pill_w: f32 = 126;
+    if (rx - status_pill_w - 14 >= lx) {
         const is_live = input.frame != null and input.frame.?.source == .live and !input.frame.?.stale;
-        const pill_w: f32 = 112;
-        rx -= pill_w + 8;
+        rx -= status_pill_w + 10;
         if (is_live) {
-            ui.runningBadge(theme, .{ .x = rx, .y = y + 4, .w = pill_w, .h = 24 }, 0x9100);
+            ui.runningBadge(theme, .{ .x = rx, .y = y + 6, .w = status_pill_w, .h = 26 }, 0x9100);
         } else {
             const pill_text = if (owner.config.source == .draft) "Unflashed draft" else "Draft preview";
             const pill = dvui.box(@src(), .{}, .{
-                .rect = .{ .x = rx, .y = y + 4, .w = pill_w, .h = 24 },
+                .rect = .{ .x = rx, .y = y + 6, .w = status_pill_w, .h = 26 },
                 .background = true,
                 .color_fill = .{ .color = theme.control },
                 .color_border = .{ .color = theme.border },
                 .border = .all(1),
-                .corners = .all(12),
+                .corners = .all(13),
                 .padding = .{},
                 .margin = .{},
             });
             pill.deinit();
-            presentation.caption(pill_text, .{ .x = rx, .y = y + 4, .w = pill_w, .h = 24 }, 11, theme.muted, null);
+            presentation.caption(pill_text, .{ .x = rx, .y = y + 6, .w = status_pill_w, .h = 26 }, 13, theme.muted, null);
         }
     }
 
@@ -525,7 +564,7 @@ fn drawTutorWorkspace(
     const gap: f32 = 10;
 
     // 1. Key-Confidence Strip (top)
-    const conf_h: f32 = 68;
+    const conf_h: f32 = 84;
     try presentation.confidenceStrip(owner, theme, .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = conf_h });
 
     // Resolve active hint once for both typing-card footer and keyboard overlay
@@ -546,12 +585,12 @@ fn drawTutorWorkspace(
 
     // 2. Calm Typing Card (middle) + Physical Tap/Hold Keyboard (bottom)
     const rem_y = bounds.y + conf_h + gap;
-    const rem_h = @max(160.0, bounds.h - conf_h - gap);
+    const rem_h = @max(180.0, bounds.h - conf_h - gap);
     const show_kb = owner.config.guidance != .free;
     const card_h: f32 = if (show_kb)
-        std.math.clamp(rem_h * 0.36, 172.0, 236.0)
+        std.math.clamp(rem_h * 0.34, 196.0, 260.0)
     else
-        @min(rem_h, 340.0);
+        @min(rem_h, 360.0);
 
     // Detect optional subtle opposite-hand Shift nudge in Stage 3 on Live-HID.
     if (owner.config.stage == .shift and owner.profile_bound) {
@@ -599,7 +638,8 @@ fn drawTestKeysWorkspace(
     input: Input,
     pending: *?control.Intent,
 ) !void {
-    const bar_h: f32 = 48;
+    const gap: f32 = 12;
+    const bar_h: f32 = 54;
     const layer = if (input.frame) |f| f.layer else owner.test_keys.highest_layer;
     const layer_name = if (input.frame) |f| f.layer_name else "";
     const mods = if (input.frame) |f| f.modifiers.toByte() else owner.test_keys.modifiers;
@@ -614,8 +654,17 @@ fn drawTestKeysWorkspace(
         pending,
     );
 
-    const kb_y = bounds.y + bar_h + 12;
-    const kb_h = @max(160.0, bounds.h - bar_h - 12);
+    const rem_y = bounds.y + bar_h + gap;
+    const rem_h = @max(220.0, bounds.h - bar_h - gap);
+    const scratch_h: f32 = std.math.clamp(rem_h * 0.24, 124.0, 168.0);
+    try presentation.testLayoutScratchpad(
+        owner,
+        theme,
+        .{ .x = bounds.x, .y = rem_y, .w = bounds.w, .h = scratch_h },
+    );
+
+    const kb_y = rem_y + scratch_h + gap;
+    const kb_h = @max(160.0, bounds.y + bounds.h - kb_y);
     try drawKeyboardArea(owner, view, theme, .{ .x = bounds.x, .y = kb_y, .w = bounds.w, .h = kb_h }, 0, null, input);
 }
 

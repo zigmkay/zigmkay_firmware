@@ -44,8 +44,6 @@ pub const Result = union(enum) {
 /// Height of the strip at the bottom of the panel that explains the primary
 /// key and holds its clipboard actions; see `key_editor_ui`.
 pub const bar_height: f32 = 76;
-/// Share of a key's height taken by its tap half.
-const tap_share: f32 = 0.62;
 
 pub fn draw(view: *View, model: *const desktop.model.Model, frame: Frame, theme: ui.Theme) !?Result {
     const actual = try model.id();
@@ -270,26 +268,26 @@ fn drawKey(
     const corner = @max(4, rect.w * 0.12);
     const thickness: f32 = if (selected) 2.5 else 1.5;
     const id = item.placed.id;
-    const split = @round(rect.h * tap_share);
-    const halves = [2]dvui.Rect{
-        .{ .x = rect.x, .y = rect.y, .w = rect.w, .h = split },
-        .{ .x = rect.x, .y = rect.y + split, .w = rect.w, .h = rect.h - split },
-    };
     // A turned key draws the same parts turned around its centre and takes
     // pointer events only inside its turned halves.
     const turn: ui.Turn = .{ .radians = item.placed.rotation, .pivot = rect.center() };
-    keyPart(rect, turn, id, 0, .round(corner), fill, border, thickness);
-    // The hold half sits on a slightly darker band below a hairline.
     const open = if (primary) view.open else null;
     const band_fill = if (open == .hold)
         ui.mix(fill, layer_color, 0.4)
     else
         ui.mix(fill, theme.bg, if (transparent) 0.25 else 0.45);
-    const inner_corner = @max(0, corner - thickness);
-    keyPart(.{ .x = rect.x + thickness, .y = rect.y + split, .w = rect.w - thickness * 2, .h = rect.h - split - thickness }, turn, id, 1, bottomCorners(inner_corner), band_fill, null, 0);
-    if (open == .tap)
-        keyPart(.{ .x = rect.x + thickness, .y = rect.y + thickness, .w = rect.w - thickness * 2, .h = split - thickness }, turn, id, 2, topCorners(inner_corner), ui.mix(fill, layer_color, 0.4), null, 0);
-    keyPart(.{ .x = rect.x + thickness, .y = rect.y + split, .w = rect.w - thickness * 2, .h = 1 }, turn, id, 3, .square, ui.mix(fill, border, if (selected) 0.6 else 0.25), null, 0);
+    const split = ui.drawKeycapFace(rect, turn, id, .{
+        .fill = fill,
+        .border = border,
+        .band_fill = band_fill,
+        .divider = ui.mix(fill, border, if (selected) 0.6 else 0.25),
+        .thickness = thickness,
+        .tap_highlight = if (open == .tap) ui.mix(fill, layer_color, 0.4) else null,
+    });
+    const halves = [2]dvui.Rect{
+        .{ .x = rect.x, .y = rect.y, .w = rect.w, .h = split },
+        .{ .x = rect.x, .y = rect.y + split, .w = rect.w, .h = rect.h - split },
+    };
     const arena = dvui.currentWindow().arena();
     var anchor: ?dvui.Rect.Physical = null;
     inline for (.{ Part.tap, Part.hold }, 0..) |part, half| {
@@ -350,59 +348,29 @@ fn drawKey(
     const shown = legends(resolvedAction(doc, model.layer, index), text);
     const inset = @max(3, rect.w * 0.08);
     const scale = @min(1.2, item.scale);
-    const tap_bounds: dvui.Rect = .{ .x = rect.x + inset, .y = rect.y + inset * 0.7, .w = @max(1, rect.w - inset * 2), .h = @max(1, split - inset * 1.2) };
     const hold_bounds: dvui.Rect = .{ .x = rect.x + inset, .y = rect.y + split + 2, .w = @max(1, rect.w - inset * 2), .h = @max(1, rect.h - split - 5) };
-    ui.caption(shown.tap, tap_bounds, .{
-        .color = if (transparent) theme.muted else theme.text,
-        .secondary = theme.muted,
-        .size = 24 * scale,
-        .id_extra = id,
-        .layer_colors = !transparent,
-        .layers = theme.layers,
-        .turn = turn,
-    });
+    ui.drawKeycapLegends(
+        theme,
+        rect,
+        turn,
+        id,
+        item.scale,
+        split,
+        shown.tap,
+        if (shown.autofire != null) "" else shown.hold,
+        if (transparent) theme.muted else theme.text,
+        theme.muted,
+        !transparent,
+        0,
+    );
     if (shown.autofire) |interval| {
         drawAutofire(theme, hold_bounds, interval, id, scale, turn);
-    } else if (shown.hold.len != 0) {
-        ui.caption(shown.hold, hold_bounds, .{
-            .color = theme.muted,
-            .secondary = theme.muted,
-            .size = 16 * scale,
-            .id_extra = @as(usize, id) + 0x20000,
-            .layer_colors = !transparent,
-            .layers = theme.layers,
-            .turn = turn,
-        });
     }
 }
 
-const CornerRect = @typeInfo(@FieldType(dvui.Options, "corners")).optional.child;
-
-/// One part of a keycap: a DVUI box on an upright key, a turned path on a
-/// turned one. `part` tells the parts of one key apart.
-fn keyPart(r: dvui.Rect, turn: ui.Turn, id: u16, part: usize, corners: CornerRect, fill: dvui.Color, border: ?dvui.Color, thickness: f32) void {
-    if (turn.radians != 0) return ui.turnedBox(r, turn, corners, fill, border, thickness);
-    const box = dvui.box(@src(), .{}, .{
-        .id_extra = @as(usize, id) * 8 + part,
-        .rect = r,
-        .background = true,
-        .color_fill = .{ .color = fill },
-        .color_border = if (border) |color| .{ .color = color } else null,
-        .border = if (border != null) .all(thickness) else .{},
-        .corners = corners,
-        .padding = .{},
-        .margin = .{},
-    });
-    box.deinit();
-}
-
-fn topCorners(radius: f32) CornerRect {
-    return .{ .tl = .round(radius), .tr = .round(radius), .br = .square, .bl = .square };
-}
-
-fn bottomCorners(radius: f32) CornerRect {
-    return .{ .tl = .square, .tr = .square, .br = .round(radius), .bl = .round(radius) };
-}
+const keyPart = ui.keycapPart;
+const topCorners = ui.topCorners;
+const bottomCorners = ui.bottomCorners;
 
 /// The lower half of an autofire key: the repeat icon and the interval.
 fn drawAutofire(theme: ui.Theme, bounds: dvui.Rect, interval: u16, id: u16, scale: f32, turn: ui.Turn) void {

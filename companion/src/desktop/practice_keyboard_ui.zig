@@ -11,8 +11,6 @@ const practice = desktop.practice;
 const lp = desktop.practice_layout_profile;
 const control = desktop.practice_controller;
 
-const tap_share: f32 = 0.62;
-
 pub const Params = struct {
     mode: control.Mode = .tutor,
     profile: ?*const lp.LayoutProfile = null,
@@ -96,9 +94,9 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, params: Params) !void {
     const pal = Palette.fromTheme(theme);
 
     // Reserve compact footer legend strip at bottom of keyboard card.
-    const legend_h: f32 = 26;
-    const pad_x: f32 = 16;
-    const pad_top: f32 = 12;
+    const legend_h: f32 = 30;
+    const pad_x: f32 = 20;
+    const pad_top: f32 = 14;
     const area: desktop.physical_view.Rect = .{
         .x = pad_x,
         .y = pad_top,
@@ -168,6 +166,7 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, params: Params) !void {
     const display_layer = @min(params.layer, params.labels.layer_count - 1);
     const layer_color = ui.layerColor(theme, display_layer);
 
+    const space_key: ?usize = if (params.profile) |p| p.space_key else null;
     for (plan) |item| {
         const idx: usize = item.placed.key_index;
         const is_combo = if (combo_pair) |cp| (idx == cp[0] or idx == cp[1]) else false;
@@ -179,7 +178,8 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, params: Params) !void {
         } else false;
         const is_anchor_ring = (anchor_key != null and anchor_key.? == idx);
         const is_error_flash = (is_tutor and params.error_flash_key != null and params.error_flash_key.? == idx);
-        const locked = is_tutor and params.dim_locked and isKeyLocked(params.labels, idx, params.unlocked_mask);
+        const is_active_key = item.target or item.hold or is_combo or item.pressed or is_anchor_ring;
+        const locked = is_tutor and params.dim_locked and !is_active_key and isKeyLocked(params.labels, idx, params.unlocked_mask, space_key);
         const finger: lp.Finger = if (params.profile) |p| p.fingerFor(idx) else .unknown;
         const is_index_home = if (params.profile) |p|
             idx < p.key_count and p.keys[idx].primary_home_anchor and (finger == .left_index or finger == .right_index)
@@ -248,16 +248,25 @@ const KeyState = struct {
     is_error_flash: bool,
 };
 
-fn isKeyLocked(labels: *const desktop.label_cache.LabelCache, key_index: usize, unlocked_mask: u32) bool {
+/// During Stage 1 (Home row) and Stage 2 (All letters), only unlocked `a..z`
+/// letters and the thumb Space key are active; punctuation and other non-letter
+/// keys stay dimmed so the board clearly reflects the active unlocked set.
+fn isKeyLocked(labels: *const desktop.label_cache.LabelCache, key_index: usize, unlocked_mask: u32, space_key: ?usize) bool {
     if (unlocked_mask == 0 or unlocked_mask == 0x03ff_ffff) return false;
+    if (space_key != null and space_key.? == key_index) return false;
     const entry = labels.lookup(0, key_index, .{});
-    const text = entry.label orelse return false;
-    if (text.len != 1) return false;
-    const ch = text[0];
-    if (ch >= 'a' and ch <= 'z') {
-        return (unlocked_mask & (@as(u32, 1) << @intCast(ch - 'a'))) == 0;
+    if (entry.hid_code) |code| {
+        if (code == 44) return false; // Space
     }
-    return false;
+    const text = entry.label orelse return true;
+    if (text.len == 1) {
+        const ch = std.ascii.toLower(text[0]);
+        if (ch == ' ') return false;
+        if (ch >= 'a' and ch <= 'z') {
+            return (unlocked_mask & (@as(u32, 1) << @intCast(ch - 'a'))) == 0;
+        }
+    }
+    return true;
 }
 
 fn splitCaption(caption: []const u8) struct { tap: []const u8, hold: []const u8 } {
@@ -279,25 +288,25 @@ fn drawKeycap(
 
     const id = item.placed.id;
     const turn: ui.Turn = .{ .radians = item.placed.rotation, .pivot = rect.center() };
-    const corner = @max(4.0, rect.w * 0.12);
-    const split = @round(rect.h * tap_share);
 
     const is_transparent = if (item.content.label) |lbl| std.mem.eql(u8, lbl, "---") else false;
     const is_tap = item.target and !ks.is_combo;
     const is_hold = item.hold;
 
-    // Derive face fill, border, thickness, and text colors exclusively from ui.Theme & layer_palette.
+    // Match the shared Companion Editor keycap styling (`keyboard_ui.zig`) 1:1.
     var fill: dvui.Color = if (ks.locked or is_transparent)
-        ui.mix(theme.panel, theme.bg, 0.35)
+        theme.panel
     else
         theme.keycap;
     var border: dvui.Color = if (ks.locked)
         ui.mix(theme.panel, theme.border, 0.55)
     else
-        ui.mix(theme.keycap, layer_color, if (is_transparent) 0.25 else 0.52);
-    var thickness: f32 = 1.25;
-    var tap_text_color: dvui.Color = if (ks.locked or is_transparent)
-        ui.mix(theme.panel, theme.muted, 0.6)
+        ui.mix(theme.keycap, layer_color, if (is_transparent) 0.3 else 0.65);
+    var thickness: f32 = 1.5;
+    var tap_text_color: dvui.Color = if (ks.locked)
+        ui.mix(theme.panel, theme.muted, 0.55)
+    else if (is_transparent)
+        theme.muted
     else
         theme.text;
     var hold_text_color: dvui.Color = if (ks.locked)
@@ -309,13 +318,13 @@ fn drawKeycap(
         const fc = if (ks.finger != .unknown) fingerColor(theme, ks.finger) else theme.accent;
         fill = ui.mix(theme.keycap, fc, 0.14);
         border = fc;
-        thickness = 1.8;
+        thickness = 2.0;
     }
 
     if (ks.is_combo) {
         fill = ui.mix(theme.keycap, pal.combo, 0.26);
         border = pal.combo;
-        thickness = 2.4;
+        thickness = 2.5;
         tap_text_color = theme.text;
         hold_text_color = pal.combo;
     } else if (is_tap) {
@@ -333,8 +342,8 @@ fn drawKeycap(
     }
 
     if (item.pressed) {
-        fill = ui.mix(fill, theme.accent, 0.38);
-        border = theme.accent;
+        fill = ui.mix(theme.keycap, layer_color, 0.42);
+        border = layer_color;
         thickness = 2.5;
         tap_text_color = theme.text;
     }
@@ -346,36 +355,24 @@ fn drawKeycap(
         tap_text_color = theme.text;
     }
 
-    // 1. Keycap outer body
-    keyPart(rect, turn, id, 0, .round(corner), fill, border, thickness);
+    // 1. Shared Editor Tap/Hold keycap shell (`ui.drawKeycapFace`)
+    const band_fill = ui.mix(fill, theme.bg, if (ks.locked or is_transparent) 0.25 else 0.45);
+    const divider = ui.mix(fill, border, if (is_tap or is_hold or ks.is_combo or item.pressed) 0.6 else 0.25);
+    const split = ui.drawKeycapFace(rect, turn, id, .{
+        .fill = fill,
+        .border = border,
+        .band_fill = band_fill,
+        .divider = divider,
+        .thickness = thickness,
+    });
 
-    // 2. Lower hold band + hairline divider (exact Companion Editor Tap/Hold anatomy)
-    const inner_corner = @max(0.0, corner - thickness);
-    const band_fill = ui.mix(fill, theme.bg, if (ks.locked or is_transparent) 0.22 else 0.42);
-    const band_rect: dvui.Rect = .{
-        .x = rect.x + thickness,
-        .y = rect.y + split,
-        .w = @max(0, rect.w - thickness * 2),
-        .h = @max(0, rect.h - split - thickness),
-    };
-    keyPart(band_rect, turn, id, 1, bottomCorners(inner_corner), band_fill, null, 0);
-    keyPart(
-        .{ .x = rect.x + thickness, .y = rect.y + split, .w = @max(0, rect.w - thickness * 2), .h = 1 },
-        turn,
-        id,
-        2,
-        .square,
-        ui.mix(fill, border, if (is_tap or is_hold or ks.is_combo) 0.55 else 0.24),
-        null,
-        0,
-    );
-
-    // 3. Finger-zone accent strip at very bottom of unlocked keycaps in Tutor mode
-    if (ks.show_finger_zones and !ks.locked and ks.finger != .unknown) {
+    // 2. Finger-zone accent strip at very bottom of unlocked keycaps in Tutor mode
+    const has_finger_strip = ks.show_finger_zones and !ks.locked and ks.finger != .unknown;
+    if (has_finger_strip) {
         const fc = fingerColor(theme, ks.finger);
         const strip_w = @max(6.0, rect.w * 0.48);
         const strip_h: f32 = 2.5;
-        keyPart(
+        ui.keycapPart(
             .{
                 .x = rect.x + (rect.w - strip_w) / 2,
                 .y = rect.y + rect.h - thickness - strip_h - 1.5,
@@ -384,7 +381,7 @@ fn drawKeycap(
             },
             turn,
             id,
-            3,
+            4,
             .round(1.25),
             ui.mix(band_fill, fc, if (is_tap or is_hold or ks.is_anchor_ring) 0.95 else 0.65),
             null,
@@ -392,10 +389,10 @@ fn drawKeycap(
         );
     }
 
-    // 4. Tactile home-row bump on left/right index anchors
-    if (ks.is_index_home) {
+    // 3. Tactile home-row bump on left/right index anchors (Tutor mode only)
+    if (ks.is_tutor and ks.is_index_home and !ks.locked) {
         const bump_w = @max(6.0, rect.w * 0.28);
-        keyPart(
+        ui.keycapPart(
             .{
                 .x = rect.x + (rect.w - bump_w) / 2,
                 .y = rect.y + split - 4.5,
@@ -404,7 +401,7 @@ fn drawKeycap(
             },
             turn,
             id,
-            4,
+            5,
             .round(1.0),
             ui.mix(fill, theme.muted, 0.7),
             null,
@@ -412,26 +409,9 @@ fn drawKeycap(
         );
     }
 
-    // 5. Legends: upper tap legend + lower hold/action badge
+    // 4. Shared Editor legends (`ui.drawKeycapLegends` at exact 24*scale / 16*scale)
     const raw_caption = if (is_transparent) "" else item.content.caption orelse item.content.label orelse "";
     const parts = splitCaption(raw_caption);
-
-    const pad_in = @max(2.0, rect.w * 0.08);
-    const tap_size = @max(9.0, @min(16.0, rect.h * 0.28));
-    const hold_size = @max(7.5, @min(10.5, rect.h * 0.17));
-
-    if (parts.tap.len > 0) {
-        var style = theme.captionStyle(tap_size, @as(usize, id) * 8 + 1);
-        style.color = tap_text_color;
-        style.secondary = hold_text_color;
-        style.turn = turn;
-        ui.caption(parts.tap, .{
-            .x = rect.x + pad_in,
-            .y = rect.y + 2,
-            .w = @max(0, rect.w - pad_in * 2),
-            .h = @max(0, split - 4),
-        }, style);
-    }
 
     const hold_label: []const u8 = if (ks.is_combo)
         "COMBO"
@@ -442,19 +422,21 @@ fn drawKeycap(
     else
         parts.hold;
 
-    if (hold_label.len > 0) {
-        var hstyle = theme.captionStyle(hold_size, @as(usize, id) * 8 + 2);
-        hstyle.color = hold_text_color;
-        hstyle.secondary = hold_text_color;
-        hstyle.turn = turn;
-        const bottom_reserve: f32 = if (ks.show_finger_zones and !ks.locked and ks.finger != .unknown) 4.0 else 1.0;
-        ui.caption(hold_label, .{
-            .x = rect.x + pad_in,
-            .y = rect.y + split + 1,
-            .w = @max(0, rect.w - pad_in * 2),
-            .h = @max(0, rect.h - split - thickness - bottom_reserve),
-        }, hstyle);
-    }
+    const show_layer_colors = !is_transparent and !ks.locked and !item.pressed;
+    ui.drawKeycapLegends(
+        theme,
+        rect,
+        turn,
+        id,
+        item.scale,
+        split,
+        parts.tap,
+        hold_label,
+        tap_text_color,
+        hold_text_color,
+        show_layer_colors,
+        if (has_finger_strip) 4.0 else 0.0,
+    );
 }
 
 fn drawMotionChevron(anchor: dvui.Rect, target: dvui.Rect, tint: dvui.Color) void {
@@ -565,7 +547,7 @@ fn drawFooterLegend(
     params: Params,
 ) !void {
     const arena = dvui.currentWindow().arena();
-    const y = bounds.h - 22;
+    const y = bounds.h - 26;
 
     // Left: source + layer pill (avoid duplicating "Layer" when layer_name already starts with it)
     const layer_tag = if (display_layer != params.hold_source_layer)
@@ -584,39 +566,39 @@ fn drawFooterLegend(
 
     var muted = theme;
     muted.text = theme.muted;
-    var left_opts = ui.options(muted, .{ .x = 14, .y = y, .w = @max(0, bounds.w * 0.44), .h = 18 }, 11);
+    var left_opts = ui.options(muted, .{ .x = 16, .y = y, .w = @max(0, bounds.w * 0.44), .h = 20 }, 13);
     left_opts.padding = .{};
     left_opts.tag = "practice.keyboard.source";
     dvui.labelNoFmt(@src(), left_text, .{ .align_y = 0.5, .ellipsize = true }, left_opts);
 
     if (params.mode == .test_keys) {
-        // Clean Test keys indicator on right
-        var right_opts = ui.options(muted, .{ .x = bounds.w - 220, .y = y, .w = 206, .h = 18 }, 11);
+        // Clean Test layout indicator on right
+        var right_opts = ui.options(muted, .{ .x = bounds.w - 260, .y = y, .w = 244, .h = 20 }, 13);
         right_opts.padding = .{};
         dvui.labelNoFmt(@src(), "Hardware & layout check · unscored", .{ .align_x = 1, .align_y = 0.5 }, right_opts);
         return;
     }
 
     // Right: finger zone legend (wide viewports) + Hold / Tap swatches
-    var cursor_x = bounds.w - 14;
+    var cursor_x = bounds.w - 16;
 
     const swatches = [_]struct { label: []const u8, col: dvui.Color, w: f32 }{
-        .{ .label = "Tap", .col = pal.tap, .w = 40 },
-        .{ .label = "Hold", .col = pal.hold, .w = 46 },
+        .{ .label = "Tap", .col = pal.tap, .w = 48 },
+        .{ .label = "Hold", .col = pal.hold, .w = 54 },
     };
     for (swatches, 0..) |sw, i| {
         cursor_x -= sw.w;
         drawLegendItem(theme, cursor_x, y, sw.col, sw.label, 0x3000 + i);
     }
 
-    if (bounds.w >= 640 and params.show_finger_zones and params.profile != null and params.profile.?.fidelity == .schematic) {
-        cursor_x -= 12;
+    if (bounds.w >= 720 and params.show_finger_zones and params.profile != null and params.profile.?.fidelity == .schematic) {
+        cursor_x -= 14;
         const fingers = [_]struct { label: []const u8, f: lp.Finger, w: f32 }{
-            .{ .label = "Thumb", .f = .left_thumb, .w = 56 },
-            .{ .label = "Index", .f = .left_index, .w = 50 },
-            .{ .label = "Middle", .f = .left_middle, .w = 56 },
-            .{ .label = "Ring", .f = .left_ring, .w = 44 },
-            .{ .label = "Pinky", .f = .left_pinky, .w = 50 },
+            .{ .label = "Thumb", .f = .left_thumb, .w = 68 },
+            .{ .label = "Index", .f = .left_index, .w = 60 },
+            .{ .label = "Middle", .f = .left_middle, .w = 68 },
+            .{ .label = "Ring", .f = .left_ring, .w = 52 },
+            .{ .label = "Pinky", .f = .left_pinky, .w = 60 },
         };
         for (fingers, 0..) |fi, i| {
             cursor_x -= fi.w;
@@ -629,7 +611,7 @@ fn drawFooterLegend(
 fn drawLegendItem(theme: ui.Theme, x: f32, y: f32, col: dvui.Color, text: []const u8, id: usize) void {
     const dot = dvui.box(@src(), .{}, .{
         .id_extra = id,
-        .rect = .{ .x = x, .y = y + 5, .w = 8, .h = 8 },
+        .rect = .{ .x = x, .y = y + 6, .w = 8, .h = 8 },
         .background = true,
         .color_fill = .{ .color = col },
         .corners = .all(4),
@@ -639,31 +621,10 @@ fn drawLegendItem(theme: ui.Theme, x: f32, y: f32, col: dvui.Color, text: []cons
     dot.deinit();
     var muted = theme;
     muted.text = theme.muted;
-    var opts = ui.options(muted, .{ .x = x + 12, .y = y, .w = 52, .h = 18 }, 11);
+    var opts = ui.options(muted, .{ .x = x + 13, .y = y, .w = 58, .h = 20 }, 13);
     opts.id_extra = id;
     opts.padding = .{};
     dvui.labelNoFmt(@src(), text, .{ .align_y = 0.5 }, opts);
-}
-
-fn keyPart(r: dvui.Rect, turn: ui.Turn, id: u16, part: usize, corners: dvui.CornerRect, fill: dvui.Color, border: ?dvui.Color, thickness: f32) void {
-    if (r.w <= 0 or r.h <= 0) return;
-    if (turn.radians != 0) return ui.turnedBox(r, turn, corners, fill, border, thickness);
-    const box = dvui.box(@src(), .{}, .{
-        .id_extra = @as(usize, id) * 16 + part,
-        .rect = r,
-        .background = true,
-        .color_fill = .{ .color = fill },
-        .color_border = .{ .color = border orelse fill },
-        .border = if (border != null) .all(thickness) else .{},
-        .corners = corners,
-        .padding = .{},
-        .margin = .{},
-    });
-    box.deinit();
-}
-
-fn bottomCorners(radius: f32) dvui.CornerRect {
-    return .{ .tl = .square, .tr = .square, .bl = .round(radius), .br = .round(radius) };
 }
 
 test "caption splitter separates tap and hold legends cleanly" {

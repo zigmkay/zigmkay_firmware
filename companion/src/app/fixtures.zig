@@ -109,7 +109,9 @@ fn showTutor(app: *App) !void {
         },
         6 => {
             app.applyPractice(try practice.choose(.{ .mode = .test_keys }, now), &app.model, now);
-            practice.test_keys.setLastText("hello");
+            practice.test_keys.clearScratchpad();
+            practice.test_keys.setLastText("!");
+            practice.test_keys.appendScratchpad("Testing my Keycaprio layout — layers, holds & combos feel crisp!");
         },
         else => {},
     }
@@ -641,7 +643,9 @@ fn captureTutor(app: *App) !void {
     if (dvui.tagGet("practice.topbar") == null) return error.TutorNotDrawn;
     const is_test_keys = app.tutor.controller.config.mode == .test_keys;
     if (is_test_keys) {
-        if (dvui.tagGet("practice.test_keys.bar") == null or dvui.tagGet("practice.keyboard") == null) return error.TutorNotDrawn;
+        if (dvui.tagGet("practice.test_keys.bar") == null or
+            dvui.tagGet("practice.test_keys.scratchpad") == null or
+            dvui.tagGet("practice.keyboard") == null) return error.TutorNotDrawn;
     } else if (dvui.tagGet("practice.word") == null or dvui.tagGet("practice.metrics") == null) {
         return error.TutorNotDrawn;
     }

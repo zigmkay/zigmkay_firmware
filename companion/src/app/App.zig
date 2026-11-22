@@ -399,9 +399,9 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     app.fitWindow();
     try app.window.begin(if (app.frame_limit == null) app.window.beginWait(app.interrupted) else app.native.nanoTime());
     errdefer _ = app.window.end(.{ .manage_backend = app.frame_limit == null }) catch {};
-    // DVUI rounds its render scale to hundredths. Keep the fitted editor
-    // aligned with the exact pixel edge, including on Retina displays.
-    if (!app.practicing and app.window.data().rect.w > 0) app.window.natural_scale = app.window.rect_pixels.w / app.window.data().rect.w;
+    // DVUI rounds its render scale to hundredths. Keep the fitted editor and
+    // tutor aligned with the exact pixel edge, including on Retina displays.
+    if (app.window.data().rect.w > 0) app.window.natural_scale = app.window.rect_pixels.w / app.window.data().rect.w;
     if (!app.fonts_installed and (app.frame_limit == null or app.mode.isTutorGallery() or app.mode.isStatus() or app.mode.isDrawers() or
         app.mode.isOnboarding() or app.mode.is(.catalog)))
     {

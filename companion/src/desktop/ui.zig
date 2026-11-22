@@ -365,6 +365,157 @@ pub fn turnedFace(r: dvui.Rect, radians: f32, corner: f32, fill: dvui.Color, bor
     turnedBox(r, .{ .radians = radians, .pivot = r.center() }, .round(corner), fill, border, thickness);
 }
 
+/// Share of a key's height taken by its upper tap half (shared across Editor and Tutor).
+pub const keycap_tap_share: f32 = 0.62;
+
+pub const CornerRect = @typeInfo(@FieldType(dvui.Options, "corners")).optional.child;
+
+pub fn topCorners(radius: f32) CornerRect {
+    return .{ .tl = .round(radius), .tr = .round(radius), .br = .square, .bl = .square };
+}
+
+pub fn bottomCorners(radius: f32) CornerRect {
+    return .{ .tl = .square, .tr = .square, .br = .round(radius), .bl = .round(radius) };
+}
+
+/// One part of a keycap: a DVUI box on an upright key, a turned path on a
+/// turned one. `part` tells the parts of one key apart.
+pub fn keycapPart(r: dvui.Rect, turn: Turn, id: u16, part: usize, corners: CornerRect, fill: dvui.Color, border: ?dvui.Color, thickness: f32) void {
+    if (turn.radians != 0) return turnedBox(r, turn, corners, fill, border, thickness);
+    const box = dvui.box(@src(), .{}, .{
+        .id_extra = @as(usize, id) * 8 + part,
+        .rect = r,
+        .background = true,
+        .color_fill = .{ .color = fill },
+        .color_border = if (border) |c| .{ .color = c } else null,
+        .border = if (border != null) .all(thickness) else .{},
+        .corners = corners,
+        .padding = .{},
+        .margin = .{},
+    });
+    box.deinit();
+}
+
+/// Visual styling for the shared Editor & Tutor Tap/Hold keycap face.
+pub const KeycapFace = struct {
+    fill: dvui.Color,
+    border: dvui.Color,
+    band_fill: dvui.Color,
+    divider: dvui.Color,
+    thickness: f32 = 1.5,
+    tap_highlight: ?dvui.Color = null,
+};
+
+/// Draws the shared Tap/Hold keycap shell (outer rounded face, lower hold band,
+/// optional active tap highlight, and hairline divider). Returns the tap/hold split Y offset.
+pub fn drawKeycapFace(rect_val: dvui.Rect, turn: Turn, id: u16, face: KeycapFace) f32 {
+    const corner = @max(4.0, rect_val.w * 0.12);
+    const split = @round(rect_val.h * keycap_tap_share);
+    const inner_corner = @max(0.0, corner - face.thickness);
+    keycapPart(rect_val, turn, id, 0, .round(corner), face.fill, face.border, face.thickness);
+    keycapPart(
+        .{
+            .x = rect_val.x + face.thickness,
+            .y = rect_val.y + split,
+            .w = @max(0.0, rect_val.w - face.thickness * 2),
+            .h = @max(0.0, rect_val.h - split - face.thickness),
+        },
+        turn,
+        id,
+        1,
+        bottomCorners(inner_corner),
+        face.band_fill,
+        null,
+        0,
+    );
+    if (face.tap_highlight) |hi| {
+        keycapPart(
+            .{
+                .x = rect_val.x + face.thickness,
+                .y = rect_val.y + face.thickness,
+                .w = @max(0.0, rect_val.w - face.thickness * 2),
+                .h = @max(0.0, split - face.thickness),
+            },
+            turn,
+            id,
+            2,
+            topCorners(inner_corner),
+            hi,
+            null,
+            0,
+        );
+    }
+    keycapPart(
+        .{
+            .x = rect_val.x + face.thickness,
+            .y = rect_val.y + split,
+            .w = @max(0.0, rect_val.w - face.thickness * 2),
+            .h = 1,
+        },
+        turn,
+        id,
+        3,
+        .square,
+        face.divider,
+        null,
+        0,
+    );
+    return split;
+}
+
+/// Draws the shared upper tap and lower hold keycap legends at the Editor's exact scale.
+pub fn drawKeycapLegends(
+    theme: Theme,
+    rect_val: dvui.Rect,
+    turn: Turn,
+    id: u16,
+    item_scale: f32,
+    split: f32,
+    tap: []const u8,
+    hold: []const u8,
+    tap_color: dvui.Color,
+    hold_color: dvui.Color,
+    layer_colors: bool,
+    bottom_reserve: f32,
+) void {
+    const inset = @max(3.0, rect_val.w * 0.08);
+    const scale = @min(@as(f32, 1.2), item_scale);
+    if (tap.len != 0) {
+        const tap_bounds: dvui.Rect = .{
+            .x = rect_val.x + inset,
+            .y = rect_val.y + inset * 0.7,
+            .w = @max(1.0, rect_val.w - inset * 2),
+            .h = @max(1.0, split - inset * 1.2),
+        };
+        caption(tap, tap_bounds, .{
+            .color = tap_color,
+            .secondary = hold_color,
+            .size = 24 * scale,
+            .id_extra = id,
+            .layer_colors = layer_colors,
+            .layers = theme.layers,
+            .turn = turn,
+        });
+    }
+    if (hold.len != 0) {
+        const hold_bounds: dvui.Rect = .{
+            .x = rect_val.x + inset,
+            .y = rect_val.y + split + 2,
+            .w = @max(1.0, rect_val.w - inset * 2),
+            .h = @max(1.0, rect_val.h - split - 5 - bottom_reserve),
+        };
+        caption(hold, hold_bounds, .{
+            .color = hold_color,
+            .secondary = hold_color,
+            .size = 16 * scale,
+            .id_extra = @as(usize, id) + 0x20000,
+            .layer_colors = layer_colors,
+            .layers = theme.layers,
+            .turn = turn,
+        });
+    }
+}
+
 /// Base options for an absolutely placed control in theme colors.
 pub fn options(t: Theme, r: dvui.Rect, size: f32) dvui.Options {
     return .{

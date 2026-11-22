@@ -95,6 +95,14 @@ fn save(app: *App, captured: desktop.editor_dispatch.Request, close: bool) !App.
 fn open(app: *App, target: desktop.editor_dispatch.Open) App.Flow {
     switch (target) {
         .practice => {
+            // "Try it out" always opens Test layout first so the user can verify
+            // switches, layers, holds, and free-type before starting a Tutor round.
+            const now_us: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
+            app.applyPractice(app.tutor.controller.pause(now_us), &app.model, now_us);
+            app.tutor.controller.config.mode = .test_keys;
+            app.tutor.controller.rundown = null;
+            app.tutor.view.sheet = .none;
+            app.tutor.view.settings_open = false;
             app.practicing = true;
             app.view.diagnostic = @splat(0);
         },

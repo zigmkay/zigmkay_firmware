@@ -168,7 +168,7 @@ fn pollRunner(app: *App) !App.Flow {
     prepared.runner = null;
     if (app.build.runner) |*old| old.deinit();
     app.build.runner = runner;
-    _ = try app.tutor.controller.choose(.{ .source = .draft }, 0);
+    _ = try app.tutor.controller.choose(.{ .mode = .test_keys, .source = .draft }, 0);
     app.practicing = true;
     app.onboarding.active = false;
     return .proceed;

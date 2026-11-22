@@ -75,6 +75,8 @@ pub const TestKeysTelemetry = struct {
     last_text_len: usize = 0,
     last_event: [64]u8 = @splat(0),
     last_event_len: usize = 0,
+    scratchpad: [512]u8 = @splat(0),
+    scratchpad_len: usize = 0,
     active_layers: u16 = 1,
     highest_layer: usize = 0,
     modifiers: u8 = 0,
@@ -85,6 +87,39 @@ pub const TestKeysTelemetry = struct {
         const n = @min(text.len, self.last_text.len);
         @memcpy(self.last_text[0..n], text[0..n]);
         self.last_text_len = n;
+    }
+
+    pub fn appendScratchpad(self: *TestKeysTelemetry, text: []const u8) void {
+        if (text.len == 0) return;
+        // Keep the latest tail when the buffer reaches capacity, trimming on UTF-8 boundaries.
+        if (self.scratchpad_len + text.len > self.scratchpad.len) {
+            const overflow = (self.scratchpad_len + text.len) - self.scratchpad.len;
+            var drop = @min(self.scratchpad_len, overflow + 64);
+            while (drop < self.scratchpad_len and (self.scratchpad[drop] & 0xC0) == 0x80) : (drop += 1) {}
+            const keep = self.scratchpad_len - drop;
+            std.mem.copyForwards(u8, self.scratchpad[0..keep], self.scratchpad[drop..self.scratchpad_len]);
+            self.scratchpad_len = keep;
+        }
+        const avail = self.scratchpad.len - self.scratchpad_len;
+        const n = @min(text.len, avail);
+        @memcpy(self.scratchpad[self.scratchpad_len .. self.scratchpad_len + n], text[0..n]);
+        self.scratchpad_len += n;
+    }
+
+    pub fn backspaceScratchpad(self: *TestKeysTelemetry) void {
+        if (self.scratchpad_len == 0) return;
+        var end = self.scratchpad_len - 1;
+        while (end > 0 and (self.scratchpad[end] & 0xC0) == 0x80) : (end -= 1) {}
+        self.scratchpad_len = end;
+    }
+
+    pub fn clearScratchpad(self: *TestKeysTelemetry) void {
+        self.scratchpad_len = 0;
+        self.last_text_len = 0;
+    }
+
+    pub fn scratchpadSlice(self: *const TestKeysTelemetry) []const u8 {
+        return self.scratchpad[0..self.scratchpad_len];
     }
 
     pub fn setLastEvent(self: *TestKeysTelemetry, note: []const u8) void {
@@ -529,7 +564,10 @@ pub const Controller = struct {
     /// Handles Enter/Space in rundown or normal OS text input in Tutor mode.
     pub fn insertOs(self: *Controller, focused: bool, bytes: []const u8, now: u64, paste: bool) !Effect {
         if (self.config.mode == .test_keys) {
-            if (focused and bytes.len > 0) self.test_keys.setLastText(bytes);
+            if (focused and bytes.len > 0) {
+                self.test_keys.setLastText(bytes);
+                self.test_keys.appendScratchpad(bytes);
+            }
             return .{};
         }
         if (!self.acceptingOsText(focused)) return .{};
@@ -539,7 +577,10 @@ pub const Controller = struct {
 
     pub fn insertDraft(self: *Controller, op: Operation, sequence: u64, bytes: []const u8, now: u64) !Effect {
         if (self.config.mode == .test_keys) {
-            if (bytes.len > 0) self.test_keys.setLastText(bytes);
+            if (bytes.len > 0) {
+                self.test_keys.setLastText(bytes);
+                self.test_keys.appendScratchpad(bytes);
+            }
             return .{};
         }
         if (!self.accepts(op) or self.runner_state != .running or self.session.source != .draft) return .{};

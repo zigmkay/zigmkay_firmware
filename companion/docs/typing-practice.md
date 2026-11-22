@@ -1,10 +1,12 @@
-# Typing Tutor & Test Keys
+# Test Layout & Adaptive Typing Tutor
 
-Choose **Open tutor** in the Companion Editor to learn your layout step by step
-or to verify switches, layers, holds, and combos on your keyboard.
+Choose **Open tutor** under **Try it out** in the Companion Editor to test your
+layout freely or switch to the adaptive 6-stage Typing Tutor.
 
-The top bar provides a **Tutor | Test keys** segmented switch so hardware
-checking stays completely separate from adaptive typing practice.
+The top bar provides a **Test layout | Tutor** segmented switch. Opening from
+**Try it out** always lands in **Test layout** first so you can immediately
+verify switches, layers, holds, combos, and free-type in the scratchpad before
+switching to **Tutor**.
 
 ## Adaptive Typing Tutor
 
@@ -106,13 +108,15 @@ keys rather than wiping your whole profile. Use the top-right **Settings**
 popover to adjust target speed (WPM), daily goal, guidance level, input source,
 or to reset progress for the active profile.
 
-## Test Keys Mode
+## Test Layout Mode
 
-Switch the top bar to **Test keys** to inspect physical switch presses, active
-layers, held modifiers, simultaneous key presses, and triggered 2-key combos
-without scoring or recording tutor history.
+Opening **Try it out** lands directly in **Test layout**. It pairs the exact
+shared Editor keyboard view with a live telemetry bar (active layer, held
+modifiers, simultaneous presses, and triggered 2-key combos) and a calm
+free-typing scratchpad where you can type anything you want—completely unscored
+and unpersisted.
 
-![Test keys mode showing clean keyboard canvas and live layer/modifier telemetry](screenshots/typing-practice/test-keys.png)
+![Test layout mode with free-typing scratchpad, live layer/modifier telemetry, and shared Editor keyboard view](screenshots/typing-practice/test-keys.png)
 
 ## Input Sources
 
