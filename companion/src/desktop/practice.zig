@@ -263,6 +263,8 @@ pub const Label = struct {
     shortcut: bool = false,
     hold_layer: ?usize = null,
     hold_modifiers: ?u8 = null,
+    one_shot_layer: ?usize = null,
+    one_shot_modifiers: u8 = 0,
     provider_unknown: bool = false,
     unproven: bool = false,
 };
