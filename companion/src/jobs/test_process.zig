@@ -1,5 +1,5 @@
 const std = @import("std");
-const jobs = @import("companion-jobs");
+const jobs = @import("root.zig");
 
 test "asynchronous jobs own explicit environment before caller mutation" {
     const gpa = std.testing.allocator;

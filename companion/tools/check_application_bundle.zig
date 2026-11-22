@@ -5,6 +5,14 @@ const project = @import("project");
 const catalog = @import("catalog-project");
 const jobs = @import("companion-jobs");
 
+/// Representative boards covering every keymap/callback/side/encoder variant
+/// for fast PR bundle checks without duplicating identical board families.
+const representative_boards = [_][]const u8{
+    "lk8",
+    "dasbob",
+    "molekula",
+};
+
 pub fn main(init: std.process.Init) !void {
     const a = init.gpa;
     // toSlice requires an arena: Windows returns a view into a larger allocation.
@@ -25,13 +33,26 @@ pub fn main(init: std.process.Init) !void {
             args[2],
             entry.selector,
         );
-        try checkImports(init, resources, args[2]);
+        try checkImports(init, resources, args[2], false);
+    } else if (std.mem.eql(u8, args[3], "representative")) {
+        for (representative_boards) |selector| try check(
+            init,
+            resources,
+            args[2],
+            selector,
+        );
+        try checkImports(init, resources, args[2], true);
     } else if (std.mem.eql(u8, args[3], "imports")) {
-        try checkImports(init, resources, args[2]);
+        try checkImports(init, resources, args[2], false);
     } else try check(init, resources, args[2], args[3]);
 }
 
-fn checkImports(init: std.process.Init, resources: jobs.application_bundle.Bundle, cache: []const u8) !void {
+fn checkImports(
+    init: std.process.Init,
+    resources: jobs.application_bundle.Bundle,
+    cache: []const u8,
+    representative_only: bool,
+) !void {
     const importer = desktop.onboarding.importer;
     const a = init.arena.allocator();
     if (resources.executable) |exe| {
@@ -52,7 +73,17 @@ fn checkImports(init: std.process.Init, resources: jobs.application_bundle.Bundl
     var root = try std.Io.Dir.cwd().createDirPathOpen(init.io, root_path, .{});
     defer root.close(init.io);
     const exe_suffix = if (@import("builtin").os.tag == .windows) ".exe" else "";
+    // Share the global Zig cache already populated by firmware builds so
+    // `analyze-keymap` does not recompile the Zig standard library cold.
+    const shared_global_cache = try std.fs.path.join(a, &.{
+        cache,
+        "builds",
+        "compiler-cache",
+        &std.fmt.bytesToHex(resources.manifest.id, .lower),
+        "global",
+    });
     inline for (.{ "us", "de" }) |name| {
+        if (representative_only and !std.mem.eql(u8, name, "us")) continue;
         const source_path = try std.fs.path.join(a, &.{ root_path, name });
         try writeImportFixture(
             init.io,
@@ -67,9 +98,14 @@ fn checkImports(init: std.process.Init, resources: jobs.application_bundle.Bundl
             .build_root = try resources.path(a, "build"),
             .packages = try resources.path(a, "dependencies/p"),
             .cache = try std.fs.path.join(a, &.{ cache, "import-tools" }),
+            .global_cache = shared_global_cache,
         }, init.environ_map);
         defer analyzed.deinit();
-        for ([_][]const u8{ "keycaprio_colemak_0_6", "keycaprio_colemak_0_7" }) |selector| {
+        const selectors: []const []const u8 = if (representative_only)
+            &.{"keycaprio_colemak_0_7"}
+        else
+            &.{ "keycaprio_colemak_0_6", "keycaprio_colemak_0_7" };
+        for (selectors) |selector| {
             var prepared = try importer.prepare(
                 init.gpa,
                 init.io,

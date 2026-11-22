@@ -23,7 +23,8 @@ pub fn add(s: *tests.Suite, deps: Deps, mb: anytype, app: *Compile, bootsel: ?*C
     }
     if (b.graph.needed_lazy_dependencies.count() != 0) return;
 
-    const assembler = b.addExecutable(.{ .name = "assemble-application", .root_module = s.mods.root("tools/assemble_application.zig", s.mods.core.jobs_only) });
+    // Build-time host tool: debug compiles in ~1s instead of ~45s in ReleaseSafe.
+    const assembler = tests.host(b, "assemble-application", "tools/assemble_application.zig", s.mods.core.jobs_only);
     assembler.root_module.addOptions("bundle-pins", pins(b, cfg.revision, cfg.target.result.os.tag));
     const icons = s.mods.gui.?.icon_files;
     switch (os) {

@@ -3,35 +3,40 @@ const std = @import("std");
 pub fn add_test_steps(b: *std.Build, zigmkay_module: *std.Build.Module, test_step: *std.Build.Step, test_dir: []const u8) void {
     const target = b.standardTargetOptions(.{});
 
-    // START: Create test file iterator
+    const root_path = b.fmt("{s}/test_all.zig", .{test_dir});
+
     var src_dir = b.root.openDir(b.graph.io, test_dir, .{ .iterate = true }) catch |err|
         std.debug.panic("Failed to open '{s}': {}", .{ test_dir, err });
     defer src_dir.close(b.graph.io);
+
+    const root_source = src_dir.readFileAlloc(b.graph.io, "test_all.zig", b.allocator, .limited(1024 * 1024)) catch |err|
+        std.debug.panic("Failed to read '{s}': {}", .{ root_path, err });
 
     b.dependOnDirectoryContents(b.path(test_dir));
     var walker = src_dir.walk(b.allocator) catch |err|
         std.debug.panic("Failed to walk '{s}': {}", .{ test_dir, err });
     defer walker.deinit();
-    // END: Create test file iterator
 
     while (walker.next(b.graph.io) catch |err| std.debug.panic("Failed to iterate '{s}': {}", .{ test_dir, err })) |entry| {
-        if (entry.kind == .file and std.mem.indexOf(u8, entry.basename, "test_") != null) {
-            const current_test_file_path = std.fmt.allocPrint(b.allocator, "{s}/{s}", .{ test_dir, entry.path }) catch unreachable;
-
-            // to ensure your test file is actually being loaded, remove the comments on the following line:
-            //std.debug.print("{s}\n", .{current_test_file_path});
-
-            const current_test_file_module = b.createModule(.{
-                .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = current_test_file_path } },
-                .target = target,
-            });
-            current_test_file_module.addImport("zigmkay", zigmkay_module);
-
-            const current_test_exe = b.addTest(.{ .root_module = current_test_file_module });
-            const current_test_run = b.addRunArtifact(current_test_exe);
-            test_step.dependOn(&current_test_run.step);
+        if (entry.kind == .file and std.mem.indexOf(u8, entry.basename, "test_") != null and !std.mem.eql(u8, entry.basename, "test_all.zig")) {
+            const normalized = b.allocator.dupe(u8, entry.path) catch @panic("OOM");
+            std.mem.replaceScalar(u8, normalized, '\\', '/');
+            const needle = b.fmt("@import(\"{s}\")", .{normalized});
+            if (std.mem.indexOf(u8, root_source, needle) == null) {
+                std.debug.panic("Test file '{s}/{s}' is not imported in '{s}'", .{ test_dir, normalized, root_path });
+            }
         }
     }
+
+    const test_module = b.createModule(.{
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = root_path } },
+        .target = target,
+    });
+    test_module.addImport("zigmkay", zigmkay_module);
+
+    const test_exe = b.addTest(.{ .root_module = test_module });
+    const test_run = b.addRunArtifact(test_exe);
+    test_step.dependOn(&test_run.step);
 }
 
 /// Builds and installs the host tools so that dependents can fetch them with

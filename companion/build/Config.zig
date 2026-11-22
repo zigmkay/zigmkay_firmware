@@ -28,6 +28,8 @@ macos_sdk: ?[]const u8,
 desktop: bool,
 /// The microzig embedded graph (`-Dfirmware`, implied by `-Dbundle`).
 firmware: bool,
+/// Limit embedded firmware matrix checks to representative boards (`-Dfirmware-subset`).
+firmware_subset: bool,
 /// The self-contained application (`-Dbundle`).
 bundle: bool,
 only: ?Only,
@@ -55,6 +57,7 @@ pub fn init(b: *std.Build) Config {
         .macos_sdk = b.option([]const u8, "macos-sdk", "Explicit macOS SDK path for release compilation"),
         .desktop = bundle or (b.option(bool, "desktop", "Configure the native GUI, tray and vector icons") orelse false),
         .firmware = !native_only and (bundle or (b.option(bool, "firmware", "Configure embedded firmware compilation (never flashes)") orelse false)),
+        .firmware_subset = b.option(bool, "firmware-subset", "Compile only representative boards in check-firmware steps") orelse false,
         .bundle = bundle,
         .only = b.option(Only, "only", "Configure only a small offline subset"),
         .test_filters = b.option([]const []const u8, "test-filter", "Run only tests whose names contain this text") orelse &.{},

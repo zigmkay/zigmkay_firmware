@@ -54,8 +54,8 @@ pub fn build(b: *std.Build) !void {
     if (cfg.macos_sdk) |sdk| if (app) |exe| native.sdkPaths(b, exe.root_module, sdk);
 
     suite.guard(steps.@"test", &.{
-        .{ .desktop, cfg.desktop, &gui.test_roots },
-        .{ .firmware, cfg.firmware, &firmware.test_roots },
+        .{ .desktop, cfg.desktop, &gui.test_roots, &gui.deferred_test_files },
+        .{ .firmware, cfg.firmware, &firmware.test_roots, &firmware.test_roots },
     });
 }
 

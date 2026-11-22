@@ -22,13 +22,14 @@ jobs:
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
+          cache-size-limit: 4096
       - name: Verify Zig version
         run: test "$(zig version)" = 0.17.0
       - name: Firmware core tests (no device access)
-        run: zig build test --summary all
+        run: zig build test -j4 --summary all
       - name: Keyboard regression tests
         working-directory: keyboards
-        run: zig build test --summary all
+        run: zig build test -j4 --summary all
       - name: Keycode generator tests
         working-directory: zkeycodes
-        run: zig build test --summary all
+        run: zig build test -j4 --summary all

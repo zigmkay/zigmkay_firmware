@@ -15,8 +15,9 @@ const Import = std.Build.Module.Import;
 /// unconfigured areas against their static inventory instead of binaries.
 pub const Area = enum { core, desktop, firmware };
 
-/// An area, whether its option is on, and its static test-root inventory.
-pub const Inventory = struct { Area, bool, []const []const u8 };
+/// An area, whether its option is on, its wired test roots, and the source
+/// files containing tests that are deferred when the area is unconfigured.
+pub const Inventory = struct { Area, bool, []const []const u8, []const []const u8 };
 
 /// Collects every test compilation so `check` compiles it and
 /// `tests-reached` can read the binaries.
@@ -70,18 +71,19 @@ pub const Suite = struct {
         const tool = b.addExecutable(.{ .name = "tests-reached", .root_module = b.createModule(.{
             .root_source_file = b.path("tools/tests_reached.zig"),
             .target = b.graph.host,
+            .optimize = .ReleaseFast,
         }) });
         const run = b.addRunArtifact(tool);
         run.addDirectoryArg(b.path("."));
         for (inventories) |inventory| {
-            const area, const configured, const roots = inventory;
+            const area, const configured, const roots, const deferred_files = inventory;
             if (configured) {
                 for (roots) |root| if (!s.hasRoot(area, root)) std.debug.panic("{t} test inventory lists unwired root {s}", .{ area, root });
                 for (s.entries.items) |entry| if (entry.area == area and !listed(roots, entry.root))
                     std.debug.panic("{t} test root {s} is missing from its inventory", .{ area, entry.root });
-            } else for (roots) |root| {
+            } else for (deferred_files) |file| {
                 run.addArg("--deferred");
-                run.addFileArg(b.path(root));
+                run.addFileArg(b.path(file));
             }
         }
         for (s.entries.items) |entry| {
@@ -145,17 +147,11 @@ pub const Fixtures = struct {
     /// Exported projects of the pinned import fixtures, for firmware checks.
     imports: []const ImportedExport = &.{},
     /// Application flash admission tests, also part of `test-desktop`.
-    flash_session: [3]?*std.Build.Step.Run = @splat(null),
+    app_tests: ?*std.Build.Step.Run = null,
 };
 
 pub const ImportedExport = struct { selector: []const u8, export_root: std.Build.LazyPath };
 
-const practice_files = [_][]const u8{ "practice.zig", "practice_view.zig", "practice_generator.zig", "practice_controller.zig" };
-const desktop_files = [_][]const u8{ "try_state.zig", "flash_controller.zig", "auto_build.zig", "geometry.zig", "encoder_state.zig" };
-const jobs_files = [_][]const u8{ "target_lock.zig", "firmware.zig", "source_digest.zig", "sidecar.zig", "flash_inputs.zig", "application_bundle.zig", "bundle_payload.zig", "runner_artifact.zig", "bootsel_transfer.zig" };
-const project_desktop_files = [_][]const u8{ "startup_project.zig", "host_input.zig", "draft_input.zig", "action_form.zig", "profile_projects.zig", "model.zig" };
-const label_files = [_][]const u8{ "keycap_symbols.zig", "labels.zig", "label_cache.zig", "physical_view.zig" };
-const session_files = [_][]const u8{ "root.zig", "test_session.zig", "live_adapter.zig", "session_capture.zig" };
 const import_fixtures = [_][]const u8{ "us", "de" };
 const import_selectors = [_][]const u8{ "keycaprio_colemak_0_6", "keycaprio_colemak_0_7" };
 
@@ -164,7 +160,7 @@ pub fn addCore(s: *Suite) Fixtures {
     const b = s.b;
     const steps = s.steps;
     const core = s.mods.core;
-    for (practice_files) |name| _ = s.unit(steps.test_practice, .core, b.fmt("src/desktop/{s}", .{name}), &.{});
+    _ = s.unit(steps.test_practice, .core, "src/desktop/test_practice_all.zig", &.{});
     _ = s.unit(steps.test_practice, .core, "src/platform/app_paths.zig", &.{});
 
     const release = b.createModule(.{ .root_source_file = b.path("tools/release.zig"), .target = s.cfg.target, .optimize = s.cfg.optimize, .imports = core.jobs_only });
@@ -172,17 +168,6 @@ pub fn addCore(s: *Suite) Fixtures {
     _ = s.add(steps.test_jobs, .core, release);
 
     const helper = s.exe("job-fixture", "src/jobs/fixture.zig", &.{});
-    const process = s.mods.root("src/jobs/test_process.zig", core.jobs_only);
-    const process_options = b.addOptions();
-    process_options.addOptionPath("helper_path", helper.getEmittedBin());
-    process.addOptions("options", process_options);
-    _ = s.add(steps.test_jobs, .core, process);
-    _ = s.unit(steps.test_jobs, .core, "src/jobs/package_manifest.zig", core.jobs_deps);
-    _ = s.unit(steps.test_jobs, .core, "src/jobs/source_files.zig", &.{});
-    for (jobs_files) |name| _ = s.unit(steps.test_jobs, .core, b.fmt("src/jobs/{s}", .{name}), core.jobs_deps);
-    _ = s.unit(steps.test_jobs, .core, "src/artifact/uf2.zig", &.{});
-    _ = s.unit(steps.@"test", .core, "src/project/owned_zon.zig", &.{});
-
     const picotool = b.addOptions();
     picotool.addOptionPath("fixture", s.exe("picotool-job-fixture", "src/jobs/picotool_fixture.zig", &.{}).getEmittedBin());
     picotool.addOptionPath("helper_path", helper.getEmittedBin());
@@ -196,14 +181,14 @@ pub fn addCore(s: *Suite) Fixtures {
         wrapper.addOptions("options", picotool);
         _ = s.add(steps.test_jobs, .core, wrapper);
     }
-    const picotool_job = s.mods.root("src/jobs/test_picotool_job.zig", core.jobs_deps);
-    picotool_job.addOptions("options", picotool);
-    _ = s.add(steps.test_jobs, .core, picotool_job);
+    const jobs_all = s.mods.root("src/jobs/test_all.zig", core.jobs_deps);
+    jobs_all.addOptions("options", picotool);
+    _ = s.add(steps.test_jobs, .core, jobs_all);
+    _ = s.unit(steps.test_jobs, .core, "src/artifact/uf2.zig", &.{});
 
-    for (desktop_files) |name| _ = s.unit(steps.@"test", .core, b.fmt("src/desktop/{s}", .{name}), core.jobs_only);
+    _ = s.unit(steps.@"test", .core, "src/project/owned_zon.zig", &.{});
+    _ = s.unit(steps.@"test", .core, "src/desktop/test_core_all.zig", core.jobs_only);
     _ = s.add(steps.@"test", .core, core.flash_presenter);
-    _ = s.add(steps.@"test", .core, core.tray_lifecycle);
-    _ = s.unit(steps.@"test", .core, "src/app/cli.zig", &.{});
     return .{ .picotool = picotool };
 }
 
@@ -215,31 +200,17 @@ pub fn addHost(s: *Suite, fixtures: *Fixtures) void {
     const h = s.mods.host.?;
 
     addInput(s, h);
-    _ = s.unit(step, .core, "tests/processor_contract.zig", h.processor_contract_deps);
     _ = s.unit(step, .core, "src/layout/root.zig", h.zigmkay_only);
     _ = s.add(step, .core, h.catalog);
     // The descriptors' tests compile only in the generated inventory.
     _ = s.addCopied(step, .core, h.defaults_test, "src/firmware/boards.zig");
     _ = s.add(step, .core, h.catalog_project);
 
-    _ = s.unit(step, .core, "src/desktop/text.zig", h.text_deps);
-    for (project_desktop_files) |name| _ = s.unit(step, .core, b.fmt("src/desktop/{s}", .{name}), h.project_only);
-    for (label_files) |name| _ = s.unit(step, .core, b.fmt("src/desktop/{s}", .{name}), h.label_deps);
-    _ = s.unit(step, .core, "src/desktop/flash_runtime.zig", h.flash_runtime_deps);
-    _ = s.unit(step, .core, "src/desktop/event_history.zig", h.event_history_deps);
-    _ = s.unit(step, .core, "src/desktop/inspector_session.zig", h.inspector_session_deps);
-    _ = s.unit(step, .core, "src/desktop/live_keyboard.zig", h.live_keyboard_deps);
-    const integration = s.mods.root("tests/desktop_integration.zig", h.desktop_integration_deps);
+    _ = s.unit(step, .core, "src/desktop/test_host_all.zig", h.desktop_host_test_deps);
+    const integration = s.mods.root("tests/test_host_all.zig", h.host_integration_test_deps);
     integration.addOptions("options", fixtures.picotool);
     _ = s.add(step, .core, integration);
-    _ = s.unit(step, .core, "tests/catalog_physical_view.zig", h.catalog_view_deps);
-    _ = s.unit(step, .core, "tests/onboarding.zig", h.onboarding_deps);
-    _ = s.unit(step, .core, "tests/keyboard_library.zig", h.onboarding_deps);
-    fixtures.flash_session = .{
-        s.unit(step, .core, "src/app/flash_session.zig", h.flash_session_deps),
-        s.unit(step, .core, "src/app/flash_bootloader.zig", &.{}),
-        s.unit(step, .core, "src/app/flash_fixture.zig", h.flash_fixture_deps),
-    };
+    fixtures.app_tests = s.unit(step, .core, "src/app/test_all.zig", h.app_test_deps);
 
     // Nested analysis builds run against the bundled runtime closure, exactly
     // as the installed application does, with the repository's import fixtures.
@@ -260,10 +231,8 @@ pub fn addHost(s: *Suite, fixtures: *Fixtures) void {
 
     _ = s.unit(step, .core, "src/platform/test_native_hid.zig", h.native_hid_only);
     _ = s.unit(step, .core, "src/firmware/protocol.zig", h.zigmkay_only);
-    for (session_files) |name| {
-        const imports = if (std.mem.eql(u8, name, "root.zig")) h.session_deps else h.session_test_deps;
-        _ = s.unit(step, .core, b.fmt("src/session/{s}", .{name}), imports);
-    }
+    _ = s.unit(step, .core, "src/session/root.zig", h.session_deps);
+    _ = s.unit(step, .core, "src/session/test_all.zig", h.session_test_deps);
 }
 
 fn addInput(s: *Suite, h: Modules.Host) void {
@@ -281,22 +250,30 @@ fn addInput(s: *Suite, h: Modules.Host) void {
 }
 
 /// Export every selected board, synthetic and default, and compare it with
-/// its real processor.
+/// its real processor in two consolidated test binaries (one synthetic, one
+/// default) instead of 28 separate binaries.
 fn addCatalogProcessors(s: *Suite, h: Modules.Host) *Compile {
     const b = s.b;
-    const exporter = s.mods.root("tools/catalog_export.zig", h.catalog_export_deps);
-    const export_tool = b.addExecutable(.{ .name = "catalog-export", .root_module = exporter });
+    const export_tool = host(b, "catalog-export", "tools/catalog_export.zig", h.catalog_export_deps);
     s.steps.check.dependOn(&export_tool.step);
+
+    var index_source: std.ArrayList(u8) = .empty;
+    index_source.appendSlice(b.allocator, "pub const profiles = .{\n") catch @panic("OOM");
+    for (fw_build.boards.entries, 0..) |_, index| {
+        index_source.appendSlice(b.allocator, b.fmt("    @import(\"profile_{d}\"),\n", .{index})) catch @panic("OOM");
+    }
+    index_source.appendSlice(b.allocator, "};\n") catch @panic("OOM");
+    const index_file = b.addWriteFiles().add("profiles.zig", index_source.items);
+
+    const synthetic_profiles = b.createModule(.{ .root_source_file = index_file });
+    const default_profiles = b.createModule(.{ .root_source_file = index_file });
+
     for (fw_build.boards.entries, 0..) |board, index| {
         const generate = b.addRunArtifact(export_tool);
         generate.addArg(board.name);
         const directory = generate.addOutputDirectoryArg2(board.name, .{ .make_absolute = true });
         const generated = b.createModule(.{ .root_source_file = directory.path(b, "keymap.zig"), .imports = h.zigmkay_only });
-        _ = s.unit(s.steps.@"test", .core, "tests/catalog_processor_contract.zig", &.{
-            .{ .name = "generated-profile", .module = generated },
-            .{ .name = "zigmkay", .module = h.zigmkay },
-            .{ .name = "device-protocol", .module = h.protocol },
-        });
+        synthetic_profiles.addImport(b.fmt("profile_{d}", .{index}), generated);
 
         const default_generate = b.addRunArtifact(export_tool);
         default_generate.addArg(board.name);
@@ -308,15 +285,19 @@ fn addCatalogProcessors(s: *Suite, h: Modules.Host) *Compile {
             .root_source_file = default_directory.path(b, b.fmt("callback_0/{s}", .{board.default_keymap})),
             .imports = &.{ .{ .name = "zigmkay", .module = h.zigmkay }, .{ .name = "zkeycodes", .module = h.keycodes } },
         }));
-        const options = b.addOptions();
-        options.addOption(usize, "index", index);
-        _ = s.unit(s.steps.@"test", .core, "tests/catalog_default_processor_contract.zig", &.{
-            .{ .name = "generated-profile", .module = exported },
-            .{ .name = "firmware-defaults", .module = h.defaults },
-            .{ .name = "zigmkay", .module = h.zigmkay },
-            .{ .name = "catalog-options", .module = options.createModule() },
-        });
+        default_profiles.addImport(b.fmt("profile_{d}", .{index}), exported);
     }
+
+    _ = s.unit(s.steps.@"test", .core, "tests/catalog_processor_contract.zig", &.{
+        .{ .name = "zigmkay", .module = h.zigmkay },
+        .{ .name = "device-protocol", .module = h.protocol },
+        .{ .name = "generated-profiles", .module = synthetic_profiles },
+    });
+    _ = s.unit(s.steps.@"test", .core, "tests/catalog_default_processor_contract.zig", &.{
+        .{ .name = "firmware-defaults", .module = h.defaults },
+        .{ .name = "zigmkay", .module = h.zigmkay },
+        .{ .name = "generated-profiles", .module = default_profiles },
+    });
     return export_tool;
 }
 
@@ -356,28 +337,47 @@ fn runnerFixture(s: *Suite, h: Modules.Host, name: []const u8, mode: ?[]const u8
 }
 
 /// Convert the pinned import fixtures through the production importer and
-/// compare their processor traces. Returns the exports for firmware checks.
+/// compare their processor traces in one consolidated test binary.
 fn addImportProcessors(s: *Suite, h: Modules.Host, importer_options: *std.Build.Step.Options) []const ImportedExport {
     const b = s.b;
     const tool = host(b, "import-fixture", "tools/import_fixture.zig", h.import_fixture_deps);
     tool.root_module.addOptions("build-options", importer_options);
     var result: std.ArrayList(ImportedExport) = .empty;
-    for (import_fixtures) |name| for (import_selectors) |selector| {
-        const run = b.addRunArtifact(tool);
-        run.addDirectoryArg(b.path(b.fmt("tests/fixtures/import/{s}", .{name})));
-        run.addArg(selector);
-        const exported = run.addOutputDirectoryArg(b.fmt("imported-{s}-{s}", .{ name, selector })).path(b, "export");
-        result.append(b.allocator, .{ .selector = selector, .export_root = exported }) catch @panic("OOM");
-        const profile = importedProfile(b, exported, h.zigmkay, h.keycodes, h.layout);
-        const original = b.createModule(.{ .root_source_file = b.path(b.fmt("tests/fixtures/import/{s}/src/keymap.zig", .{name})), .imports = &.{ .{ .name = "zigmkay", .module = h.zigmkay }, .{ .name = "zkeycodes", .module = h.keycodes } } });
-        _ = s.add(s.steps.@"test", .core, b.createModule(.{ .root_source_file = b.path("tests/import_processor_contract.zig"), .target = b.graph.host, .imports = &.{
-            .{ .name = "zigmkay", .module = h.zigmkay },
-            .{ .name = "original-profile", .module = original },
-            .{ .name = "generated-profile", .module = profile },
-        } }));
-        const imported_runner = runner_build.runner(b, b.fmt("imported-{s}-{s}-runner", .{ name, selector }), h.zigmkay, profile, h.runner_protocol, null);
-        s.steps.@"test".dependOn(&imported_runner.step);
+    var index_source: std.ArrayList(u8) = .empty;
+    index_source.appendSlice(b.allocator, "pub const pairs = .{\n") catch @panic("OOM");
+    for (import_fixtures, 0..) |_, fi| for (import_selectors, 0..) |_, si| {
+        const idx = fi * import_selectors.len + si;
+        index_source.appendSlice(b.allocator, b.fmt("    .{{ .original = @import(\"original_{d}\"), .profile = @import(\"profile_{d}\") }},\n", .{ fi, idx })) catch @panic("OOM");
     };
+    index_source.appendSlice(b.allocator, "};\n") catch @panic("OOM");
+    const pairs_mod = b.createModule(.{ .root_source_file = b.addWriteFiles().add("imported_pairs.zig", index_source.items) });
+    var idx: usize = 0;
+    for (import_fixtures, 0..) |name, fi| {
+        const original = b.createModule(.{ .root_source_file = b.path(b.fmt("tests/fixtures/import/{s}/src/keymap.zig", .{name})), .imports = &.{ .{ .name = "zigmkay", .module = h.zigmkay }, .{ .name = "zkeycodes", .module = h.keycodes } } });
+        pairs_mod.addImport(b.fmt("original_{d}", .{fi}), original);
+        for (import_selectors) |selector| {
+            const run = b.addRunArtifact(tool);
+            run.addDirectoryArg(b.path(b.fmt("tests/fixtures/import/{s}", .{name})));
+            run.addArg(selector);
+            const exported = run.addOutputDirectoryArg(b.fmt("imported-{s}-{s}", .{ name, selector })).path(b, "export");
+            result.append(b.allocator, .{ .selector = selector, .export_root = exported }) catch @panic("OOM");
+            const profile = importedProfile(b, exported, h.zigmkay, h.keycodes, h.layout);
+            pairs_mod.addImport(b.fmt("profile_{d}", .{idx}), profile);
+            if (!s.cfg.firmware_subset or idx == 0) {
+                const imported_runner = runner_build.runner(b, b.fmt("imported-{s}-{s}-runner", .{ name, selector }), h.zigmkay, profile, h.runner_protocol, null);
+                s.steps.@"test".dependOn(&imported_runner.step);
+            }
+            idx += 1;
+        }
+    }
+    _ = s.add(s.steps.@"test", .core, b.createModule(.{
+        .root_source_file = b.path("tests/import_processor_contract.zig"),
+        .target = b.graph.host,
+        .imports = &.{
+            .{ .name = "zigmkay", .module = h.zigmkay },
+            .{ .name = "imported-profiles", .module = pairs_mod },
+        },
+    }));
     return result.items;
 }
 

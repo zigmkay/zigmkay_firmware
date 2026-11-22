@@ -6,7 +6,7 @@
 
 [![Firmware tests](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/firmware.yml/badge.svg)](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/firmware.yml)
 [![Companion offline checks](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-offline-checks.yml/badge.svg)](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-offline-checks.yml)
-[![Companion desktop checks](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-desktop-checks.yml/badge.svg)](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-desktop-checks.yml)
+[![Companion application bundle](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-application-bundle.yml/badge.svg)](https://github.com/zigmkay/zigmkay_firmware/actions/workflows/companion-application-bundle.yml)
 <br>
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-blue.svg)](LICENSE)
 [![Zig 0.17.0](https://img.shields.io/badge/zig-0.17.0-f7a41d.svg?logo=zig&logoColor=white)](https://ziglang.org/download/)

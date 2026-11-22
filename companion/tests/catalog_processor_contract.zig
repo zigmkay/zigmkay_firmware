@@ -1,9 +1,10 @@
 const std = @import("std");
 const firmware = @import("zigmkay");
 const core = firmware.core;
-const profile = @import("generated-profile");
+const protocol = @import("device-protocol");
+const generated = @import("generated-profiles");
 
-test "synthetic catalog export preserves every indexed press and release" {
+fn checkSyntheticProfile(comptime profile: type) !void {
     const Processor = firmware.processing.CreateProcessorType(
         &profile.dimensions,
         &profile.keymap,
@@ -41,7 +42,6 @@ test "synthetic catalog export preserves every indexed press and release" {
         );
         try std.testing.expect(output.dequeue() == null);
     }
-    const protocol = @import("device-protocol");
     const identity = profile.identity(protocol);
     const actual = try protocol.computeIdentity(.{
         .board_id = identity.board_id,
@@ -58,4 +58,10 @@ test "synthetic catalog export preserves every indexed press and release" {
     });
     try std.testing.expectEqual(identity.digest, actual.digest);
     try std.testing.expectEqual(protocol.keymapId(actual), profile.custom_functions.companion_keymap_id);
+}
+
+test "synthetic catalog export preserves every indexed press and release" {
+    inline for (generated.profiles) |profile| {
+        try checkSyntheticProfile(profile);
+    }
 }

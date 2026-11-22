@@ -11,6 +11,22 @@ const runner_build = @import("../src/runner/build.zig");
 /// Every firmware-area test root; `tests-reached` checks it against the wiring.
 pub const test_roots = [_][]const u8{ "tests/project_processor_contract.zig", "tools/usb_candidate.zig" };
 
+/// Representative boards covering every distinct keymap family, callback style,
+/// side mode and encoder layout for `-Dfirmware-subset` PR checks.
+const representative_boards = [_][]const u8{
+    "clacky_chan",
+    "keycaprio_colemak_0_7",
+    "lk8",
+    "dasbob",
+    "tuckytwotimes",
+    "molekula",
+};
+
+fn isRepresentativeBoard(name: []const u8) bool {
+    for (representative_boards) |board| if (std.mem.eql(u8, name, board)) return true;
+    return false;
+}
+
 pub fn add(s: *tests.Suite, mb: anytype, fixtures: tests.Fixtures) void {
     const b = s.b;
     const cfg = s.cfg;
@@ -27,8 +43,10 @@ pub fn add(s: *tests.Suite, mb: anytype, fixtures: tests.Fixtures) void {
         steps.build_project.dependOn(&b.addInstallFile(uf2(project), "firmware/project.uf2").step);
     };
 
-    // Both pinned imports for every Keycaprio revision.
-    for (fixtures.imports) |fixture| {
+    // Both pinned imports for every Keycaprio revision (or one representative
+    // import when `-Dfirmware-subset` is set).
+    for (fixtures.imports, 0..) |fixture, index| {
+        if (cfg.firmware_subset and index != 0) continue;
         const firmware = fw_build.addKeyboardFirmware(b, mb, &target, .safe, "imported", fw_build.boards.find(fixture.selector).?, sources, null);
         const processor = firmware.exe.root_module.import_table.get("zigmkay").?;
         const layout = b.createModule(.{ .root_source_file = b.path("src/layout/root.zig"), .imports = &.{.{ .name = "zigmkay", .module = processor }} });
@@ -39,11 +57,12 @@ pub fn add(s: *tests.Suite, mb: anytype, fixtures: tests.Fixtures) void {
     }
 
     // Every selected board with its synthetic indexed export and, separately,
-    // with its actual default keymap.
+    // with its actual default keymap (or the representative subset on PRs).
     for ([_]struct { *std.Build.Step, bool }{ .{ steps.check_firmware, false }, .{ steps.check_firmware_defaults, true } }) |matrix| {
         const step, const defaults = matrix;
         const files = b.addWriteFiles();
         for (fw_build.boards.entries) |board| {
+            if (cfg.firmware_subset and !isRepresentativeBoard(board.name)) continue;
             const generate = b.addRunArtifact(fixtures.catalog_export.?);
             generate.addArg(board.name);
             const directory = generate.addOutputDirectoryArg2(board.name, .{ .make_absolute = true });

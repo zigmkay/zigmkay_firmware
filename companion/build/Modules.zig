@@ -82,26 +82,17 @@ pub const Host = struct {
 
     // Import sets of test and executable roots.
     zigmkay_only: []const Import,
-    project_only: []const Import,
-    label_deps: []const Import,
-    text_deps: []const Import,
-    flash_runtime_deps: []const Import,
-    event_history_deps: []const Import,
-    inspector_session_deps: []const Import,
-    live_keyboard_deps: []const Import,
-    desktop_integration_deps: []const Import,
-    catalog_view_deps: []const Import,
-    onboarding_deps: []const Import,
-    flash_session_deps: []const Import,
-    flash_fixture_deps: []const Import,
+    desktop_host_test_deps: []const Import,
+    host_integration_test_deps: []const Import,
+    app_test_deps: []const Import,
     bundle_check_deps: []const Import,
     catalog_export_deps: []const Import,
-    processor_contract_deps: []const Import,
     keymap_project: []const Import,
     runner_test_deps: []const Import,
     manifest_fixture_deps: []const Import,
     import_fixture_deps: []const Import,
     native_hid_only: []const Import,
+    project_only: []const Import,
 };
 
 /// Test roots of the input package, all on the host target.
@@ -140,15 +131,12 @@ pub const Gui = struct {
     keyboard_ui: *Module,
     key_editor_ui: *Module,
     companion_window: *Module,
-    audit_options: *std.Build.Step.Options,
 
-    vector_test_deps: []const Import,
     application_icons: *Module,
     icon_files: std.Build.LazyPath,
-    key_renderer_deps: []const Import,
-    dependency_smoke_deps: []const Import,
-    physical_smoke_deps: []const Import,
-    editor_frame_test_deps: []const Import,
+    desktop_gui_test_deps: []const Import,
+    platform_gui_test_deps: []const Import,
+    tests_desktop_deps: []const Import,
     app_deps: []const Import,
     usb_acceptance_deps: []const Import,
 };
@@ -276,7 +264,7 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .{ .name = "companion-jobs", .module = core.jobs },
     });
     const importer = b.createModule(.{ .root_source_file = b.path("src/importer/root.zig"), .target = t, .optimize = o, .imports = importer_deps });
-    const desktop_core = b.createModule(.{ .root_source_file = b.path("src/desktop/root.zig"), .target = t, .optimize = o, .imports = dupe(b, &.{
+    const desktop_core_imports = dupe(b, &.{
         .{ .name = "project", .module = project },
         .{ .name = "layout-model", .module = layout },
         .{ .name = "zkeymap", .module = keymap },
@@ -291,13 +279,8 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .{ .name = "keymap-importer", .module = importer },
         .{ .name = "runner-async", .module = runner_async },
         .{ .name = "session", .module = session },
-    }) });
-    const label_deps = dupe(b, &.{
-        .{ .name = "project", .module = project },
-        .{ .name = "layout-model", .module = layout },
-        .{ .name = "zkeymap", .module = keymap },
-        .{ .name = "zkeycodes", .module = keycodes },
     });
+    const desktop_core = b.createModule(.{ .root_source_file = b.path("src/desktop/root.zig"), .target = t, .optimize = o, .imports = desktop_core_imports });
     return .{
         .sources = sources,
         .zigmkay = zigmkay,
@@ -339,32 +322,20 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .input_tests = initInputTests(b, keycodes, keymap, input_source),
         .zigmkay_only = zigmkay_only,
         .project_only = project_only,
-        .label_deps = label_deps,
-        .text_deps = dupe(b, &.{ .{ .name = "layout-model", .module = layout }, .{ .name = "input-source", .module = input_source } }),
-        .flash_runtime_deps = dupe(b, &.{ .{ .name = "companion-jobs", .module = core.jobs }, .{ .name = "flash-controller", .module = core.flash_controller } }),
-        .event_history_deps = dupe(b, &.{.{ .name = "device-protocol", .module = protocol }}),
-        .inspector_session_deps = dupe(b, &.{ .{ .name = "project", .module = project }, .{ .name = "layout-model", .module = layout } }),
-        .live_keyboard_deps = dupe(b, &.{
-            .{ .name = "session", .module = session },
-            .{ .name = "device-protocol", .module = protocol },
+        .desktop_host_test_deps = desktop_core_imports,
+        .host_integration_test_deps = dupe(b, &.{
+            .{ .name = "desktop-core", .module = desktop_core },
+            .{ .name = "project", .module = project },
+            .{ .name = "companion-jobs", .module = core.jobs },
+            .{ .name = "catalog", .module = catalog },
             .{ .name = "layout-model", .module = layout },
-            .{ .name = "project", .module = project },
-            .{ .name = "zkeymap", .module = keymap },
-            .{ .name = "zkeycodes", .module = keycodes },
+            .{ .name = "zigmkay", .module = zigmkay },
         }),
-        .desktop_integration_deps = dupe(b, &.{
-            .{ .name = "desktop-core", .module = desktop_core },
-            .{ .name = "project", .module = project },
-            .{ .name = "companion-jobs", .module = core.jobs },
-        }),
-        .catalog_view_deps = dupe(b, &.{ .{ .name = "desktop-core", .module = desktop_core }, .{ .name = "catalog", .module = catalog } }),
-        .onboarding_deps = dupe(b, &.{ .{ .name = "desktop-core", .module = desktop_core }, .{ .name = "project", .module = project } }),
-        .flash_session_deps = dupe(b, &.{
+        .app_test_deps = dupe(b, &.{
             .{ .name = "desktop-core", .module = desktop_core },
             .{ .name = "companion-jobs", .module = core.jobs },
             .{ .name = "project", .module = project },
         }),
-        .flash_fixture_deps = dupe(b, &.{ .{ .name = "desktop-core", .module = desktop_core }, .{ .name = "project", .module = project } }),
         .bundle_check_deps = dupe(b, &.{
             .{ .name = "desktop-core", .module = desktop_core },
             .{ .name = "project", .module = project },
@@ -373,7 +344,6 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
             .{ .name = "catalog-inventory", .module = catalog },
         }),
         .catalog_export_deps = dupe(b, &.{ .{ .name = "catalog-project", .module = catalog_project }, .{ .name = "project", .module = project } }),
-        .processor_contract_deps = dupe(b, &.{ .{ .name = "zigmkay", .module = zigmkay }, .{ .name = "layout-model", .module = layout } }),
         .keymap_project = dupe(b, &.{.{ .name = "keymap-project", .module = project }}),
         .runner_test_deps = dupe(b, &.{
             .{ .name = "runner-protocol", .module = runner_protocol },
@@ -404,7 +374,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/generate_application_icons.zig"),
             .target = b.graph.host,
-            .optimize = .ReleaseSafe,
+            .optimize = .debug,
             .imports = &.{.{ .name = "svg2tvg", .module = svg2tvg }},
         }),
     });
@@ -455,8 +425,6 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .{ .name = "dvui", .module = dvui },
         .{ .name = "dvui_backend", .module = backend },
     }) });
-    const audit_options = b.addOptions();
-    audit_options.addOption(bool, "vectors", true);
 
     const dc = host.desktop_core;
     const editor = [_]Import{
@@ -488,7 +456,6 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .{ .name = "layout-model", .module = host.layout },
     });
     const with_form = editor ++ [_]Import{.{ .name = "action-form-ui", .module = action_form_ui }};
-    const action_drawer_ui = desktopModule(b, cfg, "action_drawer_ui.zig", &with_form);
     const combo_ui = desktopModule(b, cfg, "combo_ui.zig", &(with_form ++ [_]Import{.{ .name = "project", .module = host.project }}));
     const encoder_ui = desktopModule(b, cfg, "encoder_ui.zig", &with_form);
     const callback_ui = desktopModule(b, cfg, "callback_ui.zig", &editor);
@@ -567,48 +534,25 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .keyboard_ui = keyboard_ui,
         .key_editor_ui = key_editor_ui,
         .companion_window = companion_window,
-        .audit_options = audit_options,
-        .vector_test_deps = dupe(b, &.{ .{ .name = "svg2tvg", .module = svg2tvg }, .{ .name = "icons", .module = icons } }),
         .application_icons = application_icons,
         .icon_files = icon_files,
-        .key_renderer_deps = dupe(b, &.{
+        .desktop_gui_test_deps = dupe(b, &.{
             .{ .name = "dvui", .module = dvui },
             .{ .name = "editor-fonts", .module = fonts },
             .{ .name = "editor-ui", .module = ui },
             .{ .name = "desktop-core", .module = dc },
             .{ .name = "layout-model", .module = host.layout },
             .{ .name = "zkeymap", .module = host.keymap },
+            .{ .name = "project", .module = host.project },
         }),
-        .dependency_smoke_deps = dupe(b, &.{
+        .platform_gui_test_deps = dupe(b, &.{
+            .{ .name = "sdl3-c", .module = sdl },
             .{ .name = "dvui", .module = dvui },
             .{ .name = "dvui_backend", .module = backend },
-            .{ .name = "ztray", .module = tray },
-            .{ .name = "window-placement", .module = placement },
-            .{ .name = "editor-fonts", .module = fonts },
-            .{ .name = "folder-dialog", .module = folder_dialog },
-            .{ .name = "editor-ui", .module = ui },
-            .{ .name = "flash-ui", .module = flash_ui },
-            .{ .name = "flash-presenter", .module = core.flash_presenter },
-            .{ .name = "native-tray", .module = native_tray },
-            .{ .name = "native-events", .module = events },
-            .{ .name = "desktop-icons", .module = icons },
-            .{ .name = "desktop-audit-options", .module = audit_options.createModule() },
         }),
-        .physical_smoke_deps = dupe(b, &(shared_ui ++ [_]Import{
-            .{ .name = "physical-ui", .module = physical_ui },
-            .{ .name = "action-form-ui", .module = action_form_ui },
-            .{ .name = "action-drawer-ui", .module = action_drawer_ui },
-            .{ .name = "key-editor-ui", .module = key_editor_ui },
-            .{ .name = "combo-ui", .module = combo_ui },
-            .{ .name = "layer-ui", .module = layer_ui },
-            .{ .name = "host-palette-ui", .module = host_palette_ui },
-            .{ .name = "keyboard-ui", .module = keyboard_ui },
-            .{ .name = "toolbar-ui", .module = toolbar_ui },
-            .{ .name = "desktop-icons", .module = icons },
-            .{ .name = "icon-resources", .module = icon_resources },
-            .{ .name = "desktop-audit-options", .module = audit_options.createModule() },
-        })),
-        .editor_frame_test_deps = dupe(b, &.{
+        .tests_desktop_deps = dupe(b, &.{
+            .{ .name = "svg2tvg", .module = svg2tvg },
+            .{ .name = "icons", .module = icons },
             .{ .name = "paths-ui", .module = paths_ui },
             .{ .name = "desktop-core", .module = dc },
             .{ .name = "project", .module = host.project },

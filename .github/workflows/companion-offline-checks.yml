@@ -12,11 +12,15 @@ on:
       - build.zig.zon
       - .github/workflows/companion-offline-checks.yml
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
     paths: *paths
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'full-ci' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  FULL_CI: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
 
 defaults:
   run:
@@ -24,6 +28,7 @@ defaults:
 
 jobs:
   check:
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-ci'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -32,18 +37,16 @@ jobs:
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
+          cache-size-limit: 4096
       - name: Verify Zig version
         run: test "$(zig version)" = 0.17.0
       - name: Install xkbcommon development library
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
-      - name: Check source contracts first (no device access)
-        timeout-minutes: 10
-        run: zig build check -j2 --test-timeout 30s
-      - name: Test nested source traversal before the complete matrix
-        timeout-minutes: 2
-        run: zig test src/jobs/source_files.zig --test-filter nested
-      - name: Test portable contracts and imported processor traces (no device access)
+      - name: Compile and test portable contracts and imported processor traces (no device access)
         timeout-minutes: 20
-        run: zig build test -j2 --test-timeout 180s --summary all
+        run: zig build check test -j4 --test-timeout 180s --summary all
       - name: Compile generated, synthetic, default and imported firmware matrices without devices
-        run: zig build check-firmware check-firmware-defaults -Dfirmware -j2 --summary all
+        run: |
+          subset=()
+          if [ "$FULL_CI" != "true" ]; then subset=("-Dfirmware-subset=true"); fi
+          zig build check-firmware check-firmware-defaults -Dfirmware "${subset[@]}" -j4 --summary all
