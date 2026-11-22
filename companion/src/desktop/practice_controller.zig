@@ -638,6 +638,9 @@ pub const Controller = struct {
         if (self.reset_requested) {
             try storage.resetProfile(io, base_dir, self.profile.profile_hash);
             self.reset_requested = false;
+            self.pending_run = null;
+            self.needs_persist = false;
+            return;
         }
 
         if (self.pending_run) |pr| {

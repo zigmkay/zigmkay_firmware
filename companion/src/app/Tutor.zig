@@ -16,6 +16,7 @@ controller: desktop.practice_controller.Controller,
 /// The project of the active run, frozen when it starts.
 snapshot: ?Snapshot = null,
 view: tutor.View = .{},
+loaded_runs: ?desktop.practice_storage.LoadedRuns = null,
 bound_profile_hash: ?[32]u8 = null,
 bound_board_id: [64]u8 = @splat(0),
 bound_board_id_len: usize = 0,
@@ -72,6 +73,7 @@ pub const Outcome = struct {
 };
 
 pub fn deinit(self: *Tutor) void {
+    if (self.loaded_runs) |*runs| runs.deinit();
     if (self.snapshot) |*value| value.deinit();
 }
 
@@ -351,6 +353,22 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
     var outcome: Outcome = .{};
     // A run on the OS source waits for the live keyboard to verify itself.
     const waiting_for_live = practice.config.source == .os and app.live_enabled and !frame.live;
+    // Load runs.jsonl on demand only while the Progress sheet is open; free when closed.
+    if (self.view.sheet == .progress) {
+        if (self.loaded_runs == null and app.frame_limit == null and practice.profile_bound) {
+            if (app.user_paths) |owned| {
+                if (std.Io.Dir.cwd().openDir(app.io, owned.paths.data, .{})) |data_dir| {
+                    var d = data_dir;
+                    defer d.close(app.io);
+                    self.loaded_runs = desktop.practice_storage.loadRuns(app.gpa, app.io, d, practice.profile.profile_hash) catch null;
+                } else |_| {}
+            }
+        }
+    } else if (self.loaded_runs != null) {
+        self.loaded_runs.?.deinit();
+        self.loaded_runs = null;
+    }
+
     const input: tutor.Input = .{
         .now_us = now_us,
         .window_focused = app.focused(),
@@ -359,6 +377,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
         .diagnostic = std.mem.sliceTo(&app.view.diagnostic, 0),
         .frame = if (waiting_for_live) null else frame.keyboard,
         .event_times = app.events.times[0..app.events.time_count],
+        .runs = if (self.loaded_runs) |r| r.runs else &.{},
     };
     const rect = app.window.data().rect;
     const bounds: dvui.Rect = .{ .x = 0, .y = 0, .w = @max(300, rect.w), .h = @max(300, rect.h) };
@@ -381,6 +400,10 @@ pub fn finishFrame(app: *App, outcome: Outcome, control_model: *desktop.model.Mo
         app.applyPractice(practice.pause(now_us), &app.model, now_us);
         app.practicing = false;
     } else if (outcome.action) |action| {
+        if (action.intent == .reset_progress) {
+            if (self.loaded_runs) |*runs| runs.deinit();
+            self.loaded_runs = null;
+        }
         const prepared = if (app.build.runner) |runner| runner.record.inputs.project_digest else null;
         const effect = tutor.apply(practice, &self.view, action, .{ .now_us = now_us, .prepared_snapshot = prepared }) catch |err| failed: {
             app.view.report(err);

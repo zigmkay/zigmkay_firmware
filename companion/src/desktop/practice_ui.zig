@@ -9,11 +9,12 @@ const model = @import("layout-model");
 const geometry = @import("physical-ui");
 const keyboard_view = @import("practice_keyboard_ui.zig");
 const presentation = @import("practice_presentation.zig");
+const sheets_ui = @import("practice_sheets_ui.zig");
 
 const control = desktop.practice_controller;
 const storage = desktop.practice_storage;
 
-pub const Sheet = enum { none, stages, progress };
+pub const Sheet = sheets_ui.Sheet;
 
 pub const Frame = struct {
     /// Live frames must come from the coherent identity-checked session adapter.
@@ -54,6 +55,8 @@ pub const View = struct {
     sheet: Sheet = .none,
     settings_open: bool = false,
     confirm_reset: bool = false,
+    custom_text_buf: [256]u8 = @splat(0),
+    custom_text_seeded: bool = false,
     last_pressed_error_key: ?usize = null,
     last_error_flash_us: u64 = 0,
 };
@@ -301,6 +304,16 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     } else {
         try drawTutorWorkspace(owner, view, theme, .{ .x = pad_x, .y = work_top, .w = content_w, .h = work_h }, input, &pending);
     }
+
+    // 3. Secondary Sheets (Stages / Progress) and compact Settings popover
+    try sheets_ui.drawSheet(owner, &view.sheet, theme, .{
+        .board_name = if (input.frame) |f| f.board_name else "",
+        .profile_name = if (input.frame) |f| f.profile else "",
+        .runs = input.runs,
+        .custom_text_buf = &view.custom_text_buf,
+        .custom_text_seeded = &view.custom_text_seeded,
+    }, &pending);
+    try sheets_ui.drawSettingsPopover(owner, &view.settings_open, &view.confirm_reset, theme, size.w - 16, topbar_h + 6, &pending);
 
     view.drawn_len = owner.session.len;
     return .{
