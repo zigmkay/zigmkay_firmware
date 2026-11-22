@@ -53,13 +53,21 @@ jobs:
           fi
 
           tag="companion-v${version}"
-          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-            echo "::error::Tag '${tag}' already exists."
+          if gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx false; then
+            echo "::error::Release '${tag}' is already published."
             exit 1
           fi
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "::error::Release '${tag}' already exists."
-            exit 1
+
+          # A previous run may have pushed the tag and then failed before
+          # publishing. Resume it: rebuild exactly the tagged commit (the build
+          # validates that its build.zig.zon carries this version) and let the
+          # publish job create or resume the draft release.
+          if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+            commit_sha=$(git rev-parse "refs/tags/${tag}^{commit}")
+            echo "release_tag=${tag}" >> "$GITHUB_OUTPUT"
+            echo "commit_sha=${commit_sha}" >> "$GITHUB_OUTPUT"
+            echo "::notice::Tag ${tag} already exists at ${commit_sha} without a published release; resuming."
+            exit 0
           fi
 
           if [ "$version" != "$current_version" ]; then

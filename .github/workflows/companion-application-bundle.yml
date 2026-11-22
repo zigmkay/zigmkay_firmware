@@ -46,6 +46,11 @@ on:
 permissions:
   contents: read
 
+# Inside a reusable workflow, github.event_name is the CALLER's event
+# (workflow_dispatch for companion-release.yml), never 'workflow_call', and
+# inputs.mode is unset. Release runs are therefore detected by
+# inputs.release_tag, and manual diagnostic/gui runs by inputs.mode.
+
 # A new push supersedes the PR's running checks. Tags, workflow_call releases
 # and unrelated labels never cancel anything.
 concurrency:
@@ -67,7 +72,7 @@ defaults:
 
 jobs:
   windows-finalization:
-    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'diagnostic'
+    if: github.event_name == 'workflow_dispatch' && inputs.release_tag == '' && inputs.mode == 'diagnostic'
     runs-on: windows-2025
     timeout-minutes: 10
     steps:
@@ -97,7 +102,7 @@ jobs:
             ${{ runner.temp }}/finalization ü
   # Linux has its own job so linux-runtime starts as soon as its package exists.
   bundle-linux:
-    if: (github.event_name != 'workflow_dispatch' || inputs.mode == 'full') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
+    if: (inputs.release_tag != '' || github.event_name != 'workflow_dispatch' || inputs.mode == 'full') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
     strategy:
       matrix:
         include: [{ os: ubuntu-22.04, platform: linux-x86_64, jobs: 4 }]
@@ -309,7 +314,7 @@ jobs:
           path: companion/zig-out/bin/check-application-bundle
 
   bundle:
-    if: (github.event_name != 'workflow_dispatch' || inputs.mode == 'full' || inputs.mode == 'gui') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
+    if: (inputs.release_tag != '' || github.event_name != 'workflow_dispatch' || inputs.mode == 'full' || inputs.mode == 'gui') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
     strategy:
       fail-fast: false
       matrix:
@@ -321,7 +326,7 @@ jobs:
 
   linux-runtime:
     needs: bundle-linux
-    if: github.event_name != 'workflow_dispatch' || inputs.mode == 'full'
+    if: inputs.release_tag != '' || github.event_name != 'workflow_dispatch' || inputs.mode == 'full'
     strategy:
       fail-fast: false
       matrix:
@@ -411,7 +416,7 @@ jobs:
           path: ${{ runner.temp }}/Zigmkay offline ü/cache/zigmkay/builds/build-*/build.*.log
 
   source:
-    if: (github.event_name != 'workflow_dispatch' || inputs.mode == 'full') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
+    if: (inputs.release_tag != '' || github.event_name != 'workflow_dispatch' || inputs.mode == 'full') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
@@ -430,7 +435,7 @@ jobs:
 
   publish:
     needs: [bundle, bundle-linux, linux-runtime, source]
-    if: github.event_name == 'workflow_call' || startsWith(github.ref, 'refs/tags/')
+    if: inputs.release_tag != '' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
@@ -487,7 +492,31 @@ jobs:
           if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/existing-release.json"; then
             zig-out/bin/release validate-existing-release "$RUNNER_TEMP/existing-release.json"
           else
-            { printf '# Zigmkay companion %s\n\n' "$version"; cat packaging/preview-notes.md; } > "$RUNNER_TEMP/release-notes.md"
+            # Changelog since the previous companion release (ignoring firmware
+            # tags). A stable release compares against the previous stable one so
+            # its notes cover the whole preview cycle. -preview sorts before the
+            # plain version.
+            previous_tag=""
+            seen_current=false
+            while read -r candidate; do
+              if [ "$candidate" = "$RELEASE_TAG" ]; then seen_current=true; continue; fi
+              "$seen_current" || continue
+              if [[ "$version" != *-preview.* && "$candidate" == *-preview.* ]]; then continue; fi
+              previous_tag="$candidate"
+              break
+            done < <(git -c versionsort.suffix=-preview tag -l 'companion-v*' --sort=-v:refname)
+            notes_args=(-f "tag_name=$RELEASE_TAG" -f "target_commitish=$RELEASE_SHA")
+            if [ -n "$previous_tag" ]; then notes_args+=(-f "previous_tag_name=$previous_tag"); fi
+            if ! changes=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases/generate-notes" "${notes_args[@]}" --jq .body); then
+              echo "::warning::Could not generate the changelog; publishing installation notes only."
+              changes=""
+            fi
+            {
+              printf '# Zigmkay companion %s\n\n' "$version"
+              if [ -n "$changes" ]; then printf '%s\n\n' "$changes"; fi
+              printf '## Downloads and installation\n\n'
+              cat packaging/preview-notes.md
+            } > "$RUNNER_TEMP/release-notes.md"
             gh release create "$RELEASE_TAG" --verify-tag --draft "$prerelease_flag" --title "$title" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
           gh release upload "$RELEASE_TAG" release-assets/* --clobber
