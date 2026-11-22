@@ -1,6 +1,7 @@
 //! Presentation rules shared by the animated tutor and native acceptance checks.
 const std = @import("std");
-const Session = @import("practice.zig").Session;
+const practice = @import("practice.zig");
+const Session = practice.Session;
 pub const Range = struct { start: usize, end: usize };
 
 pub fn whitespace(cp: u21) bool {
@@ -9,6 +10,9 @@ pub fn whitespace(cp: u21) bool {
 
 /// Keep a mistake in view until it is corrected, rather than moving past it.
 pub fn focus(session: *const Session) usize {
+    if (session.error_mode == .stop_on_error) {
+        return @min(session.len, session.reference_len);
+    }
     for (session.typed[0..@min(session.len, session.reference_len)], 0..) |cp, i| {
         if (cp != session.reference[i]) return i;
     }
@@ -49,6 +53,14 @@ pub fn currentLine(ranges: []const Range, index: usize) usize {
     return ranges.len -| 1;
 }
 
+/// Computes the visible 3-line sliding window `[start_line, end_line)` centered around `active_line`.
+pub fn visibleThreeLines(total_lines: usize, active_line: usize) Range {
+    if (total_lines <= 3) return .{ .start = 0, .end = total_lines };
+    if (active_line == 0) return .{ .start = 0, .end = 3 };
+    if (active_line + 1 >= total_lines) return .{ .start = total_lines - 3, .end = total_lines };
+    return .{ .start = active_line - 1, .end = active_line + 2 };
+}
+
 pub fn glyph(cp: u21, explicit_space: bool, buffer: *[4]u8) []const u8 {
     return switch (cp) {
         ' ' => if (explicit_space) "␣" else " ",
@@ -59,7 +71,7 @@ pub fn glyph(cp: u21, explicit_space: bool, buffer: *[4]u8) []const u8 {
 }
 
 test "word focus follows Unicode, whitespace, mistakes and correction" {
-    var s: Session = .{};
+    var s: Session = .{ .error_mode = .flow_backspace };
     try s.load("The café.\n", .os);
     try std.testing.expectEqualDeep(
         Range{ .start = 0, .end = 3 },
@@ -93,4 +105,7 @@ test "wrapped context covers every character including indentation and newline" 
     }
     try std.testing.expectEqual(s.reference_len, next);
     try std.testing.expectEqual(@as(usize, 1), currentLine(result, 7));
+    try std.testing.expectEqualDeep(Range{ .start = 0, .end = 3 }, visibleThreeLines(6, 0));
+    try std.testing.expectEqualDeep(Range{ .start = 1, .end = 4 }, visibleThreeLines(6, 2));
+    try std.testing.expectEqualDeep(Range{ .start = 3, .end = 6 }, visibleThreeLines(6, 5));
 }

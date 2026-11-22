@@ -15,9 +15,9 @@ const window_icon = @import("window_icon.zig");
 window: ?u32 = null,
 view: companion_ui.View = .{},
 
-/// The companion stays hidden while a run hides all assistance.
+/// The companion stays hidden while a tutor run is in Free (no hints) mode.
 pub fn suppressed(app: *const App) bool {
-    return !app.life.companion_visible or (app.practicing and app.tutor.controller.config.assistance == .hidden);
+    return !app.life.companion_visible or (app.practicing and app.tutor.controller.config.mode == .tutor and app.tutor.controller.config.guidance == .free);
 }
 
 pub fn hideIfSuppressed(app: *App) void {
@@ -84,7 +84,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void
     @memset(targets, false);
     @memset(holds, false);
     const tutor = &app.tutor.controller;
-    if (app.practicing and tutor.config.assistance == .guided and tutor.active and tutor.session.state != .complete and
+    if (app.practicing and tutor.config.mode == .tutor and tutor.config.guidance != .free and tutor.active and tutor.session.state != .complete and
         (!live or practice.live) and labels == practice.labels)
     {
         const session = &tutor.session;
@@ -93,13 +93,28 @@ fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void
             app.live.frame.active
         else if (draft.owner != null) draft.active_layers else desktop.practice.layerMask(layer);
         const hint = if (next < session.reference_len)
-            try desktop.practice.hint(labels.practiceLabels(), layer, modifiers.toByte(), session.reference[next], active_layers)
+            try desktop.practice.hintWithProfile(
+                if (tutor.profile_bound) &tutor.profile else null,
+                labels.practiceLabels(),
+                layer,
+                modifiers.toByte(),
+                session.reference[next],
+                active_layers,
+            )
         else
             null;
-        try desktop.practice.guidance(labels.practiceLabels(), practice.metadata, layer, modifiers.toByte(), hint, .{
-            .tap = targets,
-            .hold = holds,
-        });
+        try desktop.practice.guidanceWithProfile(
+            if (tutor.profile_bound) &tutor.profile else null,
+            labels.practiceLabels(),
+            practice.metadata,
+            layer,
+            modifiers.toByte(),
+            hint,
+            .{
+                .tap = targets,
+                .hold = holds,
+            },
+        );
     }
     companion_ui.draw(model, .{
         .snapshot = try model.id(),
@@ -111,8 +126,8 @@ fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void
         .pressed = if (live) app.live.frame.pressed else held,
         .live = live,
         .active_layers = if (live) app.live.frame.active else null,
-        .practicing = app.practicing,
-        .assistance = tutor.config.assistance,
+        .practicing = app.practicing and tutor.config.mode == .tutor,
+        .guidance = tutor.config.guidance,
         .targets = targets,
         .holds = holds,
     }, app.view.toolbar.light) catch |err| app.view.report(err);

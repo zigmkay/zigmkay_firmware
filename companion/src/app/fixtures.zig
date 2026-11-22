@@ -41,7 +41,10 @@ fn showTutor(app: *App) !void {
     const now: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
     const scene = app.count / 4;
     if (scene == 0) return;
-    const config: desktop.practice_controller.Config = if (scene == 2) .{ .mode = .zig, .level = 0 } else .{ .level = 1 };
+    const config: desktop.practice_controller.Config = if (scene == 2)
+        .{ .stage = .free_text, .stage6_source = .zig_code, .zig_lesson_index = 0 }
+    else
+        .{ .stage = .all_letters };
     app.applyPractice(try practice.choose(config, now), &app.model, now);
     app.applyPractice(try practice.start(true, null, now), &app.model, now);
     const session = &practice.session;

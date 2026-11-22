@@ -1,8 +1,9 @@
-//! Typing tutor wiring: which project and labels a run practices on, and the
-//! tutor screen.
+//! Typing tutor wiring: layout profile derivation, persistence, frozen Snapshot
+//! isolation, Live-HID / Unflashed draft routing, and screen orchestration.
 const std = @import("std");
 const dvui = @import("dvui");
 const desktop = @import("desktop-core");
+const project = @import("project");
 const boards = @import("catalog-project");
 const tutor = @import("practice-ui");
 const ui = @import("editor-ui");
@@ -15,6 +16,11 @@ controller: desktop.practice_controller.Controller,
 /// The project of the active run, frozen when it starts.
 snapshot: ?Snapshot = null,
 view: tutor.View = .{},
+bound_profile_hash: ?[32]u8 = null,
+bound_board_id: [64]u8 = @splat(0),
+bound_board_id_len: usize = 0,
+bound_host_layout: [64]u8 = @splat(0),
+bound_host_layout_len: usize = 0,
 
 /// The project a run practices on, frozen independently of later edits.
 pub const Snapshot = struct {
@@ -69,11 +75,173 @@ pub fn deinit(self: *Tutor) void {
     if (self.snapshot) |*value| value.deinit();
 }
 
+/// Derives a `LayoutProfile` from the active board geometry, resolved `LabelCache`,
+/// and `Document.combos` (translating combo outputs through the active translator).
+pub fn deriveLayoutProfile(
+    app: *App,
+    board: *const boards.OwnedBoard,
+    labels: *const desktop.label_cache.LabelCache,
+    doc: project.Document,
+    host_layout: []const u8,
+) !desktop.practice_layout_profile.LayoutProfile {
+    const lp = desktop.practice_layout_profile;
+    var geo_buf: [lp.max_keys]lp.GeometryKey = undefined;
+    const key_count = @min(board.entry.geometry.len, lp.max_keys);
+    for (board.entry.geometry[0..key_count], 0..) |g, i| {
+        geo_buf[i] = .{
+            .key_index = g.key_index,
+            .x = g.x,
+            .y = g.y,
+            .width = g.width,
+            .height = g.height,
+            .rotation = g.rotation,
+            .hand = switch (g.hand) {
+                .left => .left,
+                .right => .right,
+                .neutral => .neutral,
+            },
+            .group = switch (g.group) {
+                .finger => .finger,
+                .thumb => .thumb,
+            },
+            .home_row = g.home_row,
+        };
+    }
+
+    var combo_buf: [lp.max_combos]lp.ComboInput = undefined;
+    var combo_len: usize = 0;
+    for (doc.combos) |combo| {
+        if (combo_len >= combo_buf.len) break;
+        const k0 = project.keyIndex(doc, combo.key_ids[0]) catch continue;
+        const k1 = project.keyIndex(doc, combo.key_ids[1]) catch continue;
+        const layer_idx = project.layerIndex(doc, combo.layer_id) catch continue;
+        const lowered = project.lowerAction(doc, combo.action) catch continue;
+
+        var buf: [64]u8 = undefined;
+        const content = if (app.source) |*source|
+            desktop.label_cache.computeKeyContent(source, lowered, .{}, &buf)
+        else
+            desktop.label_cache.computeKeyContent(&app.translator, lowered, .{}, &buf);
+
+        var out_cp: ?u21 = null;
+        if (!content.unproven and !content.dead and !content.shortcut) {
+            if (content.hid_code) |code| {
+                if (code == 44) out_cp = ' ';
+            }
+            if (out_cp == null) {
+                if (content.label) |lbl| {
+                    if (lbl.len > 0) {
+                        const seq = std.unicode.utf8ByteSequenceLength(lbl[0]) catch 0;
+                        if (seq == lbl.len) {
+                            out_cp = std.unicode.utf8Decode(lbl) catch null;
+                        }
+                    }
+                }
+            }
+        }
+        if (out_cp != null) {
+            combo_buf[combo_len] = .{
+                .layer = layer_idx,
+                .key_indices = .{ k0, k1 },
+                .output_cp = out_cp,
+                .unproven = content.unproven,
+                .dead = content.dead,
+                .shortcut = content.shortcut,
+            };
+            combo_len += 1;
+        }
+    }
+
+    const fidelity: lp.Fidelity = switch (board.entry.fidelity) {
+        .schematic => .schematic,
+        .linear => .linear,
+    };
+
+    const profile_id = std.mem.sliceTo(&doc.profile_id, 0);
+    return lp.derive(geo_buf[0..key_count], labels.practiceLabels(), .{
+        .board_id = board.entry.selector,
+        .base_layout_fingerprint = profile_id,
+        .host_layout = host_layout,
+        .fidelity = fidelity,
+        .combos = combo_buf[0..combo_len],
+    });
+}
+
+fn syncProfileAndPersistence(
+    app: *App,
+    board: *const boards.OwnedBoard,
+    labels: *const desktop.label_cache.LabelCache,
+    model: *const desktop.model.Model,
+    host_layout: []const u8,
+) void {
+    const self = &app.tutor;
+    const derived = deriveLayoutProfile(app, board, labels, model.document(), host_layout) catch return;
+
+    const needs_rebind = !self.controller.profile_bound or
+        self.bound_profile_hash == null or
+        !std.mem.eql(u8, &self.bound_profile_hash.?, &derived.profile_hash) or
+        !std.mem.eql(u8, &self.controller.profile.positions_digest, &derived.positions_digest);
+
+    if (!needs_rebind) return;
+
+    const same_profile = self.bound_profile_hash != null and
+        std.mem.eql(u8, &self.bound_profile_hash.?, &derived.profile_hash);
+
+    if (same_profile) {
+        // Individual keys edited within the same profile: partial reset only moved keys.
+        const prev_positions = self.controller.profile.keyPositionSlice();
+        _ = self.controller.learning.applyLayoutDiff(prev_positions, derived.keyPositionSlice());
+        self.controller.profile = derived;
+        self.controller.needs_persist = true;
+        return;
+    }
+
+    // Load persisted state for this profile when running outside offline fixtures.
+    var loaded: ?desktop.practice_storage.LoadedState = null;
+    defer if (loaded) |*l| l.deinit();
+    if (app.frame_limit == null) {
+        if (app.user_paths) |owned| {
+            if (std.Io.Dir.cwd().createDirPathOpen(app.io, owned.paths.data, .{})) |data_dir| {
+                var d = data_dir;
+                defer d.close(app.io);
+                loaded = desktop.practice_storage.loadState(app.gpa, app.io, d, derived.profile_hash) catch null;
+            } else |_| {}
+        }
+    }
+
+    _ = self.controller.bindProfile(derived, if (loaded) |l| (if (l.existed) l.state else null) else null);
+    self.bound_profile_hash = derived.profile_hash;
+    const bid_len = @min(board.entry.selector.len, self.bound_board_id.len);
+    @memcpy(self.bound_board_id[0..bid_len], board.entry.selector[0..bid_len]);
+    self.bound_board_id_len = bid_len;
+    const hl_len = @min(host_layout.len, self.bound_host_layout.len);
+    @memcpy(self.bound_host_layout[0..hl_len], host_layout[0..hl_len]);
+    self.bound_host_layout_len = hl_len;
+}
+
+fn flushPersistence(app: *App) void {
+    const self = &app.tutor;
+    if (app.frame_limit != null or !self.controller.needs_persist) return;
+    const owned = app.user_paths orelse return;
+    var data_dir = std.Io.Dir.cwd().createDirPathOpen(app.io, owned.paths.data, .{}) catch return;
+    defer data_dir.close(app.io);
+    self.controller.persistPending(
+        app.gpa,
+        app.io,
+        data_dir,
+        self.bound_board_id[0..self.bound_board_id_len],
+        self.bound_host_layout[0..self.bound_host_layout_len],
+    ) catch {};
+}
+
 /// Keeps the run's frozen project current and advances the run. Returns the
 /// project that controls practice input.
 pub fn observe(app: *App, now_us: u64) !*desktop.model.Model {
     const self = &app.tutor;
     const practice = &self.controller;
+    const utc_ns = std.Io.Timestamp.now(app.io, .real).nanoseconds;
+    if (utc_ns > 0) practice.utc_now_sec = @intCast(@divTrunc(utc_ns, std.time.ns_per_s));
+
     if (!practice.active or (self.snapshot != null and !std.mem.eql(u8, &self.snapshot.?.control, &practice.current))) {
         if (self.snapshot) |*value| value.deinit();
         self.snapshot = null;
@@ -94,6 +262,7 @@ pub fn observe(app: *App, now_us: u64) !*desktop.model.Model {
         if (practice.failure) |failure| return failure;
         if (practice.session.len > 1) return error.DraftRepeatRoutingFailed;
     }
+    flushPersistence(app);
     return control_model;
 }
 
@@ -104,10 +273,23 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
     const labels = if (self.snapshot) |*value|
         &value.captions.labels
     else if (live) &app.live.captions.labels else &app.captions.labels;
-    const geometry = if (self.snapshot) |*value|
-        value.board.entry.geometry
-    else if (live) app.live.board.entry.geometry else board.entry.geometry;
+    const active_board = if (self.snapshot) |*value|
+        &value.board
+    else if (live) &app.live.board else board;
+    const geometry = active_board.entry.geometry;
     const model = if (self.snapshot) |*value| &value.model else if (live) &app.live.model else &app.model;
+    const host_layout = if (app.source) |*source| source.id() else "offline";
+
+    syncProfileAndPersistence(app, active_board, labels, model, host_layout);
+
+    // Zero-friction entry: when entering Tutor mode in interactive use, immediately prepare a ready round.
+    if (app.practicing and app.frame_limit == null and practice.config.mode == .tutor and !practice.active) {
+        const now_us: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
+        const prepared = if (app.build.runner) |runner| runner.record.inputs.project_digest else null;
+        if (practice.ensureReady(prepared, now_us)) |eff| {
+            app.applyPractice(eff, model, now_us);
+        } else |_| {}
+    }
 
     const arena = app.window.arena();
     const metadata = try arena.alloc(desktop.practice.KeyMetadata, labels.key_count);
@@ -126,15 +308,27 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
     } else if (draft.owner) |runner| if (runner.pressed.len == pressed.len) {
         @memcpy(pressed, runner.pressed);
     };
+
+    const layer = if (live) app.live.frame.layer else if (draft.owner != null) draft.highest_layer else 0;
+    const active_layers = if (live) app.live.frame.active else if (draft.owner != null) draft.active_layers else 1;
+    const modifiers = if (live) app.live.frame.modifiers else @as(@TypeOf(app.live.frame.modifiers), @bitCast(draft.modifiers));
+
+    // Mirror telemetry into Test keys mode without touching tutor scoring or persistence.
+    if (practice.config.mode == .test_keys) {
+        practice.test_keys.active_layers = active_layers;
+        practice.test_keys.highest_layer = layer;
+        practice.test_keys.modifiers = modifiers.toByte();
+    }
+
     return .{ .labels = labels, .live = live, .metadata = metadata, .keyboard = .{
         .source = if (live) .live else if (draft.owner != null) .simulated else .draft,
         .labels = labels,
         .geometry = geometry,
         .metadata = metadata,
         .profile = model.document().name,
-        .layer = if (live) app.live.frame.layer else if (draft.owner != null) draft.highest_layer else 0,
-        .active_layers = if (live) app.live.frame.active else if (draft.owner != null) draft.active_layers else 1,
-        .modifiers = if (live) app.live.frame.modifiers else @bitCast(draft.modifiers),
+        .layer = layer,
+        .active_layers = active_layers,
+        .modifiers = modifiers,
         .pressed = pressed,
     } };
 }
@@ -190,4 +384,5 @@ pub fn finishFrame(app: *App, outcome: Outcome, control_model: *desktop.model.Mo
         };
         app.applyPractice(effect, control_model, now_us);
     }
+    flushPersistence(app);
 }

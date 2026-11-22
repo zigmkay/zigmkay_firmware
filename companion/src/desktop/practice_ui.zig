@@ -172,13 +172,28 @@ fn keyboard(
     var active = frame.active_layers;
     var mods = frame.modifiers;
     const next = if (guided and running(owner) and focus < owner.session.reference_len)
-        try desktop.practice.hint(practice_labels, layer, mods.toByte(), owner.session.reference[focus], active)
+        try desktop.practice.hintWithProfile(
+            if (owner.profile_bound) &owner.profile else null,
+            practice_labels,
+            layer,
+            mods.toByte(),
+            owner.session.reference[focus],
+            active,
+        )
     else
         null;
     const arena = dvui.currentWindow().arena();
     const tap = try arena.alloc(bool, labels.key_count);
     const hold = try arena.alloc(bool, labels.key_count);
-    try desktop.practice.guidance(practice_labels, frame.metadata, layer, mods.toByte(), next, .{ .tap = tap, .hold = hold });
+    try desktop.practice.guidanceWithProfile(
+        if (owner.profile_bound) &owner.profile else null,
+        practice_labels,
+        frame.metadata,
+        layer,
+        mods.toByte(),
+        next,
+        .{ .tap = tap, .hold = hold },
+    );
     const hold_source_layer = layer;
     if (guided and frame.source == .draft) if (next) |hint| {
         layer = hint.layer;
@@ -286,33 +301,35 @@ fn trackWindowFocus(owner: *control.Controller, view: *View, input: Input) contr
     return effect;
 }
 
-const english_lengths = [_][]const u8{ "1 sentence", "3 sentences", "5 sentences", "10 sentences" };
+const stage_names = [_][]const u8{
+    "Stage 1 · Home row",
+    "Stage 2 · All letters",
+    "Stage 3 · Shift & capitals",
+    "Stage 4 · Punctuation & numbers",
+    "Stage 5 · Layers & combos",
+    "Stage 6 · Free text & code",
+};
 const sources = [_][]const u8{ "OS keyboard text", "Unflashed draft" };
-const assistance = [_][]const u8{ "Highlight next key", "Keyboard only", "No keyboard" };
-
-comptime {
-    std.debug.assert(english_lengths.len == generator.sentence_counts.len);
-}
+const guidance_names = [_][]const u8{ "Guided", "On hesitation", "Free" };
 
 /// The exercise settings, in one row or, in narrow windows, two. Returns the
 /// height they take.
 fn drawControls(owner: *const control.Controller, width: f32, pending: *?control.Intent) f32 {
     const config = owner.config;
     var mode: usize = @backingInt(config.mode);
-    var level = config.level;
+    var stage_idx: usize = @backingInt(config.stage) - 1;
     var source: usize = @backingInt(config.source);
-    var help: usize = @backingInt(config.assistance);
+    var help: usize = @backingInt(config.guidance);
     const narrow = width < 760;
     var changed = false;
     {
         const row = dvui.box(@src(), .{ .dir = .horizontal }, .{ .rect = .{ .w = width, .h = 38 } });
         defer row.deinit();
-        changed = dvui.dropdown(@src(), &.{ "English", "Zig" }, .{ .choice = &mode }, .{}, .{
+        changed = dvui.dropdown(@src(), &.{ "Tutor", "Test keys" }, .{ .choice = &mode }, .{}, .{
             .min_size_content = .{ .w = 110 },
             .tag = "practice.mode",
         });
-        const lengths: []const []const u8 = if (config.mode == .zig) &desktop.practice.lesson_names else &english_lengths;
-        changed = dvui.dropdown(@src(), lengths, .{ .choice = &level }, .{}, .{ .tag = "practice.length" }) or changed;
+        changed = dvui.dropdown(@src(), &stage_names, .{ .choice = &stage_idx }, .{}, .{ .tag = "practice.length" }) or changed;
         if (!narrow) changed = drawInputChoices(&source, &help) or changed;
     }
     if (narrow) {
@@ -323,10 +340,9 @@ fn drawControls(owner: *const control.Controller, width: f32, pending: *?control
     if (changed) {
         var next = config;
         next.mode = @fromBackingInt(@intCast(mode));
-        // Each mode starts at its default length instead of reusing an index.
-        next.level = if (next.mode == config.mode) level else if (next.mode == .english) 1 else 0;
+        next.stage = generator.Stage.fromNumber(@intCast(stage_idx + 1));
         next.source = @fromBackingInt(@intCast(source));
-        next.assistance = @fromBackingInt(@intCast(help));
+        next.guidance = @fromBackingInt(@intCast(help));
         pending.* = .{ .choose = next };
     }
     return if (narrow) 84 else 42;
@@ -334,7 +350,7 @@ fn drawControls(owner: *const control.Controller, width: f32, pending: *?control
 
 fn drawInputChoices(source: *usize, help: *usize) bool {
     var changed = dvui.dropdown(@src(), &sources, .{ .choice = source }, .{}, .{ .tag = "practice.input.source" });
-    changed = dvui.dropdown(@src(), &assistance, .{ .choice = help }, .{}, .{ .tag = "practice.assistance" }) or changed;
+    changed = dvui.dropdown(@src(), &guidance_names, .{ .choice = help }, .{}, .{ .tag = "practice.assistance" }) or changed;
     return changed;
 }
 
@@ -359,7 +375,8 @@ fn drawExercise(
     });
     presentation.caption(metrics, .{ .x = 0, .y = controls_height + 2, .w = width, .h = 26 }, 18, theme.muted, "practice.metrics");
     const focus = desktop.practice_view.focus(session);
-    const show_keyboard = owner.config.assistance != .hidden;
+    const show_keyboard = owner.config.guidance != .free or owner.config.mode == .test_keys;
+    const zig_code = owner.config.stage == .free_text and owner.config.stage6_source == .zig_code;
 
     const work_y = controls_height + 34;
     const work_height = @max(0, height - 112 - work_y);
@@ -368,7 +385,7 @@ fn drawExercise(
     const footer_y = work_y + 16 + hero_height + context_height;
     presentation.focusWord(session, owner.active, theme, .{ .x = 0, .y = work_y, .w = width, .h = hero_height }, focus);
     const context: dvui.Rect = .{ .x = 0, .y = work_y + 8 + hero_height, .w = width, .h = context_height };
-    presentation.context(session, owner.active, owner.config.mode, &view.scroll, input.fixture, theme, context, focus, input.now_us);
+    presentation.context(session, owner.active, zig_code, &view.scroll, input.fixture, theme, context, focus, input.now_us);
     if (show_keyboard) {
         const keyboard_bounds: dvui.Rect = .{ .x = 0, .y = footer_y + 124, .w = width, .h = @max(0, height - footer_y - 124) };
         try drawGuide(owner, view, theme, keyboard_bounds, focus, input);
@@ -383,7 +400,7 @@ fn drawExercise(
 fn drawGuide(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dvui.Rect, focus: usize, input: Input) !void {
     view.drawn_keyboard = input.frame != null;
     if (input.frame) |frame| {
-        try keyboard(owner, frame, theme, bounds, focus, input.resources, owner.config.assistance == .guided);
+        try keyboard(owner, frame, theme, bounds, focus, input.resources, owner.shouldShowKeyboardGuidance(input.now_us));
     } else {
         const source: dvui.Rect = .{ .x = 8, .y = bounds.y + bounds.h - 22, .w = bounds.w - 16, .h = 20 };
         presentation.label("Companion · no verified keyboard layout", source, 11, theme.muted, "practice.keyboard.source");
@@ -430,7 +447,8 @@ fn drawProgressBar(session: *const desktop.practice.Session, theme: ui.Theme, fo
 fn drawFooter(owner: *const control.Controller, theme: ui.Theme, footer_y: f32, width: f32, input: Input) !void {
     const arena = dvui.currentWindow().arena();
     const session = &owner.session;
-    const code_speed = if (owner.config.mode == .zig)
+    const zig_code = owner.config.stage == .free_text and owner.config.stage6_source == .zig_code;
+    const code_speed = if (zig_code)
         try std.fmt.allocPrint(arena, " · {d:.0} CPM", .{session.wpm(input.now_us) * 5})
     else
         "";

@@ -40,7 +40,7 @@ pub fn caption(text: []const u8, bounds: dvui.Rect, size: f32, color: dvui.Color
 
 fn letter(s: *const practice.Session, index: usize, focus: usize, bounds: dvui.Rect, size: f32, t: ui.Theme, hero: bool) void {
     const current = index == focus and s.state != .complete;
-    const wrong = index < s.len and s.typed[index] != s.reference[index];
+    const wrong = (index < s.len and s.typed[index] != s.reference[index]) or (current and s.current_error);
     const text_color = if (current)
         dvui.Color.white
     else if (wrong)
@@ -138,7 +138,7 @@ fn focusHint(s: *const practice.Session, focus: usize) []const u8 {
 pub fn context(
     s: *const practice.Session,
     active: bool,
-    mode: desktop.practice_controller.Mode,
+    zig_code: bool,
     scroll: *Scroll,
     fixture: bool,
     t: ui.Theme,
@@ -184,7 +184,7 @@ pub fn context(
             .corners = .all(8),
         });
         defer row.deinit();
-        if (mode == .zig) {
+        if (zig_code) {
             const line_number = std.mem.count(u21, s.reference[0..range.start], &.{'\n'}) + 1;
             dvui.label(@src(), "{d}", .{line_number}, .{
                 .rect = .{ .x = 0, .y = 0, .w = 40, .h = line_height },
@@ -193,7 +193,7 @@ pub fn context(
             });
         }
         const count: f32 = @floatFromInt(range.end - range.start);
-        const x = if (mode == .zig) @as(f32, 50) else @max(40, (bounds.w - 16 - count * cell) / 2);
+        const x = if (zig_code) @as(f32, 50) else @max(40, (bounds.w - 16 - count * cell) / 2);
         for (range.start..range.end) |i| {
             const offset: f32 = @floatFromInt(i - range.start);
             const cell_bounds: dvui.Rect = .{ .x = x + offset * cell, .y = 0, .w = cell, .h = line_height };
