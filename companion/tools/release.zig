@@ -17,11 +17,16 @@ const platforms = [_][]const u8{
 pub fn validateTag(tag: []const u8, expected: []const u8) !void {
     if (!std.mem.startsWith(u8, tag, "v")) return error.InvalidPreviewTag;
     const text = tag[1..];
-    const marker = std.mem.indexOf(u8, text, "-preview.") orelse return error.InvalidPreviewTag;
-    var numbers = std.mem.splitScalar(u8, text[0..marker], '.');
-    for (0..3) |_| try decimal(numbers.next() orelse return error.InvalidPreviewTag);
-    if (numbers.next() != null) return error.InvalidPreviewTag;
-    try decimal(text[marker + "-preview.".len ..]);
+    if (std.mem.indexOf(u8, text, "-preview.")) |marker| {
+        var numbers = std.mem.splitScalar(u8, text[0..marker], '.');
+        for (0..3) |_| try decimal(numbers.next() orelse return error.InvalidPreviewTag);
+        if (numbers.next() != null) return error.InvalidPreviewTag;
+        try decimal(text[marker + "-preview.".len ..]);
+    } else {
+        var numbers = std.mem.splitScalar(u8, text, '.');
+        for (0..3) |_| try decimal(numbers.next() orelse return error.InvalidPreviewTag);
+        if (numbers.next() != null) return error.InvalidPreviewTag;
+    }
     if (!std.mem.eql(u8, text, expected)) return error.PreviewVersionMismatch;
 }
 
@@ -683,9 +688,12 @@ pub fn main(init: std.process.Init) !void {
 
 test "preview tags are canonical and must match the package version" {
     try validateTag("v0.1.0-preview.1", "0.1.0-preview.1");
+    try validateTag("v0.1.0", "0.1.0");
     for ([_][]const u8{
         "0.1.0-preview.1",
-        "v0.1.0",
+        "0.1.0",
+        "v0.1",
+        "v0.1.0-alpha.1",
         "v0.1-preview.1",
         "v0.1.0-preview.01",
         "v0.1.0-preview.1-extra",

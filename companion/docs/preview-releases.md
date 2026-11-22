@@ -98,22 +98,31 @@ the focused Windows diagnostic/GUI modes and builds four native release targets
 on `main`, uploading downloadable packages without publishing. Linux runtime jobs
 exercise mounted and extracted AppImages on Ubuntu 22.04 and 24.04.
 Pull requests run a faster subset: macOS arm64, Windows and Linux packages, the
-macOS offline check and the Linux runtime on Ubuntu 24.04. The `full-ci` label
-runs the complete `main` set on a PR. A new push cancels the PR's running checks.
-Offline checks relocate packages into paths with spaces/Unicode, deny networking
-and system Zig/SDK access, use read-only resources and empty compiler caches, and
-build firmware/native runners for all 14 catalog selectors twice. Windows uses
-filesystem ACLs and firewall policy in addition to PATH isolation.
+macOS representative offline check and the Linux runtime on Ubuntu 24.04. The
+`full-ci` label runs the complete `main` set on a PR. A new push cancels the PR's
+running checks. Offline checks relocate packages into paths with spaces/Unicode,
+deny networking and system Zig/SDK access, use read-only resources and empty
+compiler caches, and build firmware/native runners for catalog selectors cold and
+warm. Windows uses filesystem ACLs and firewall policy in addition to PATH
+isolation.
 
-Only `companion-vMAJOR.MINOR.PATCH-preview.N` tags are publishable; releases are
-named "Zigmkay companion". The version after the `companion-` prefix must exactly
-match `companion/build.zig.zon` and point to a commit belonging to `main`. Source, storage, native
-desktop and packaged-runtime jobs run against that commit. Only the final job
-has `contents: write`; it waits for all required jobs, validates four downloads
-and their metadata/hashes, prepares corresponding sources and `SHA256SUMS`, then
-creates a draft, uploads assets and publishes a prerelease. All Actions are pinned
-by commit. Failed gates never run publishing. A failed draft upload can be resumed;
-a rerun against an already published release refuses to replace its assets.
+To tag and publish a companion release from GitHub, run the
+[Release Companion](../../.github/workflows/companion-release.yml) workflow on
+`main` (optionally supplying a version to update `companion/build.zig.zon`). It
+creates and pushes the annotated `companion-v<version>` tag and invokes the
+application bundle workflow to build, verify and publish all four platform
+artifacts, `SHA256SUMS`, metadata and `corresponding-source.tar.gz` as a GitHub
+Release. Manually pushed `companion-vMAJOR.MINOR.PATCH` (stable release) and
+`companion-vMAJOR.MINOR.PATCH-preview.N` (prerelease) tags also trigger
+publishing. The version after the `companion-` prefix must exactly match
+`companion/build.zig.zon` and point to a commit belonging to `main`. Source,
+storage, native desktop and packaged-runtime jobs run against that commit. Only
+the tagging step and final publish job request `contents: write`; publishing
+waits for all required jobs, validates four downloads and their metadata/hashes,
+prepares corresponding sources and `SHA256SUMS`, then creates a draft, uploads
+assets and publishes the release. All Actions are pinned by commit. Failed gates
+never run publishing. A failed draft upload can be resumed; a rerun against an
+already published release refuses to replace its assets.
 
 Run `zig build test-practice test-jobs` for focused offline contracts, and `zig build check test` for the
 full source suite. Packaging outputs belong in caches. Native Windows driver-free flashing and

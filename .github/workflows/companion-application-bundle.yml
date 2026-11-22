@@ -3,9 +3,10 @@ name: Companion application bundle
 on:
   push:
     branches: [main]
-    # Companion previews are tagged companion-v<version>-preview.<n>. GitHub
-    # ignores path filters for tag pushes, so a release tag always builds.
-    tags: ['companion-v*-preview.*']
+    # Companion releases are tagged companion-v<version> (stable) or
+    # companion-v<version>-preview.<n> (prerelease). GitHub ignores path
+    # filters for tag pushes, so a release tag always builds.
+    tags: ['companion-v*']
     paths:
       - "companion/**"
       - "zigmkay/**"
@@ -31,21 +32,34 @@ on:
         type: choice
         options: [diagnostic, gui, full]
         default: diagnostic
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Companion release tag to build and publish (e.g. companion-v0.1.0-preview.1 or companion-v0.1.0)
+        required: true
+        type: string
+      commit_sha:
+        description: Exact commit SHA tagged for the release
+        required: true
+        type: string
 
 permissions:
   contents: read
 
-# A new push supersedes the PR's running checks. Tags and unrelated labels
-# never cancel anything.
+# A new push supersedes the PR's running checks. Tags, workflow_call releases
+# and unrelated labels never cancel anything.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'full-ci' && format('-{0}', github.run_id) || '' }}
+  group: ${{ github.workflow }}-${{ inputs.release_tag || github.event.pull_request.number || github.ref }}${{ github.event.action == 'labeled' && github.event.label.name != 'full-ci' && format('-{0}', github.run_id) || '' }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# Pull requests build macOS arm64, Windows and Linux. Pushes to main, tags,
-# manual runs and PRs labeled `full-ci` add macOS x86_64, the isolated
-# Windows verification, a second Linux runtime and the ReleaseSafe source job.
+# Pull requests build macOS arm64, Windows and Linux with representative offline
+# verification. Pushes to main, releases, manual runs and PRs labeled `full-ci`
+# add macOS x86_64, full 14-board verification, isolated Windows verification,
+# a second Linux runtime and the ReleaseSafe source job.
 env:
   FULL_CI: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+  RELEASE_TAG: ${{ inputs.release_tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name || '') }}
+  RELEASE_SHA: ${{ inputs.commit_sha || github.sha }}
 
 defaults:
   run:
@@ -63,7 +77,7 @@ jobs:
           version: 0.17.0
           cache-size-limit: 4096
       - name: Build only the symbolized finalization reproduction
-        run: zig build tools -Donly=diagnostic -j2 --summary all
+        run: zig build tools -Donly=diagnostic -j4 --summary all
       - name: Reproduce artifact publication without firmware compilation or devices
         shell: pwsh
         run: |
@@ -90,6 +104,7 @@ jobs:
     steps: &bundle-steps
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.commit_sha || '' }}
           fetch-depth: 0
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
@@ -108,20 +123,22 @@ jobs:
           set -eu
           sdk=()
           if [ "$RUNNER_OS" = macOS ]; then sdk=("-Dmacos-sdk=$(xcrun --show-sdk-path)"); fi
-          zig build bundle tools -Dbundle -Drelease=true -Doptimize=safe "-Drevision=$GITHUB_SHA" "${sdk[@]}" -j${{ matrix.jobs }} --summary all
-      - name: Validate the preview tag against this exact commit
-        if: startsWith(github.ref, 'refs/tags/')
+          zig build bundle tools -Dbundle -Drelease=true -Doptimize=safe "-Drevision=$RELEASE_SHA" "${sdk[@]}" -j${{ matrix.jobs }} --summary all
+      - name: Validate the release tag against this exact commit
+        if: env.RELEASE_TAG != ''
         shell: bash
-        env:
-          PREVIEW_TAG: ${{ github.ref_name }}
-        run: zig-out/bin/release validate-tag "${PREVIEW_TAG#companion-}" "$GITHUB_SHA"
+        run: zig-out/bin/release validate-tag "${RELEASE_TAG#companion-}" "$RELEASE_SHA"
       - name: Verify native desktop behavior offline
         if: inputs.mode != 'gui'
         shell: bash
         run: |
           set -eu
-          zig build test-desktop -Ddesktop -Doptimize=safe -j2 --test-timeout 180s
-      - name: Package the unsigned preview
+          sdk=()
+          if [ "$RUNNER_OS" = macOS ]; then sdk=("-Dmacos-sdk=$(xcrun --show-sdk-path)"); fi
+          # Keep -Drelease=true and -Dmacos-sdk identical to the bundle build so
+          # SDL3, FreeType, DVUI and zigmkay-companion are reused from cache.
+          zig build test-desktop -Ddesktop -Drelease=true -Doptimize=safe "${sdk[@]}" -j${{ matrix.jobs }} --test-timeout 180s
+      - name: Package the unsigned release artifact
         shell: bash
         run: |
           set -eu
@@ -130,7 +147,7 @@ jobs:
             Windows) root="$GITHUB_WORKSPACE/companion/zig-out/Zigmkay.exe" ;;
             Linux) root="$GITHUB_WORKSPACE/companion/zig-out/Zigmkay.AppDir" ;;
           esac
-          zig-out/bin/release package "$root" "$GITHUB_WORKSPACE/companion/release-assets" "$GITHUB_SHA"
+          zig-out/bin/release package "$root" "$GITHUB_WORKSPACE/companion/release-assets" "$RELEASE_SHA"
       - name: Relocated macOS offline builds and practice
         if: runner.os == 'macOS'
         shell: bash
@@ -145,12 +162,16 @@ jobs:
           chmod -R a-w "$target/Zigmkay.app"
           profile="(version 1)(allow default)(deny network*)(deny file-read* (subpath \"$GITHUB_WORKSPACE\"))(deny file-read* (subpath \"$RUNNER_TOOL_CACHE\"))(deny file-read* (subpath \"/Applications/Xcode.app\"))(deny file-read* (subpath \"/Library/Developer\"))"
           cd "$target"
+          bundle_mode="representative"
+          if [ "$FULL_CI" = "true" ]; then bundle_mode="all"; fi
           for pass in cold warm; do
-            echo "Offline bundle verification: $pass"
+            echo "Offline bundle verification: $pass ($bundle_mode)"
             env -i HOME="$target/home" PATH=/usr/bin:/bin SDKROOT=/missing DEVELOPER_DIR=/missing ZIG_LOCAL_PKG_DIR=/missing \
-              sandbox-exec -p "$profile" ./check "$target/Zigmkay.app/Contents/Resources" "$target/home/Library/Caches/zigmkay" all
+              sandbox-exec -p "$profile" ./check "$target/Zigmkay.app/Contents/Resources" "$target/home/Library/Caches/zigmkay" "$bundle_mode"
           done
-          env -i HOME="$target/home" PATH=/usr/bin:/bin SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software \
+          # Pass the same SDKROOT/DEVELOPER_DIR overrides so the GUI build reuses
+          # the warm compiler cache instead of recompiling MicroZig cold.
+          env -i HOME="$target/home" PATH=/usr/bin:/bin SDKROOT=/missing DEVELOPER_DIR=/missing ZIG_LOCAL_PKG_DIR=/missing SDL_VIDEODRIVER=dummy SDL_RENDER_DRIVER=software \
             sandbox-exec -p "$profile" "$target/Zigmkay.app/Contents/MacOS/zigmkay-companion" --offline-build-frames 30000
       - name: Single Windows executable builds and practice
         if: runner.os == 'Windows' && (env.FULL_CI == 'true' || inputs.mode == 'gui')
@@ -356,13 +377,25 @@ jobs:
           # Give Clang writable temporary space without hiding the FUSE mount in /tmp.
           sandbox=(bwrap --unshare-net --ro-bind / / --dev /dev --proc /proc --tmpfs "$GITHUB_WORKSPACE" --tmpfs "$RUNNER_TOOL_CACHE" --tmpfs /usr/include --bind "$target" "$target" --setenv TMPDIR "$target/tmp" --setenv HOME "$target/home" --setenv XDG_CONFIG_HOME "$target/config" --setenv XDG_DATA_HOME "$target/data" --setenv XDG_CACHE_HOME "$target/cache" --setenv PATH /usr/bin:/bin --setenv ZIG_LIB_DIR /missing --setenv ZIG_LOCAL_PKG_DIR /missing --setenv SDL_VIDEODRIVER dummy --setenv SDL_RENDER_DRIVER software --chdir "$target")
           if [ -d /usr/lib/gcc ]; then sandbox+=(--tmpfs /usr/lib/gcc); fi
-          for root in "$mount" "$target/install/squashfs-root"; do
-            for pass in cold warm; do
-              "${sandbox[@]}" --setenv LD_LIBRARY_PATH "$root/usr/lib" "$target/check" "$root/usr/share/zigmkay" "$target/cache/zigmkay" all
+          if [ "$FULL_CI" = "true" ]; then
+            for root in "$mount" "$target/install/squashfs-root"; do
+              for pass in cold warm; do
+                "${sandbox[@]}" --setenv LD_LIBRARY_PATH "$root/usr/lib" "$target/check" "$root/usr/share/zigmkay" "$target/cache/zigmkay" all
+              done
+              "${sandbox[@]}" "$root/AppRun" --offline-build-frames 30000
+              rm -rf "$target/cache/zigmkay"
             done
-            "${sandbox[@]}" "$root/AppRun" --offline-build-frames 30000
-            rm -rf "$target/cache/zigmkay"
-          done
+          else
+            # On PRs, verify cold+warm representative boards & imports on the
+            # mounted AppImage, then verify the extracted AppDir reusing the warm
+            # cache instead of wiping it and recompiling MicroZig from scratch.
+            for pass in cold warm; do
+              "${sandbox[@]}" --setenv LD_LIBRARY_PATH "$mount/usr/lib" "$target/check" "$mount/usr/share/zigmkay" "$target/cache/zigmkay" representative
+            done
+            "${sandbox[@]}" "$mount/AppRun" --offline-build-frames 30000
+            "${sandbox[@]}" --setenv LD_LIBRARY_PATH "$target/install/squashfs-root/usr/lib" "$target/check" "$target/install/squashfs-root/usr/share/zigmkay" "$target/cache/zigmkay" lk8
+            "${sandbox[@]}" "$target/install/squashfs-root/AppRun" --offline-build-frames 30000
+          fi
       - name: Preserve Linux runtime diagnostics
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -378,30 +411,34 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.commit_sha || '' }}
           fetch-depth: 0
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
+          cache-size-limit: 4096
       - run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev
-      - run: zig build check test -Doptimize=safe -j2 --test-timeout 180s
+      - run: zig build check test -Doptimize=safe -j4 --test-timeout 180s
 
   publish:
     needs: [bundle, bundle-linux, linux-runtime, source]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'workflow_call' || startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     permissions:
       contents: write
     concurrency:
-      group: preview-release-${{ github.ref }}
+      group: companion-release-publish-${{ inputs.release_tag || github.ref }}
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          ref: ${{ inputs.commit_sha || '' }}
           fetch-depth: 0
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29
         with:
           version: 0.17.0
+          cache-size-limit: 4096
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: preview-*
@@ -413,31 +450,35 @@ jobs:
           merge-multiple: true
           path: companion/dependency-sources
       - name: Assemble source archive and validate the complete release inventory
-        env:
-          PREVIEW_TAG: ${{ github.ref_name }}
         run: |
           set -eu
-          zig build tools test-jobs -Donly=practice -Doptimize=safe -j2
-          zig-out/bin/release validate-tag "${PREVIEW_TAG#companion-}" "$GITHUB_SHA"
+          zig build tools test-jobs -Donly=practice -Doptimize=safe -j4
+          zig-out/bin/release validate-tag "${RELEASE_TAG#companion-}" "$RELEASE_SHA"
           mkdir -p source/application source/dependencies
           # The companion builds on the enclosing firmware tree; archive all of it.
-          git -C "$GITHUB_WORKSPACE" archive "$GITHUB_SHA" | tar -xf - -C source/application
+          git -C "$GITHUB_WORKSPACE" archive "$RELEASE_SHA" | tar -xf - -C source/application
           cp dependency-sources/*.tar.gz source/dependencies/
           tar -czf release-assets/corresponding-source.tar.gz -C source .
-          zig-out/bin/release finalize "$GITHUB_WORKSPACE/companion/release-assets" "$GITHUB_SHA"
-      - name: Create or resume a draft, upload assets, then publish a prerelease
+          zig-out/bin/release finalize "$GITHUB_WORKSPACE/companion/release-assets" "$RELEASE_SHA"
+      - name: Create or resume a draft, upload assets, then publish the release
         env:
           GH_TOKEN: ${{ github.token }}
-          PREVIEW_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$PREVIEW_TAG" --json isDraft > "$RUNNER_TEMP/existing-release.json"; then
+          version="${RELEASE_TAG#companion-}"
+          if [[ "$version" == *-preview.* ]]; then
+            prerelease_flag="--prerelease"
+            title="Zigmkay companion $version — unsigned preview"
+          else
+            prerelease_flag="--prerelease=false"
+            title="Zigmkay companion $version"
+          fi
+          if gh release view "$RELEASE_TAG" --json isDraft > "$RUNNER_TEMP/existing-release.json"; then
             zig-out/bin/release validate-existing-release "$RUNNER_TEMP/existing-release.json"
           else
-            version="${PREVIEW_TAG#companion-}"
             { printf '# Zigmkay companion %s\n\n' "$version"; cat packaging/preview-notes.md; } > "$RUNNER_TEMP/release-notes.md"
-            gh release create "$PREVIEW_TAG" --verify-tag --draft --prerelease --title "Zigmkay companion $version — unsigned preview" --notes-file "$RUNNER_TEMP/release-notes.md"
+            gh release create "$RELEASE_TAG" --verify-tag --draft "$prerelease_flag" --title "$title" --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
-          gh release upload "$PREVIEW_TAG" release-assets/* --clobber
-          gh release edit "$PREVIEW_TAG" --draft=false --prerelease
+          gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false "$prerelease_flag"
