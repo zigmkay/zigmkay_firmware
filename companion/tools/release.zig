@@ -489,6 +489,7 @@ const disk_image_format = "ULMO";
 /// folder is copied into a read-write image first and then converted.
 fn diskImage(io: std.Io, stage: []const u8, destination: []const u8) !void {
     const writable = try std.fmt.allocPrint(a, "{s}.rw.dmg", .{destination});
+    defer std.Io.Dir.cwd().deleteFile(io, writable) catch {};
     const start = std.Io.Clock.awake.now(io);
     _ = try run(io, &.{
         "hdiutil",
@@ -505,16 +506,18 @@ fn diskImage(io: std.Io, stage: []const u8, destination: []const u8) !void {
         writable,
     });
     const created = std.Io.Clock.awake.now(io);
+    // A rejected or partly written image must not remain as a release asset.
+    errdefer std.Io.Dir.cwd().deleteFile(io, destination) catch {};
     _ = try run(io, &.{ "hdiutil", "convert", writable, "-ov", "-format", disk_image_format, "-o", destination });
     const converted = std.Io.Clock.awake.now(io);
-    try std.Io.Dir.cwd().deleteFile(io, writable);
     const bytes = try read(io, destination);
     defer a.free(bytes);
     const sizes = try diskImageSizes(bytes);
-    std.log.info("disk image {s}: {d} bytes, {d} referenced, {d} expanded; create {d} ms, convert {d} ms", .{
+    std.log.info("disk image {s}: {d} bytes, {d} referenced, {d} metadata, {d} expanded; create {d} ms, convert {d} ms", .{
         disk_image_format,
-        bytes.len,
+        sizes.size,
         sizes.referenced,
+        sizes.metadata,
         sizes.expanded,
         start.durationTo(created).toMilliseconds(),
         created.durationTo(converted).toMilliseconds(),
@@ -524,17 +527,20 @@ fn diskImage(io: std.Io, stage: []const u8, destination: []const u8) !void {
 
 /// What the block tables of a UDIF disk image describe.
 const DiskImageSizes = struct {
-    /// Length of the data fork that holds the image's chunks.
-    data: u64,
-    /// Bytes of the data fork that chunks reference.
+    /// Length of the whole image file.
+    size: u64,
+    /// Bytes of the trailer, the XML block tables and the resource fork.
+    metadata: u64,
+    /// Bytes of the data fork that at least one chunk references.
     referenced: u64,
     /// Size of the image once expanded.
     expanded: u64,
 
-    /// Refuse an image whose data fork is noticeably larger than its chunks.
+    /// Refuse an image noticeably larger than its chunks and metadata.
     fn check(sizes: DiskImageSizes) !void {
-        if (sizes.referenced > sizes.data) return error.InvalidDiskImage;
-        if (sizes.data - sizes.referenced > @max(1024 * 1024, sizes.data / 100)) return error.UnreferencedDiskImageData;
+        const used = std.math.add(u64, sizes.referenced, sizes.metadata) catch return error.InvalidDiskImage;
+        if (used > sizes.size) return error.InvalidDiskImage;
+        if (sizes.size - used > @max(1024 * 1024, sizes.size / 100)) return error.UnreferencedDiskImageData;
     }
 };
 
@@ -542,16 +548,18 @@ const DiskImageSizes = struct {
 fn diskImageSizes(bytes: []const u8) !DiskImageSizes {
     if (bytes.len < 512) return error.InvalidDiskImage;
     const trailer = bytes[bytes.len - 512 ..];
-    if (!std.mem.eql(u8, trailer[0..4], "koly")) return error.InvalidDiskImage;
-    const data_offset = std.mem.readInt(u64, trailer[0x18..0x20], .big);
-    const data_length = std.mem.readInt(u64, trailer[0x20..0x28], .big);
-    const xml_offset = std.mem.readInt(u64, trailer[0xD8..0xE0], .big);
-    const xml_length = std.mem.readInt(u64, trailer[0xE0..0xE8], .big);
+    if (!std.mem.eql(u8, trailer[0..4], "koly") or
+        std.mem.readInt(u32, trailer[0x04..0x08], .big) != 4 or
+        std.mem.readInt(u32, trailer[0x08..0x0C], .big) != 512) return error.InvalidDiskImage;
     const limit = bytes.len - 512;
-    if (data_offset > limit or data_length > limit - data_offset or
-        xml_offset > limit or xml_length > limit - xml_offset) return error.InvalidDiskImage;
-    var rest = bytes[xml_offset..][0..xml_length];
-    var sizes: DiskImageSizes = .{ .data = data_length, .referenced = 0, .expanded = 0 };
+    const data = try diskImageFork(trailer, 0x18, limit);
+    const resources = try diskImageFork(trailer, 0x28, limit);
+    const xml = try diskImageFork(trailer, 0xD8, limit);
+    var rest = bytes[xml.offset..][0..xml.length];
+    var expanded: u64 = 0;
+    var tables: usize = 0;
+    var ranges: std.ArrayList(DiskImageRange) = .empty;
+    defer ranges.deinit(a);
     var encoded: std.ArrayList(u8) = .empty;
     defer encoded.deinit(a);
     while (std.mem.indexOf(u8, rest, "<data>")) |start| {
@@ -564,15 +572,50 @@ fn diskImageSizes(bytes: []const u8) !DiskImageSizes {
         defer a.free(table);
         try decoder.decode(table, encoded.items);
         if (table.len < 0xCC or !std.mem.eql(u8, table[0..4], "mish")) continue;
+        tables += 1;
+        // Chunk offsets are relative to the table's own offset into the data fork.
+        const base = std.math.add(u64, data.offset, std.mem.readInt(u64, table[0x18..0x20], .big)) catch return error.InvalidDiskImage;
         const count = std.mem.readInt(u32, table[0xC8..0xCC], .big);
         if ((table.len - 0xCC) / 40 < count) return error.InvalidDiskImage;
         for (0..count) |index| {
             const chunk = table[0xCC + 40 * index ..][0..40];
-            sizes.expanded += std.mem.readInt(u64, chunk[16..24], .big) * 512;
-            sizes.referenced += std.mem.readInt(u64, chunk[32..40], .big);
+            const sectors = std.math.mul(u64, std.mem.readInt(u64, chunk[16..24], .big), 512) catch return error.InvalidDiskImage;
+            expanded = std.math.add(u64, expanded, sectors) catch return error.InvalidDiskImage;
+            const length = std.mem.readInt(u64, chunk[32..40], .big);
+            if (length == 0) continue;
+            const offset = std.math.add(u64, base, std.mem.readInt(u64, chunk[24..32], .big)) catch return error.InvalidDiskImage;
+            const chunk_end = std.math.add(u64, offset, length) catch return error.InvalidDiskImage;
+            if (chunk_end > data.offset + data.length) return error.InvalidDiskImage;
+            try ranges.append(a, .{ .start = offset, .end = chunk_end });
         }
     }
-    return sizes;
+    if (tables == 0) return error.InvalidDiskImage;
+    // Chunks may overlap: count every referenced byte once.
+    std.mem.sort(DiskImageRange, ranges.items, {}, DiskImageRange.less);
+    var referenced: u64 = 0;
+    var covered: u64 = 0;
+    for (ranges.items) |range| {
+        const from = @max(range.start, covered);
+        if (range.end > from) referenced += range.end - from;
+        covered = @max(covered, range.end);
+    }
+    return .{ .size = bytes.len, .metadata = 512 + xml.length + resources.length, .referenced = referenced, .expanded = expanded };
+}
+
+const DiskImageRange = struct {
+    start: u64,
+    end: u64,
+    fn less(_: void, left: DiskImageRange, right: DiskImageRange) bool {
+        return left.start < right.start;
+    }
+};
+
+/// The offset and length at `at` in a `koly` trailer, within the first `limit` bytes.
+fn diskImageFork(trailer: []const u8, at: usize, limit: usize) !struct { offset: u64, length: u64 } {
+    const offset = std.mem.readInt(u64, trailer[at..][0..8], .big);
+    const length = std.mem.readInt(u64, trailer[at + 8 ..][0..8], .big);
+    if (offset > limit or length > limit - offset) return error.InvalidDiskImage;
+    return .{ .offset = offset, .length = length };
 }
 
 fn seal(io: std.Io, root: []const u8, resources: []const u8) !jobs.application_bundle.Manifest {
@@ -611,6 +654,9 @@ fn package(io: std.Io, root: []const u8, output: []const u8, revision: []const u
             try auditMac(io, root);
             manifest = try seal(io, root, try join(&.{ root, "Contents/Resources" }));
             const stage = try join(&.{ output, "dmg-stage" });
+            // A stage left by an earlier failed run would break the symlink below.
+            try std.Io.Dir.cwd().deleteTree(io, stage);
+            errdefer std.Io.Dir.cwd().deleteTree(io, stage) catch {};
             try std.Io.Dir.cwd().createDirPath(io, stage);
             _ = try run(io, &.{ "ditto", root, try join(&.{ stage, "Zigmkay.app" }) });
             try std.Io.Dir.cwd().symLink(
@@ -771,7 +817,7 @@ pub fn main(init: std.process.Init) !void {
     } else if (args.len == 3 and std.mem.eql(u8, args[1], "inspect-disk-image")) {
         const sizes = try diskImageSizes(try read(init.io, args[2]));
         var stdout = std.Io.File.stdout().writer(init.io, &.{});
-        try stdout.interface.print("data {d} referenced {d} expanded {d}\n", .{ sizes.data, sizes.referenced, sizes.expanded });
+        try stdout.interface.print("size {d} referenced {d} metadata {d} expanded {d}\n", .{ sizes.size, sizes.referenced, sizes.metadata, sizes.expanded });
         try sizes.check();
     } else if (args.len == 4 and std.mem.eql(u8, args[1], "finalize")) {
         try finalize(init.io, args[2], args[3]);
@@ -838,48 +884,76 @@ test "release inventory refuses missing assets mismatched commits and changed ha
     try t.expectError(error.ReleaseAssetHashMismatch, finalize(t.io, root, "commit"));
 }
 
-/// A UDIF image with one block table: `chunks` compressed lengths in a data
-/// fork of `data` bytes.
-fn testDiskImage(data: u64, chunks: []const u64) ![]u8 {
-    var table: std.ArrayList(u8) = .empty;
-    defer table.deinit(std.testing.allocator);
-    try table.appendSlice(std.testing.allocator, "mish");
-    try table.appendNTimes(std.testing.allocator, 0, 0xC8 - 4);
-    var count: [4]u8 = undefined;
-    std.mem.writeInt(u32, &count, @intCast(chunks.len), .big);
-    try table.appendSlice(std.testing.allocator, &count);
-    for (chunks) |length| {
-        var chunk: [40]u8 = @splat(0);
-        std.mem.writeInt(u64, chunk[16..24], 8, .big);
-        std.mem.writeInt(u64, chunk[32..40], length, .big);
-        try table.appendSlice(std.testing.allocator, &chunk);
+/// A chunk of `length` bytes at `offset` into the data fork.
+const TestChunk = struct { offset: u64, length: u64 };
+
+/// A UDIF image with a data fork of `data` bytes and, unless `chunks` is
+/// null, one block table holding them.
+fn testDiskImage(data: u64, chunks: ?[]const TestChunk) ![]u8 {
+    const gpa = std.testing.allocator;
+    var xml: std.ArrayList(u8) = .empty;
+    defer xml.deinit(gpa);
+    try xml.appendSlice(gpa, "<plist><key>blkx</key><array>");
+    if (chunks) |entries| {
+        var table: std.ArrayList(u8) = .empty;
+        defer table.deinit(gpa);
+        try table.appendSlice(gpa, "mish");
+        try table.appendNTimes(gpa, 0, 0xC8 - 4);
+        var count: [4]u8 = undefined;
+        std.mem.writeInt(u32, &count, @intCast(entries.len), .big);
+        try table.appendSlice(gpa, &count);
+        for (entries) |entry| {
+            var chunk: [40]u8 = @splat(0);
+            std.mem.writeInt(u64, chunk[16..24], 8, .big);
+            std.mem.writeInt(u64, chunk[24..32], entry.offset, .big);
+            std.mem.writeInt(u64, chunk[32..40], entry.length, .big);
+            try table.appendSlice(gpa, &chunk);
+        }
+        const encoder = std.base64.standard.Encoder;
+        const encoded = try gpa.alloc(u8, encoder.calcSize(table.items.len));
+        defer gpa.free(encoded);
+        _ = encoder.encode(encoded, table.items);
+        try xml.print(gpa, "<dict><key>Data</key>\n\t<data>\n\t{s}\n\t</data></dict>", .{encoded});
     }
-    const encoder = std.base64.standard.Encoder;
-    const encoded = try std.testing.allocator.alloc(u8, encoder.calcSize(table.items.len));
-    defer std.testing.allocator.free(encoded);
-    _ = encoder.encode(encoded, table.items);
-    const xml = try std.fmt.allocPrint(std.testing.allocator, "<plist><key>blkx</key><array><dict><key>Data</key>\n\t<data>\n\t{s}\n\t</data></dict></array><data>cGxzdA==</data></plist>", .{encoded});
-    defer std.testing.allocator.free(xml);
-    const image = try std.testing.allocator.alloc(u8, data + xml.len + 512);
+    try xml.appendSlice(gpa, "</array><data>cGxzdA==</data></plist>");
+    const image = try gpa.alloc(u8, data + xml.items.len + 512);
     @memset(image, 0);
-    @memcpy(image[data..][0..xml.len], xml);
+    @memcpy(image[data..][0..xml.items.len], xml.items);
     const trailer = image[image.len - 512 ..];
     @memcpy(trailer[0..4], "koly");
+    std.mem.writeInt(u32, trailer[0x04..0x08], 4, .big);
+    std.mem.writeInt(u32, trailer[0x08..0x0C], 512, .big);
     std.mem.writeInt(u64, trailer[0x20..0x28], data, .big);
     std.mem.writeInt(u64, trailer[0xD8..0xE0], data, .big);
-    std.mem.writeInt(u64, trailer[0xE0..0xE8], xml.len, .big);
+    std.mem.writeInt(u64, trailer[0xE0..0xE8], xml.items.len, .big);
     return image;
 }
 
 test "disk images must not carry data their block tables leave unreferenced" {
     const t = std.testing;
-    const whole = try testDiskImage(3 * 1024 * 1024, &.{ 1024 * 1024, 2 * 1024 * 1024 });
+    const mib = 1024 * 1024;
+    const whole = try testDiskImage(3 * mib, &.{ .{ .offset = 0, .length = mib }, .{ .offset = mib, .length = 2 * mib } });
     defer t.allocator.free(whole);
     const sizes = try diskImageSizes(whole);
-    try t.expectEqual(DiskImageSizes{ .data = 3 * 1024 * 1024, .referenced = 3 * 1024 * 1024, .expanded = 2 * 8 * 512 }, sizes);
+    try t.expectEqual(3 * mib, sizes.referenced);
+    try t.expectEqual(whole.len, sizes.size);
+    try t.expectEqual(whole.len - 3 * mib, sizes.metadata);
+    try t.expectEqual(2 * 8 * 512, sizes.expanded);
     try sizes.check();
-    const padded = try testDiskImage(6 * 1024 * 1024, &.{ 1024 * 1024, 2 * 1024 * 1024 });
+    // Unreferenced space behind the chunks.
+    const padded = try testDiskImage(6 * mib, &.{ .{ .offset = 0, .length = mib }, .{ .offset = mib, .length = 2 * mib } });
     defer t.allocator.free(padded);
     try t.expectError(error.UnreferencedDiskImageData, (try diskImageSizes(padded)).check());
+    // Chunks that reference the same bytes count them once.
+    const overlapping = try testDiskImage(6 * mib, &.{ .{ .offset = 0, .length = 3 * mib }, .{ .offset = 0, .length = 3 * mib } });
+    defer t.allocator.free(overlapping);
+    try t.expectEqual(3 * mib, (try diskImageSizes(overlapping)).referenced);
+    try t.expectError(error.UnreferencedDiskImageData, (try diskImageSizes(overlapping)).check());
+    const outside = try testDiskImage(3 * mib, &.{.{ .offset = 2 * mib, .length = 2 * mib }});
+    defer t.allocator.free(outside);
+    try t.expectError(error.InvalidDiskImage, diskImageSizes(outside));
+    const untabled = try testDiskImage(4096, null);
+    defer t.allocator.free(untabled);
+    try t.expectError(error.InvalidDiskImage, diskImageSizes(untabled));
     try t.expectError(error.InvalidDiskImage, diskImageSizes("not a disk image"));
 }

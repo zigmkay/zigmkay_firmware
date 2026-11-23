@@ -33,11 +33,18 @@ const Assembler = struct {
             var it = dir.iterate();
             while (try it.next(self.io)) |entry| {
                 if (std.mem.eql(u8, entry.name, ".git") or std.mem.eql(u8, entry.name, ".zig-cache") or std.mem.eql(u8, entry.name, "zig-out") or std.mem.eql(u8, entry.name, "zig-pkg")) continue;
-                if (selection.extensions) |kept| if (entry.kind != .directory and !hasExtension(entry.name, kept)) continue;
-                if (selection.extensions != null and entry.kind == .directory and (for (pins.firmware_skipped) |name| {
+                // Filters must not mistake a directory for a file where the
+                // filesystem reports no kind or the entry is a link.
+                const is_directory = switch (entry.kind) {
+                    .directory => true,
+                    .unknown, .sym_link => (try dir.statFile(self.io, entry.name, .{})).kind == .directory,
+                    else => false,
+                };
+                if (selection.extensions) |kept| if (!is_directory and !hasExtension(entry.name, kept)) continue;
+                if (selection.extensions != null and is_directory and (for (pins.firmware_skipped) |name| {
                     if (std.mem.eql(u8, entry.name, name)) break true;
                 } else isSkippedFirmwarePath(relative, entry.name))) continue;
-                if (selection.keep) |keep| if (!keep(try below(self.a, selection.below, entry.name), entry.kind == .directory)) continue;
+                if (selection.keep) |keep| if (!keep(try below(self.a, selection.below, entry.name), is_directory)) continue;
                 try names.append(self.a, try self.a.dupe(u8, entry.name));
             }
             std.mem.sort([]const u8, names.items, {}, less);
