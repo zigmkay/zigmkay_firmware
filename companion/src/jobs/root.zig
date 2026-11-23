@@ -12,7 +12,6 @@ pub const picotool_job = @import("picotool_job.zig");
 pub const managed_flash = @import("managed_flash.zig");
 pub const managed_build = @import("managed_build.zig");
 pub const build_context = @import("build_context.zig");
-pub const runner_artifact = @import("runner_artifact.zig");
 pub const output_limit = 1024 * 1024;
 pub const SnapshotId = [32]u8;
 

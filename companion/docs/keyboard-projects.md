@@ -109,7 +109,7 @@ offers New layout, Duplicate, Rename, Export Zig source and Show in folder.
 Edits save automatically shortly after each change, and Undo and Redo stay
 available. Choosing another layout saves the open one first. A failed save is
 reported in the head and stops automatic saving until the next edit. Switching
-invalidates old job ownership and draft runner use.
+invalidates old job ownership.
 
 My Keyboards groups every known project by hardware: collection members,
 remembered profile projects and the legacy per-profile folders next to the
@@ -179,10 +179,10 @@ are bounded. Archive links and escaping paths are rejected. Network failures
 retain the wizard for retry or local-folder import. Git and a separately
 installed Zig are unnecessary in bundled applications.
 
-**Try it out** in the editor prepares a native-only processor runner, without
-building a UF2. A scored run retains its chosen layout and input mode. Ordinary
-OS text practices that chosen layout; it does not identify the physical keyboard
-that produced the text. Firmware installation remains an explicit later action.
+**Try it out** in the editor opens the Tutor on the layout as shown. Practice
+always scores the OS text of the connected keyboard, so a layout that is not
+flashed yet cannot be practised; the Tutor points that out. Firmware
+installation remains an explicit action.
 The companion retains single-device behavior and reports ambiguous connections.
 Automatic switching between connected keyboards belongs to the follow-up PR.
 
@@ -201,5 +201,5 @@ Import tests use pinned local source and loopback HTTP/archive fixtures. Process
 traces cover every key/layer as taps and holds, all combos, and base-layer paired
 holds in both release orders. The bundle checker accepts `imports` or `all` and
 uses embedded source fixtures with the installed compiler, sources and package
-closure, then prepares native tutor runners and firmware for both revisions.
+closure, then prepares firmware for both revisions.
 Native UI galleries stay in `.zig-cache/keyboard-onboarding-gallery`.

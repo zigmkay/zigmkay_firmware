@@ -140,7 +140,7 @@ zig build test-practice -Donly=practice
 ```
 
 Run the full desktop test suite and headless SDL GUI fixtures (including
-`--offline-practice-frames 3`, `--offline-draft-frames`, and the 8-scene
+`--offline-practice-frames 3` and the 8-scene
 Dark/Light `--offline-tutor-frames 32` gallery):
 
 ```sh

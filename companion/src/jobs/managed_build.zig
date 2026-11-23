@@ -9,7 +9,6 @@ pub const Request = struct {
         receipt: jobs.build_context.Receipt,
     };
 
-    native_only: bool = false,
     payload_executable: ?[]const u8 = null,
     payload_root: ?[]const u8 = null,
     /// Identity supplied by the installed application descriptor.
@@ -19,7 +18,7 @@ pub const Request = struct {
     export_directory: []const u8,
     expected_export_tree: jobs.firmware.Digest,
     install_directory: []const u8,
-    // Cold builds compile the shipped build runner, native runner and firmware.
+    // Cold builds compile the shipped build runner and the firmware.
     // Hosted Windows runners can exceed five minutes without being hung.
     timeout_ms: u32 = 900_000,
 };
@@ -54,7 +53,6 @@ pub const Job = struct {
     install_name: []const u8,
     completed: bool = false,
     accepted: bool = false,
-    runner_completed: bool = false,
     finish_verified: bool = false,
     finish_verified_key: jobs.firmware.Digest = @splat(0),
     finish_verified_receipt: jobs.build_context.Receipt = undefined,
@@ -101,10 +99,6 @@ pub const Job = struct {
             install_path,
         );
         errdefer command.deinit();
-        if (owned.native_only) {
-            const args = try extendArgv(&command, &.{"-Dnative-only=true"});
-            args[jobs.firmware.Command.step_arg] = "build-runner";
-        }
         var selected_environment = try environment.clone(gpa);
         defer selected_environment.deinit();
         const compiler_cache = try compilerCacheDirectory(arena.allocator(), owned);
@@ -225,84 +219,6 @@ pub const Job = struct {
         var directory = try std.Io.Dir.cwd().createDirPathOpen(self.io, path, .{});
         defer directory.close(self.io);
         try directory.writeFile(self.io, .{ .sub_path = "built", .data = "" });
-    }
-
-    /// The existing build-project command also installs the native processor runner.
-    /// It is accepted only after successful firmware completion from this same job.
-    pub fn finishRunner(self: *Job, current: jobs.firmware.Inputs) !jobs.runner_artifact.Manifest {
-        if (!self.accepted or !self.finish_verified or self.runner_completed) return error.RunnerBuildNotCompleted;
-        self.runner_completed = true;
-        self.finish_verified = false;
-        const phase_start = std.Io.Clock.awake.now(self.io);
-        defer std.log.info("build phase runner_finalization_ms={d}", .{
-            phase_start.durationTo(std.Io.Clock.awake.now(self.io)).toMilliseconds(),
-        });
-        if (!std.mem.eql(u8, &jobs.firmware.key(current), &self.finish_verified_key) or
-            !std.mem.eql(u8, &self.finish_verified_key, &self.command.build_key) or
-            !std.meta.eql(self.finish_verified_receipt, self.captured.receipt) or
-            std.Io.Clock.awake.now(self.io).toMilliseconds() - self.finish_verified_at_ms > 1000)
-            return error.StaleBuild;
-        const output = std.fs.path.dirname(std.fs.path.dirname(self.command.uf2_path).?).?;
-        const executable = "project-runner" ++ if (@import("builtin").os.tag == .windows) ".exe" else "";
-        const path = try std.fs.path.join(self.gpa, &.{ output, "bin", executable });
-        defer self.gpa.free(path);
-        const bytes = try std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            path,
-            self.gpa,
-            .limited(jobs.runner_artifact.max_bytes),
-        );
-        defer self.gpa.free(bytes);
-        return jobs.runner_artifact.Manifest.complete(
-            self.gpa,
-            .succeeded,
-            jobs.runner_artifact.key(self.captured.inputs, jobs.runner_artifact.native_target),
-            self.captured.inputs,
-            current,
-            path,
-            bytes,
-        );
-    }
-
-    /// Native-only completion has its own successful process and freshness gate;
-    /// no UF2 file is read or required.
-    pub fn finishNativeRunner(
-        self: *Job,
-        result: jobs.Result,
-        current: jobs.firmware.Inputs,
-    ) !jobs.runner_artifact.Manifest {
-        if (!self.request.native_only or
-            self.completed or
-            self.process.future != null or
-            !self.process.started) return error.RunnerBuildNotCompleted;
-        self.completed = true;
-        if (!result.successful()) return error.BuildFailed;
-        if (!std.mem.eql(u8, &result.snapshot_id, &self.command.build_key) or
-            !std.mem.eql(u8, &jobs.firmware.key(current), &self.command.build_key)) return error.StaleBuild;
-        try verifyExport(self.gpa, self.io, self.request);
-        const output = std.fs.path.dirname(std.fs.path.dirname(self.command.uf2_path).?).?;
-        const path = try std.fs.path.join(self.gpa, &.{
-            output,
-            "bin",
-            "project-runner" ++ if (@import("builtin").os.tag == .windows) ".exe" else "",
-        });
-        defer self.gpa.free(path);
-        const bytes = try std.Io.Dir.cwd().readFileAlloc(
-            self.io,
-            path,
-            self.gpa,
-            .limited(jobs.runner_artifact.max_bytes),
-        );
-        defer self.gpa.free(bytes);
-        return jobs.runner_artifact.Manifest.complete(
-            self.gpa,
-            .succeeded,
-            jobs.runner_artifact.key(current, jobs.runner_artifact.native_target),
-            self.captured.inputs,
-            current,
-            path,
-            bytes,
-        );
     }
 
     pub fn cancel(self: *Job) void {

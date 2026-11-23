@@ -55,8 +55,6 @@ pub const Build = struct {
     resources: ?desktop.application_bundle.Bundle = null,
     tools: ?jobs_api.flash_inputs.Tools = null,
     artifact: ?desktop.build_worker.Artifact = null,
-    /// Native tutor runner of the accepted build.
-    runner: ?desktop.build_worker.Runner = null,
     /// Job generation of the accepted build.
     generation: u64 = 0,
     tree: jobs_api.firmware.Digest = @splat(0),
@@ -188,12 +186,10 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     errdefer if (app.build.tools) |*tools| tools.deinit();
     errdefer if (app.build.resources) |*resources| resources.deinit();
     try app.loadBundle();
-    errdefer if (app.build.runner) |*runner| runner.deinit();
 }
 
 /// Releases everything in the reverse order of `init`.
 pub fn deinit(app: *App) void {
-    if (app.build.runner) |*runner| runner.deinit();
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.flash.deinit();
     if (app.build.resources) |*resources| resources.deinit();
@@ -612,8 +608,6 @@ pub fn discardEditorWork(app: *App) void {
     app.jobs.cancel();
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.build.artifact = null;
-    if (app.build.runner) |*runner| runner.deinit();
-    app.build.runner = null;
     app.exported = null;
     app.flash.pending = null;
     app.flash.advance = false;

@@ -181,6 +181,5 @@ fn check(
     defer candidate.deinit();
     var result = try candidate.takeBundle(&model, .{ .generation = 1, .snapshot = request.captured });
     defer result.deinit();
-    try result.runner.verifyFile(a, init.io, result.firmware.inputs);
     std.log.info("Offline bundle build passed: {s}", .{selector});
 }

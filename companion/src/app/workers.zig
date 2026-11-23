@@ -163,9 +163,7 @@ fn pollBuild(app: *App) !App.Flow {
     };
     try app.flash.buildSucceeded(&app.model, app.owner_generation);
     if (app.build.artifact) |*previous| previous.deinit();
-    if (app.build.runner) |*previous| previous.deinit();
     app.build.artifact = bundle.firmware;
-    app.build.runner = bundle.runner;
     app.build.generation = app.job_generation;
     app.build.tree = bundle.expected_export_tree;
     app.flash.panel = false;

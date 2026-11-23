@@ -7,7 +7,6 @@ const workers = @import("owned_worker.zig");
 const Model = @import("model.zig").Model;
 pub const Ticket = workers.Ticket;
 pub const Artifact = jobs.firmware.Manifest;
-pub const Runner = jobs.runner_artifact.Manifest;
 pub const Plan = struct { version: u16 = 1, config: Config };
 pub const Config = struct { board_id: [8]u8, build_board: []const u8, request: jobs.managed_build.Request };
 
@@ -178,43 +177,14 @@ pub const Request = struct {
             defer file.close(io);
             try file.writeStreamingAll(io, log[1]);
         }
-        if (request.native_only) {
-            var runner = try job.finishNativeRunner(result, job.captured.inputs);
-            defer runner.deinit();
-            var runner_cache = try output.createDirPathOpen(io, "runners", .{});
-            defer runner_cache.close(io);
-            var frozen = try jobs.runner_artifact.freeze(gpa, io, runner_cache, runner, job.captured.inputs);
-            errdefer frozen.deinit();
-            return .{
-                .ticket = .{ .generation = self.generation, .snapshot = self.captured },
-                .manifest = null,
-                .runner = frozen,
-                .receipt = job.captured.receipt,
-                .expected_export_tree = request.expected_export_tree,
-            };
-        }
         var candidate = try job.finish(result, job.captured.inputs);
         errdefer candidate.deinit();
-        var runner = try job.finishRunner(job.captured.inputs);
-        defer runner.deinit();
         try jobs.sidecar.saveLock(gpa, io, output, candidate.inputs.lock, .create);
         try jobs.sidecar.saveReceipt(gpa, io, output, job.captured.receipt, .create);
-        var runner_cache = try output.createDirPathOpen(io, "runners", .{});
-        defer runner_cache.close(io);
-        var frozen_runner = try jobs.runner_artifact.freeze(
-            gpa,
-            io,
-            runner_cache,
-            runner,
-            job.captured.inputs,
-        );
-        errdefer frozen_runner.deinit();
-        try jobs.sidecar.saveRunner(gpa, io, output, frozen_runner, .create);
         try jobs.sidecar.saveManifest(gpa, io, output, candidate, .create);
         return .{
             .ticket = .{ .generation = self.generation, .snapshot = self.captured },
             .manifest = candidate,
-            .runner = frozen_runner,
             .receipt = job.captured.receipt,
             .expected_export_tree = request.expected_export_tree,
         };
@@ -224,13 +194,11 @@ pub const Request = struct {
 pub const Prepared = struct {
     ticket: Ticket,
     manifest: ?jobs.firmware.Manifest,
-    runner: ?Runner = null,
     receipt: jobs.build_context.Receipt,
     expected_export_tree: jobs.firmware.Digest = std.mem.zeroes(jobs.firmware.Digest),
 
     pub fn deinit(self: *Prepared) void {
         if (self.manifest) |*manifest| manifest.deinit();
-        if (self.runner) |*runner| runner.deinit();
         self.* = undefined;
     }
 
@@ -247,21 +215,17 @@ pub const Prepared = struct {
         if (!std.meta.eql(self.ticket, current) or
             !std.mem.eql(u8, &current.snapshot, &(try model.id()))) return error.StaleBuild;
         const manifest = self.manifest orelse return error.BuildAlreadyCompleted;
-        const runner = self.runner orelse return error.RunnerBuildNotCompleted;
         self.manifest = null;
-        self.runner = null;
-        return .{ .firmware = manifest, .runner = runner, .expected_export_tree = self.expected_export_tree };
+        return .{ .firmware = manifest, .expected_export_tree = self.expected_export_tree };
     }
 };
 
 pub const Bundle = struct {
     firmware: Artifact,
-    runner: Runner,
     expected_export_tree: jobs.firmware.Digest = std.mem.zeroes(jobs.firmware.Digest),
 
     pub fn deinit(self: *Bundle) void {
         self.firmware.deinit();
-        self.runner.deinit();
         self.* = undefined;
     }
 };

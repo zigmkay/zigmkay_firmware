@@ -37,7 +37,7 @@ pub fn init(b: *std.Build) Steps {
         .tools = b.step("tools", "Install release, bundle check, catalog export and diagnostic utilities"),
         .check_firmware = b.step("check-firmware", "Compile generated, synthetic all-board and imported firmware; never flashes (-Dfirmware)"),
         .check_firmware_defaults = b.step("check-firmware-defaults", "Compile every board's actual default keymap; never flashes (-Dfirmware)"),
-        .build_project = b.step("build-project", "Build a verified export into UF2 and native runner (-Dfirmware -Dproject-export -Dproject-board)"),
+        .build_project = b.step("build-project", "Build a verified export into UF2 (-Dfirmware -Dproject-export -Dproject-board)"),
         .hardware_tools = b.step("hardware-tools", "Prepare the USB candidate UF2 and native HID client without running them (-Dfirmware -Ddesktop)"),
         .analyze_keymap = b.step("analyze-keymap", "Compile a captured keymap with the typed evaluator (-Dimport-root)"),
     };

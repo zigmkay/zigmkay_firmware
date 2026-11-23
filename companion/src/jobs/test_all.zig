@@ -8,7 +8,6 @@ test {
     _ = @import("flash_inputs.zig");
     _ = @import("application_bundle.zig");
     _ = @import("bundle_payload.zig");
-    _ = @import("runner_artifact.zig");
     _ = @import("bootsel_transfer.zig");
     _ = @import("picotool_job.zig");
     _ = @import("test_process.zig");

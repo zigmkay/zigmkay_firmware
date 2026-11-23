@@ -17,8 +17,8 @@ unless they carry the `full-ci` label.
 
 The **Self-contained application** workflow also supports manual dispatch:
 
-- `diagnostic`: Windows-only manifest publication, runner protection, cache reuse
-  and cleanup using fixture artifacts, without firmware compilation. The run
+- `diagnostic`: Windows-only manifest publication and cleanup using fixture
+  artifacts, without firmware compilation. The run
   preserves its executable, PDB, log and output artifacts for three days.
 - `gui`: Windows-only offline GUI build/practice verification, without repeating
   the catalog's cold/warm build matrix.
@@ -117,7 +117,7 @@ whose option is missing fails with a message that names it.
 | `tools` | Install `release`, `check-application-bundle`, `catalog-export` and `diagnose-build-finalization` (plus `bootsel-transfer` on Windows) to `zig-out/bin` | |
 | `check-firmware` | Compile generated, synthetic all-board and imported firmware | `-Dfirmware` |
 | `check-firmware-defaults` | Compile every board's actual default keymap | `-Dfirmware` |
-| `build-project` | Build a verified export into `zig-out/firmware/project.uf2` and `zig-out/bin/project-runner` | `-Dfirmware -Dproject-export=<dir> -Dproject-board=<selector>` |
+| `build-project` | Build a verified export into `zig-out/firmware/project.uf2` | `-Dfirmware -Dproject-export=<dir> -Dproject-board=<selector>` |
 | `hardware-tools` | Prepare `zig-out/acceptance` (USB candidate UF2 and inventory) and `usb-acceptance` without running them | `-Dfirmware -Ddesktop` |
 | `analyze-keymap` | Compile a captured keymap with the typed evaluator | `-Dimport-root=<dir>` |
 
@@ -136,8 +136,8 @@ whose option is missing fails with a message that names it.
 
 `check-firmware` and `check-firmware-defaults` compile firmware into the build
 cache; they do not flash hardware. The bundled application runs
-[`runtime/build.zig`](../runtime/build.zig) with its own `build-project`,
-`build-runner` and `analyze-keymap` steps; [`build/runtime.zig`](../build/runtime.zig)
+[`runtime/build.zig`](../runtime/build.zig) with its own `build-project` and
+`analyze-keymap` steps; [`build/runtime.zig`](../build/runtime.zig)
 lists the source directories shipped with it. The importer tests run their
 nested builds against that runtime closure.
 
@@ -159,7 +159,7 @@ separate explicit hardware task. The checks below never flash a device.
 ## Editor Build and Flash
 
 The installed application contains Zig 0.17.0 and its libraries, the pinned
-firmware dependency closure, native runner sources, and prebuilt Flash tools.
+firmware dependency closure, and prebuilt Flash tools.
 Startup reads a small bundle descriptor; it does not scan packages, run the
 compiler, download files or compile tools. Build exports the selected project
 and invokes the bundled compiler with `--system`, which forbids dependency
@@ -180,7 +180,7 @@ discovered within five seconds of the HID trigger, the bar asks the user to
 enter BOOTSEL manually and allows thirty additional seconds. That is the same
 authorized transaction, not another transfer attempt. No automatic retry occurs.
 The build evidence records the application payload identity and exported snapshot.
-Artifact freshness, runner verification and Flash admission checks remain active.
+Artifact freshness and Flash admission checks remain active.
 No compiler installation, development checkout or platform SDK is required by
 the assembled application.
 
@@ -197,7 +197,7 @@ Signing, notarization and DMG creation are separate release work.
 `mise run //companion:editor` and `mise run //companion:companion` assemble and launch this installed
 application. Compile-only desktop checks do not produce a distributable bundle.
 
-To validate firmware and native runners for every catalog board without devices:
+To validate firmware for every catalog board without devices:
 
 ```sh
 zig build bundle tools -Dbundle -j2

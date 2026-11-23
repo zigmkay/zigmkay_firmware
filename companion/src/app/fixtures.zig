@@ -357,8 +357,6 @@ pub fn checkBuild(app: *App) !void {
         return error.ManagedEditorBuildFailed;
     };
     if (!std.mem.eql(u8, &artifact.inputs.project_digest, &(try app.model.id()))) return error.ManagedEditorBuildStale;
-    const runner = app.build.runner orelse return error.ManagedEditorRunnerMissing;
-    try runner.verifyFile(app.gpa, app.io, artifact.inputs);
     app.fixture.build_checked = true;
 }
 
