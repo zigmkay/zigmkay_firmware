@@ -145,25 +145,26 @@ pub const CharRoute = struct {
     layer_one_shot: bool = false,
 };
 
+/// Where a character sits, independent of the board: two keyboards with the
+/// same layout give the same positions although their key indices differ.
 pub const KeyPosition = struct {
     cp: u21,
     layer: u8,
-    key_index: u8,
+    /// Hand, finger and row of the key; see `LayoutProfile.slot`.
+    slot: u16,
     shift: bool,
-    combo_key_index: ?u8 = null,
+    combo_slot: ?u16 = null,
 
     pub fn eql(a: KeyPosition, b: KeyPosition) bool {
         return a.cp == b.cp and
             a.layer == b.layer and
-            a.key_index == b.key_index and
+            a.slot == b.slot and
             a.shift == b.shift and
-            a.combo_key_index == b.combo_key_index;
+            a.combo_slot == b.combo_slot;
     }
 };
 
 pub const DeriveOptions = struct {
-    board_id: []const u8 = "",
-    base_layout_fingerprint: []const u8 = "",
     host_layout: []const u8 = "default",
     fidelity: Fidelity = .schematic,
     combos: []const ComboInput = &.{},
@@ -223,7 +224,8 @@ pub const LayoutProfile = struct {
     key_positions: [max_routes]KeyPosition = undefined,
     key_position_len: usize = 0,
 
-    /// Deterministic profile hash from (board_id, base_layout_fingerprint, host_layout).
+    /// Identity of the layout type: home-row letters and host layout. It does
+    /// not depend on the board, so progress carries over between keyboards.
     profile_hash: [32]u8 = @splat(0),
     /// Exact content digest of key_positions for quick change detection.
     positions_digest: [32]u8 = @splat(0),
@@ -254,6 +256,24 @@ pub const LayoutProfile = struct {
 
     pub fn comboSlice(self: *const LayoutProfile) []const CharRoute {
         return self.combos[0..self.combo_len];
+    }
+
+    /// The finger position of a key: finger (which implies the hand), row and
+    /// the inner-index and outer-pinky columns. Thumb keys and keys without a
+    /// finger also carry their column, since nothing else tells them apart.
+    pub fn slot(self: *const LayoutProfile, key_index: usize) u16 {
+        if (key_index >= self.key_count) return 0xffff;
+        const key = self.keys[key_index];
+        const row: u16 = @intCast(std.math.clamp(@as(i16, key.row_offset) + 2, 0, 3));
+        var value: u16 = @backingInt(key.finger);
+        value |= row << 4;
+        value |= @as(u16, @intFromBool(key.inner_index)) << 6;
+        value |= @as(u16, @intFromBool(key.outer_pinky)) << 7;
+        if (key.finger == .unknown or key.group == .thumb) {
+            value |= @as(u16, @min(key.column_rank, 15)) << 8;
+            value |= @as(u16, @backingInt(key.hand)) << 12;
+        }
+        return value;
     }
 
     pub fn keyPositionSlice(self: *const LayoutProfile) []const KeyPosition {
@@ -1008,9 +1028,9 @@ fn buildKeyPositionsAndHashes(profile: *LayoutProfile, options: DeriveOptions) v
         profile.key_positions[pos_len] = .{
             .cp = route.cp,
             .layer = @intCast(route.layer),
-            .key_index = @intCast(route.key_index),
+            .slot = profile.slot(route.key_index),
             .shift = (route.modifiers & 0x22) != 0,
-            .combo_key_index = if (route.combo_key_index) |ck| @intCast(ck) else null,
+            .combo_slot = if (route.combo_key_index) |ck| profile.slot(ck) else null,
         };
         pos_len += 1;
     }
@@ -1026,31 +1046,25 @@ fn buildKeyPositionsAndHashes(profile: *LayoutProfile, options: DeriveOptions) v
 
     // Exact positions digest.
     var pos_hash = std.crypto.hash.sha2.Sha256.init(.{});
-    pos_hash.update("zigmkay-tutor-positions-v1\x00");
+    pos_hash.update("zigmkay-tutor-positions-v2\x00");
     for (profile.keyPositionSlice()) |pos| {
         var cp_buf: [4]u8 = undefined;
         std.mem.writeInt(u32, &cp_buf, pos.cp, .little);
         pos_hash.update(&cp_buf);
-        pos_hash.update(&.{
-            pos.layer,
-            pos.key_index,
-            @intFromBool(pos.shift),
-            pos.combo_key_index orelse 0xff,
-        });
+        var slots: [4]u8 = undefined;
+        std.mem.writeInt(u16, slots[0..2], pos.slot, .little);
+        std.mem.writeInt(u16, slots[2..4], pos.combo_slot orelse 0xffff, .little);
+        pos_hash.update(&slots);
+        pos_hash.update(&.{ pos.layer, @intFromBool(pos.shift) });
     }
     profile.positions_digest = pos_hash.finalResult();
 
-    // Profile signature from (board_id, base_layout_fingerprint, host_layout).
+    // The profile is a layout type, not a keyboard: home-row letters keep
+    // QWERTY and Colemak apart, and the board is left out on purpose so the
+    // same layout on two keyboards shares its progress.
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
-    hash.update("zigmkay-tutor-profile-v1\x00");
-    hash.update(options.board_id);
-    hash.update(&.{0});
-    if (options.base_layout_fingerprint.len > 0) {
-        hash.update(options.base_layout_fingerprint);
-    } else {
-        // Fallback fingerprint from Zone 1 home-row letters so QWERTY vs Colemak stay distinct.
-        hash.update(profile.zone1Letters());
-    }
+    hash.update("zigmkay-tutor-profile-v2\x00");
+    hash.update(profile.zone1Letters());
     hash.update(&.{0});
     hash.update(options.host_layout);
     profile.profile_hash = hash.finalResult();
@@ -1361,7 +1375,7 @@ test "all 6 catalog schematics derive accurate fingers and home anchors plus lin
         const geo = schematicKeycaprio34();
         const keys = makeQwerty34();
         const ctx: TestLabelsCtx = .{ .keys = &keys };
-        const p = try derive(&geo, ctx.labels(2), .{ .board_id = "keycaprio_34" });
+        const p = try derive(&geo, ctx.labels(2), .{});
         try t.expectEqual(Finger.left_pinky, p.fingerFor(10));
         try t.expectEqual(Finger.left_ring, p.fingerFor(11));
         try t.expectEqual(Finger.left_middle, p.fingerFor(12));
@@ -1391,7 +1405,7 @@ test "all 6 catalog schematics derive accurate fingers and home anchors plus lin
         var keys: [30]TestKey = @splat(.{});
         keys[28] = .{ .text = " ", .hid_code = 44 };
         const ctx: TestLabelsCtx = .{ .keys = &keys };
-        const p = try derive(&geo, ctx.labels(1), .{ .board_id = "board_30" });
+        const p = try derive(&geo, ctx.labels(1), .{});
         try t.expectEqual(Finger.left_ring, p.fingerFor(20)); // bottom row starts at ring
         try t.expectEqual(Finger.right_ring, p.fingerFor(27));
         try t.expectEqual(Finger.left_thumb, p.fingerFor(28));
@@ -1406,7 +1420,7 @@ test "all 6 catalog schematics derive accurate fingers and home anchors plus lin
         var keys: [36]TestKey = @splat(.{});
         keys[31] = .{ .text = " ", .hid_code = 44 };
         const ctx: TestLabelsCtx = .{ .keys = &keys };
-        const p = try derive(&geo, ctx.labels(1), .{ .board_id = "dasbob" });
+        const p = try derive(&geo, ctx.labels(1), .{});
         try t.expectEqual(Finger.left_thumb, p.fingerFor(30));
         try t.expectEqual(Finger.left_thumb, p.fingerFor(32));
         try t.expectEqual(Finger.right_thumb, p.fingerFor(33));
@@ -1421,7 +1435,7 @@ test "all 6 catalog schematics derive accurate fingers and home anchors plus lin
         var keys: [38]TestKey = @splat(.{});
         keys[33] = .{ .text = " ", .hid_code = 44 };
         const ctx: TestLabelsCtx = .{ .keys = &keys };
-        const p = try derive(&geo, ctx.labels(1), .{ .board_id = "molekula" });
+        const p = try derive(&geo, ctx.labels(1), .{});
         // Outer two columns are both pinky; inner pinky (col 1) is the primary home anchor.
         try t.expectEqual(Finger.left_pinky, p.fingerFor(10));
         try t.expect(p.keys[10].outer_pinky);
@@ -1461,7 +1475,7 @@ test "all 6 catalog schematics derive accurate fingers and home anchors plus lin
             keys[i].text = letters[i];
         }
         const ctx: TestLabelsCtx = .{ .keys = &keys };
-        const p = try derive(&geo, ctx.labels(1), .{ .board_id = "linear_test", .fidelity = .linear });
+        const p = try derive(&geo, ctx.labels(1), .{ .fidelity = .linear });
         for (0..12) |i| {
             try t.expectEqual(Finger.unknown, p.fingerFor(i));
             try t.expectEqual(if (i < 6) Hand.left else Hand.right, p.handFor(i));
@@ -1483,7 +1497,6 @@ test "QWERTY vs Colemak-DH unlock zones, low-vowel detection, opposite-hand shif
         .{ .layer = 0, .key_indices = .{ 16, 17 }, .output_cp = '?', .unproven = true },
     };
     const qwerty = try derive(&geo, qwerty_ctx.labels(2), .{
-        .board_id = "keycaprio_34",
         .host_layout = "en-US",
         .combos = &combos,
     });
@@ -1517,7 +1530,6 @@ test "QWERTY vs Colemak-DH unlock zones, low-vowel detection, opposite-hand shif
     const colemak_keys = makeColemakDh34();
     const colemak_ctx: TestLabelsCtx = .{ .keys = &colemak_keys };
     const colemak = try derive(&geo, colemak_ctx.labels(2), .{
-        .board_id = "keycaprio_34",
         .host_layout = "en-US",
     });
     // Zone 1 on Colemak-DH has 8 letters (a r s t n e i o) and 4 vowels!
@@ -1531,7 +1543,6 @@ test "QWERTY vs Colemak-DH unlock zones, low-vowel detection, opposite-hand shif
     try t.expect(!std.mem.eql(u8, &qwerty.profile_hash, &colemak.profile_hash));
     // Distinct profile hashes between host layouts.
     const colemak_de = try derive(&geo, colemak_ctx.labels(2), .{
-        .board_id = "keycaprio_34",
         .host_layout = "de-DE",
     });
     try t.expect(!std.mem.eql(u8, &colemak.profile_hash, &colemak_de.profile_hash));

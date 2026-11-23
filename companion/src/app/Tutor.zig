@@ -97,7 +97,6 @@ pub fn deriveLayoutProfile(
     host_layout: []const u8,
 ) !desktop.practice_layout_profile.LayoutProfile {
     const source: desktop.practice_profile_source.Board = .{
-        .selector = board.entry.selector,
         .geometry = board.entry.geometry,
         .fidelity = switch (board.entry.fidelity) {
             .schematic => .schematic,
@@ -132,6 +131,7 @@ fn syncProfileAndPersistence(
         // Individual keys edited within the same profile: partial reset only moved keys.
         const prev_positions = self.controller.profile.keyPositionSlice();
         _ = self.controller.learning.applyLayoutDiff(prev_positions, derived.keyPositionSlice());
+        if (derived.unlock_len > 0) self.controller.learning.setUnlockOrder(derived.unlockSlice());
         self.controller.profile = derived;
         self.controller.needs_persist = true;
         return;

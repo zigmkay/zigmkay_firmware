@@ -102,11 +102,14 @@ and no external database:
 - `<app_data>/tutor/profiles/<profile_hash>/runs.jsonl` — append-only round
   history loaded on demand when you open the Progress sheet.
 
-Profiles are scoped to your board, base layout, and host keyboard layout.
-Moving an individual key in the editor only resets statistics for the moved
-keys rather than wiping your whole profile. Use the top-right **Settings**
-popover to adjust target speed (WPM), daily goal, guidance level, input source,
-or to reset progress for the active profile.
+A profile is a layout type, not a keyboard: it is scoped to the home-row
+letters and the host keyboard layout. The same layout on two keyboards shares
+its progress, while QWERTY and Colemak stay apart. Key positions are compared
+by hand, finger and row, so switching keyboards resets nothing; moving an
+individual key in the editor only resets statistics for the moved keys rather
+than wiping your whole profile. Use the top-right **Settings** popover to
+adjust target speed (WPM), daily goal, guidance level, or to reset progress for
+the active profile.
 
 ## Test Layout Mode
 
@@ -142,6 +145,15 @@ Dark/Light `--offline-tutor-frames 32` gallery):
 
 ```sh
 zig build test-desktop -Ddesktop
+```
+
+Play simulated learners (a fluent and a beginner typist) through all six stages
+on every bundled default keymap. It checks that every round can be finished,
+that progress never moves backwards and that saved progress reloads unchanged.
+`zig build test` compiles it but does not run it:
+
+```sh
+zig build test-tutor-learner
 ```
 
 To render native GPU screenshots of the same 8-scene Dark/Light gallery into

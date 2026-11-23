@@ -56,11 +56,43 @@ test "a simulated learner finishes every round on every bundled keymap" {
     try t.expect(layouts > 0);
 }
 
-fn learn(entry: catalog.Entry, typist: Typist) !void {
+test "the same layout on two keyboards is one Tutor profile and keeps its key positions" {
     const t = std.testing;
-    var tmp = t.tmpDir(.{});
-    defer tmp.cleanup();
+    const Seen = struct { selector: []const u8, profile: lp.LayoutProfile };
+    var seen: std.ArrayList(Seen) = .empty;
+    defer seen.deinit(t.allocator);
+    for (catalog.entries) |entry| {
+        if (catalog.defaultData(entry.selector) == null) continue;
+        try seen.append(t.allocator, .{ .selector = entry.selector, .profile = try deriveDefault(entry) });
+    }
+    var shared: usize = 0;
+    for (seen.items, 0..) |a, i| for (seen.items[i + 1 ..]) |b| {
+        const same = std.mem.eql(u8, &a.profile.profile_hash, &b.profile.profile_hash);
+        // Home-row letters decide the profile, whatever the board.
+        try t.expectEqual(std.mem.eql(u8, a.profile.zone1Letters(), b.profile.zone1Letters()), same);
+        if (!same) continue;
+        shared += 1;
+        // Switching keyboards must not look like every letter moved.
+        var moved: usize = 0;
+        for ("abcdefghijklmnopqrstuvwxyz") |letter| {
+            const left = positionOf(&a.profile, letter) orelse continue;
+            const right = positionOf(&b.profile, letter) orelse continue;
+            if (!left.eql(right)) moved += 1;
+        }
+        std.debug.print("tutor learner: {s} and {s} share a profile ({s}), {d} letters sit elsewhere\n", .{
+            a.selector, b.selector, a.profile.zone1Letters(), moved,
+        });
+    };
+    try t.expect(shared > 0);
+}
 
+fn positionOf(profile: *const lp.LayoutProfile, letter: u8) ?lp.KeyPosition {
+    for (profile.keyPositionSlice()) |position| if (position.cp == letter) return position;
+    return null;
+}
+
+fn deriveDefault(entry: catalog.Entry) !lp.LayoutProfile {
+    const t = std.testing;
     var board = try catalog_project.OwnedBoard.init(t.allocator, entry.selector);
     defer board.deinit();
     var defaults = try catalog_project.createDefault(t.allocator, board);
@@ -70,14 +102,21 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
     var translator: OfflineTranslator = .{};
     var labels = try desktop.label_cache.buildProjectCache(t.allocator, &translator, model.document());
     defer labels.deinit();
-    const profile = try desktop.practice_profile_source.derive(.{
-        .selector = entry.selector,
+    return desktop.practice_profile_source.derive(.{
         .geometry = entry.geometry,
         .fidelity = switch (entry.fidelity) {
             .schematic => .schematic,
             .linear => .linear,
         },
     }, &labels, model.document(), &translator, "en-US");
+}
+
+fn learn(entry: catalog.Entry, typist: Typist) !void {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+
+    const profile = try deriveDefault(entry);
 
     const owner = try t.allocator.create(control.Controller);
     defer t.allocator.destroy(owner);

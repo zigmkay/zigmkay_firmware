@@ -300,6 +300,16 @@ pub const LearningModel = struct {
         return model;
     }
 
+    /// Adopts the unlock order of an edited layout. The number of unlocked
+    /// letters stays; letters the layout can no longer produce drop out with
+    /// the old order.
+    pub fn setUnlockOrder(self: *LearningModel, unlock_order: []const u8) void {
+        self.unlock_len = @min(unlock_order.len, 26);
+        @memcpy(self.unlock_order[0..self.unlock_len], unlock_order[0..self.unlock_len]);
+        self.unlocked_count = @min(self.unlocked_count, self.unlock_len);
+        self.refreshFocusKey();
+    }
+
     pub fn activeLetters(self: *const LearningModel) []const u8 {
         return self.unlock_order[0..self.unlocked_count];
     }
@@ -791,12 +801,12 @@ test "bounded bigram top-3 ranking and layout-diff partial reset" {
     model.getOrAddStat('s').?.* = .{ .cp = 's', .ema_ms = 260.0, .ema_acc = 0.97, .samples = 25, .acc_initialized = true };
 
     const prev_pos = [_]layout_profile.KeyPosition{
-        .{ .cp = 'a', .layer = 0, .key_index = 10, .shift = false },
-        .{ .cp = 's', .layer = 0, .key_index = 11, .shift = false },
+        .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false },
+        .{ .cp = 's', .layer = 0, .slot = 11, .shift = false },
     };
     const cur_pos = [_]layout_profile.KeyPosition{
-        .{ .cp = 'a', .layer = 0, .key_index = 10, .shift = false },
-        .{ .cp = 's', .layer = 0, .key_index = 12, .shift = false }, // moved!
+        .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false },
+        .{ .cp = 's', .layer = 0, .slot = 12, .shift = false }, // moved!
     };
     const reset_count = model.applyLayoutDiff(&prev_pos, &cur_pos);
     try t.expectEqual(@as(usize, 1), reset_count);
@@ -809,4 +819,17 @@ test "bounded bigram top-3 ranking and layout-diff partial reset" {
     try t.expectEqual(@as(usize, 2), after.len);
     try t.expectEqual(@as(u21, 'f'), after[0].prev);
     try t.expectEqual(@as(u21, 'd'), after[1].prev);
+}
+
+test "an edited layout replaces the unlock order and keeps the unlocked count" {
+    const t = std.testing;
+    var model = LearningModel.init("asdfjkle", 6, .{});
+    try t.expectEqualStrings("asdfjk", model.activeLetters());
+    // 'f' can no longer be typed and 'e' moved forward.
+    model.setUnlockOrder("asdejkl");
+    try t.expectEqualStrings("asdejk", model.activeLetters());
+    try t.expect(model.unlockedMask() & (@as(u32, 1) << ('f' - 'a')) == 0);
+    // A shorter order clamps the count.
+    model.setUnlockOrder("as");
+    try t.expectEqualStrings("as", model.activeLetters());
 }

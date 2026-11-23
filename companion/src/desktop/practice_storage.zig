@@ -46,9 +46,9 @@ pub const PersistedBigram = struct {
 pub const PersistedKeyPosition = struct {
     cp: u32,
     layer: u8,
-    key_index: u8,
+    slot: u16,
     shift: bool,
-    combo_key_index: ?u8 = null,
+    combo_slot: ?u16 = null,
 };
 
 pub const ProfileState = struct {
@@ -417,9 +417,9 @@ pub fn hydrateLearningModel(
             prev_buf[i] = .{
                 .cp = @intCast(@min(p.cp, std.math.maxInt(u21))),
                 .layer = p.layer,
-                .key_index = p.key_index,
+                .slot = p.slot,
                 .shift = p.shift,
-                .combo_key_index = p.combo_key_index,
+                .combo_slot = p.combo_slot,
             };
         }
         reset_count = learning.applyLayoutDiff(prev_buf[0..n], profile.keyPositionSlice());
@@ -478,9 +478,9 @@ pub fn buildProfileState(
         dst.* = .{
             .cp = src.cp,
             .layer = src.layer,
-            .key_index = src.key_index,
+            .slot = src.slot,
             .shift = src.shift,
-            .combo_key_index = src.combo_key_index,
+            .combo_slot = src.combo_slot,
         };
     }
 
@@ -531,8 +531,8 @@ test "state.zon roundtrip, atomic overwrite, corrupt recovery and reset" {
         .{ .ema_ms = 330.0, .confidence = 0.65 },
     };
     const saved_pos = [_]PersistedKeyPosition{
-        .{ .cp = 'a', .layer = 0, .key_index = 10, .shift = false },
-        .{ .cp = 's', .layer = 0, .key_index = 11, .shift = false },
+        .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false },
+        .{ .cp = 's', .layer = 0, .slot = 11, .shift = false },
     };
     const state: ProfileState = .{
         .language = .en,
@@ -710,8 +710,8 @@ test "daily goal, UTC streak rollover, and layout-diff partial reset integration
     };
     profile.unlock_order[0] = 'a';
     profile.unlock_order[1] = 's';
-    profile.key_positions[0] = .{ .cp = 'a', .layer = 0, .key_index = 10, .shift = false };
-    profile.key_positions[1] = .{ .cp = 's', .layer = 0, .key_index = 12, .shift = false }; // moved from 11 -> 12
+    profile.key_positions[0] = .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false };
+    profile.key_positions[1] = .{ .cp = 's', .layer = 0, .slot = 12, .shift = false }; // moved from 11 -> 12
 
     const persisted: ProfileState = .{
         .unlocked_count = 2,
@@ -720,8 +720,8 @@ test "daily goal, UTC streak rollover, and layout-diff partial reset integration
             .{ .cp = 's', .ema_ms = 230.0, .ema_acc = 0.98, .samples = 24 },
         },
         .key_positions = &.{
-            .{ .cp = 'a', .layer = 0, .key_index = 10, .shift = false },
-            .{ .cp = 's', .layer = 0, .key_index = 11, .shift = false },
+            .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false },
+            .{ .cp = 's', .layer = 0, .slot = 11, .shift = false },
         },
     };
 

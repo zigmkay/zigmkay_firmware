@@ -7,7 +7,6 @@ const label_cache = @import("label_cache.zig");
 const lp = @import("practice_layout_profile.zig");
 
 pub const Board = struct {
-    selector: []const u8,
     geometry: []const physical_layout.Key,
     fidelity: lp.Fidelity,
 };
@@ -84,10 +83,7 @@ pub fn derive(
         }
     }
 
-    const profile_id = std.mem.sliceTo(&doc.profile_id, 0);
     return lp.derive(geo_buf[0..key_count], labels.practiceLabels(), .{
-        .board_id = board.selector,
-        .base_layout_fingerprint = profile_id,
         .host_layout = host_layout,
         .fidelity = board.fidelity,
         .combos = combo_buf[0..combo_len],
