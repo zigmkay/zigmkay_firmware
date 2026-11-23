@@ -90,7 +90,7 @@ pub fn apply(app: *App, action: keyboard_onboarding.Action) !void {
             cancelRunnerBuild(app);
             onboarding.active = false;
         },
-        .tutor => try prepareTutor(app),
+        .tutor => openTutor(app),
         .toggle_theme => app.view.toolbar.light = !app.view.toolbar.light,
         .open => if (app.unsavedChanges() and commands.autosaves(app)) {
             onboarding.open_when_saved = true;
@@ -107,15 +107,12 @@ fn cancelRunnerBuild(app: *App) void {
     app.jobs.runner = null;
 }
 
-/// Builds the native tutor runner of the selected project.
-fn prepareTutor(app: *App) !void {
+/// Opens the Tutor on the selected project. Practice always types on the
+/// connected keyboard; the Tutor points out when it runs another layout.
+fn openTutor(app: *App) void {
     if (!app.onboarding.selected or app.jobs.busy()) return;
-    const plan = app.build.plan orelse return app.onboarding.report(error.MissingApplicationBundle);
-    var config = plan.config;
-    config.request.native_only = true;
-    const next_job = try std.math.add(u64, app.job_generation, 1);
-    app.jobs.runner = workers.startBuild(app, config, next_job) catch |err| return app.onboarding.report(err);
-    app.job_generation = next_job;
+    app.practicing = true;
+    app.onboarding.active = false;
 }
 
 fn chooseFolder(app: *App, target: desktop.folder_selection.Target) !void {

@@ -710,7 +710,6 @@ pub fn testKeysTelemetryBar(
     layer: usize,
     layer_name: []const u8,
     modifiers: u8,
-    pending: *?control.Intent,
 ) !void {
     const bar = dvui.box(@src(), .{}, .{
         .rect = bounds,
@@ -791,12 +790,6 @@ pub fn testKeysTelemetryBar(
     else
         "Press switches on your keyboard to verify layers, holds, and combos";
     label(emitted, .{ .x = mx + 12, .y = y, .w = @max(0, bounds.w - mx - 200), .h = pill_h }, 14, if (owner.test_keys.active_combo_cp != null) ui.layerColor(theme, 4) else theme.muted, "practice.metrics");
-
-    // Source toggle on right
-    const src_label = if (owner.config.source == .os) "Input: Keyboard" else "Input: Draft";
-    if (ui.button(theme, src_label, "practice.input.source", .{ .x = bounds.w - 172, .y = y, .w = 158, .h = pill_h }) and pending.* == null) {
-        pending.* = .{ .set_source = if (owner.config.source == .os) .draft else .os };
-    }
 }
 
 /// Calm free-typing scratchpad card for Test layout mode, matching the Tutor's

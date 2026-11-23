@@ -30,6 +30,25 @@ pub const Frame = struct {
     modifiers: model.Modifiers = .{},
     pressed: []const bool,
     stale: bool = false,
+    /// Why typed text may not match the keys shown. Practice always types on
+    /// the connected keyboard, never on an unflashed editor layout.
+    layout_notice: LayoutNotice = .none,
+};
+
+pub const LayoutNotice = enum {
+    none,
+    /// No keyboard verified this layout; the editor layout is only a guide.
+    unverified,
+    /// The verified keyboard runs a layout the editor has since changed.
+    editor_changed,
+
+    pub fn text(self: LayoutNotice) ?[]const u8 {
+        return switch (self) {
+            .none => null,
+            .unverified => "Your keyboard may run a different layout than the one shown · flash this layout to practise it",
+            .editor_changed => "The editor has changes your keyboard does not run yet · flash them to practise the new layout",
+        };
+    }
 };
 
 pub const Input = struct {
@@ -342,7 +361,7 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     const work_h = @max(200.0, size.h - work_top - 16);
 
     if (owner.config.mode == .test_keys) {
-        try drawTestKeysWorkspace(owner, view, theme, .{ .x = pad_x, .y = work_top, .w = content_w, .h = work_h }, input, &pending);
+        try drawTestKeysWorkspace(owner, view, theme, .{ .x = pad_x, .y = work_top, .w = content_w, .h = work_h }, input);
     } else {
         try drawTutorWorkspace(owner, view, theme, .{ .x = pad_x, .y = work_top, .w = content_w, .h = work_h }, input, &pending);
     }
@@ -541,7 +560,7 @@ fn drawTopBar(
         if (is_live) {
             ui.runningBadge(theme, .{ .x = rx, .y = y + 6, .w = status_pill_w, .h = 26 }, 0x9100);
         } else {
-            const pill_text = if (owner.config.source == .draft) "Unflashed draft" else "Draft preview";
+            const pill_text = "Layout guide";
             const pill = dvui.box(@src(), .{}, .{
                 .rect = .{ .x = rx, .y = y + 6, .w = status_pill_w, .h = 26 },
                 .background = true,
@@ -645,7 +664,6 @@ fn drawTestKeysWorkspace(
     theme: ui.Theme,
     bounds: dvui.Rect,
     input: Input,
-    pending: *?control.Intent,
 ) !void {
     const gap: f32 = 12;
     const bar_h: f32 = 54;
@@ -660,7 +678,6 @@ fn drawTestKeysWorkspace(
         layer,
         layer_name,
         mods,
-        pending,
     );
 
     const rem_y = bounds.y + bar_h + gap;
@@ -681,12 +698,30 @@ fn drawKeyboardArea(
     owner: *const control.Controller,
     view: *View,
     theme: ui.Theme,
-    bounds: dvui.Rect,
+    area: dvui.Rect,
     focus: usize,
     resolved_hint: ?desktop.practice.Hint,
     input: Input,
 ) !void {
     view.drawn_keyboard = input.frame != null;
+    var bounds = area;
+    if (input.frame) |shown| if (shown.layout_notice.text()) |notice| {
+        const notice_h: f32 = 30;
+        const strip = dvui.box(@src(), .{}, .{
+            .rect = .{ .x = area.x, .y = area.y, .w = area.w, .h = notice_h },
+            .background = true,
+            .color_fill = .{ .color = ui.mix(theme.panel, theme.accent, 0.14) },
+            .color_border = .{ .color = ui.mix(theme.panel, theme.accent, 0.45) },
+            .border = .all(1),
+            .corners = .all(8),
+            .padding = .{},
+            .margin = .{},
+        });
+        defer strip.deinit();
+        presentation.caption(notice, .{ .x = 12, .y = 0, .w = @max(0, area.w - 24), .h = notice_h }, 13, theme.text, "practice.keyboard.notice");
+        bounds.y += notice_h + 8;
+        bounds.h = @max(0, bounds.h - notice_h - 8);
+    };
     const frame = input.frame orelse {
         const panel = dvui.box(@src(), .{}, .{
             .rect = bounds,
@@ -700,7 +735,7 @@ fn drawKeyboardArea(
             .tag = "practice.keyboard",
         });
         defer panel.deinit();
-        presentation.caption("Waiting for verified keyboard layout telemetry…", .{ .x = 16, .y = 0, .w = bounds.w - 32, .h = bounds.h }, 15, theme.muted, "practice.keyboard.source");
+        presentation.caption("Waiting for a keyboard that runs this layout · flash it from the editor if yours runs another one", .{ .x = 16, .y = 0, .w = bounds.w - 32, .h = bounds.h }, 15, theme.muted, "practice.keyboard.source");
         return;
     };
 
@@ -750,7 +785,7 @@ fn drawKeyboardArea(
     const source_title = switch (frame.source) {
         .live => if (frame.stale) "Live keyboard · stale" else "Live keyboard",
         .simulated => "Draft simulation",
-        .draft => if (is_test_keys) "Draft layout" else "Layout guide",
+        .draft => "Layout guide",
     };
     const src_caption = try std.fmt.allocPrint(arena, "{s} · {s}", .{ source_title, frame.profile });
     const dim_locked = !is_test_keys and (owner.config.stage == .home_row or owner.config.stage == .all_letters);

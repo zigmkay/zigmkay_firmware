@@ -1,5 +1,5 @@
 //! Typing tutor wiring: layout profile derivation, persistence, frozen Snapshot
-//! isolation, Live-HID / Unflashed draft routing, and screen orchestration.
+//! isolation, Live-HID routing, and screen orchestration.
 const std = @import("std");
 const dvui = @import("dvui");
 const desktop = @import("desktop-core");
@@ -391,6 +391,13 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
 
     const doc = model.document();
     const layer_name = if (layer < doc.layers.len) doc.layers[layer].name else "";
+    // Practice types on the connected keyboard. Say so when that keyboard is
+    // not known to run the layout the editor holds.
+    const layout_notice: tutor.LayoutNotice = if (app.frame_limit != null)
+        .none
+    else if (!live)
+        .unverified
+    else if (sameLayout(&app.live.model, &app.model)) .none else .editor_changed;
     return .{ .labels = labels, .live = live, .metadata = metadata, .keyboard = .{
         .source = if (live) .live else if (draft.owner != null) .simulated else .draft,
         .labels = labels,
@@ -403,7 +410,14 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
         .active_layers = active_layers,
         .modifiers = modifiers,
         .pressed = pressed,
+        .layout_notice = layout_notice,
     } };
+}
+
+fn sameLayout(a: *const desktop.model.Model, b: *const desktop.model.Model) bool {
+    const left = a.id() catch return false;
+    const right = b.id() catch return false;
+    return std.mem.eql(u8, &left, &right);
 }
 
 pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {

@@ -182,7 +182,6 @@ pub const Intent = union(enum) {
     set_target_wpm: f32,
     set_guidance: GuidanceMode,
     set_daily_goal: u16,
-    set_source: practice.Source,
     set_stage5_filter: struct { filter: generator.Stage5Filter, layer: ?usize = null },
     set_stage6_source: struct { source: generator.Stage6Source, zig_lesson: usize = 0 },
     reset_progress,
@@ -362,15 +361,6 @@ pub const Controller = struct {
                 self.persisted.daily_goal_minutes = clamped;
                 self.needs_persist = true;
                 break :blk .{};
-            },
-            .set_source => |src| blk: {
-                var next = self.config;
-                next.source = src;
-                const eff = try self.choose(next, now);
-                if (self.config.mode == .tutor) {
-                    break :blk try self.start(true, prepared_snapshot, now);
-                }
-                break :blk eff;
             },
             .set_stage5_filter => |sf| blk: {
                 var next = self.config;

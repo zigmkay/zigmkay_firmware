@@ -51,7 +51,7 @@ pub fn drawSettingsPopover(
 ) !void {
     if (!open.*) return;
     const pop_w: f32 = 324;
-    const pop_h: f32 = if (confirm_reset.*) 348 else 322;
+    const pop_h: f32 = if (confirm_reset.*) 285 else 259;
     const screen = dvui.windowRect();
     const x = std.math.clamp(anchor_right - pop_w, 12.0, @max(12.0, screen.w - pop_w - 12.0));
     const y = std.math.clamp(anchor_top, 12.0, @max(12.0, screen.h - pop_h - 12.0));
@@ -128,19 +128,7 @@ pub fn drawSettingsPopover(
     }
     cy += 38;
 
-    // 4. Input source
-    presentation.label("Input source", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
-    cy += 23;
-    const sw = (inner_w - 6) / 2.0;
-    if (pillButton(theme, "OS keyboard text", .{ .x = pad, .y = cy, .w = sw, .h = 28 }, owner.config.source == .os, 0xa400) and pending.* == null) {
-        pending.* = .{ .set_source = .os };
-    }
-    if (pillButton(theme, "Unflashed draft", .{ .x = pad + sw + 6, .y = cy, .w = sw, .h = 28 }, owner.config.source == .draft, 0xa401) and pending.* == null) {
-        pending.* = .{ .set_source = .draft };
-    }
-    cy += 40;
-
-    // 5. Reset progress (inline two-step confirmation)
+    // 4. Reset progress (inline two-step confirmation)
     ui.divider(theme, .{ .x = pad, .y = cy - 6, .w = inner_w, .h = 1 }, 0xa002);
     if (!confirm_reset.*) {
         if (ui.dangerButton(theme, null, "Reset profile progress", "practice.settings.reset", .{ .x = pad, .y = cy + 4, .w = inner_w, .h = 30 })) {

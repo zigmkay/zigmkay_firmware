@@ -138,44 +138,10 @@ fn captureSource(view: *editor.View, model: *desktop.model.Model, action: callba
 
 /// Accepts finished job results. A failed or stale result skips the frame.
 pub fn poll(app: *App) !App.Flow {
-    inline for (.{ pollRunner, pollBuild, pollFile, pollSource }) |pollJob| {
+    inline for (.{ pollBuild, pollFile, pollSource }) |pollJob| {
         const flow = try pollJob(app);
         if (flow != .proceed) return flow;
     }
-    return .proceed;
-}
-
-fn pollRunner(app: *App) !App.Flow {
-    const job = app.jobs.runner orelse return .proceed;
-    const event = job.worker.poll() orelse return .proceed;
-    app.jobs.runner = null;
-    defer job.worker.destroy();
-    var prepared = event.result catch |err| {
-        app.onboarding.report(err);
-        return .next_frame;
-    };
-    defer prepared.deinit();
-    if (job.editor_generation != app.owner_generation or !std.meta.eql(event.ticket, job.worker.ticket) or
-        !std.mem.eql(u8, &event.ticket.snapshot, &(try app.model.id())))
-    {
-        app.onboarding.report(error.StaleBuild);
-        return .next_frame;
-    }
-    const runner = prepared.runner orelse {
-        app.onboarding.report(error.RunnerArtifactNotPrepared);
-        return .next_frame;
-    };
-    prepared.runner = null;
-    if (app.build.runner) |*old| old.deinit();
-    app.build.runner = runner;
-    // Keep the saved Tutor settings (stage, target WPM, goal, guidance); only
-    // the mode and the input source change for the draft runner.
-    var config = app.tutor.controller.config;
-    config.mode = .test_keys;
-    config.source = .draft;
-    _ = try app.tutor.controller.choose(config, 0);
-    app.practicing = true;
-    app.onboarding.active = false;
     return .proceed;
 }
 
