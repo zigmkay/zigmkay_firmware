@@ -145,6 +145,24 @@ pub fn recordDailyPractice(state: *ProfileState, utc_timestamp_sec: u64, active_
     }
 }
 
+pub const DailyView = struct { active_seconds: u32, streak_days: u32 };
+
+/// The daily goal progress and streak as of `utc_now_sec`, without mutating
+/// `state`: a stored day that is not today has no active seconds yet, and a
+/// streak lapses once a whole UTC day was skipped. `utc_now_sec == 0` means
+/// the clock is unknown and returns the stored values.
+pub fn dailyView(state: ProfileState, utc_now_sec: u64) DailyView {
+    if (utc_now_sec == 0 or state.daily_utc_day == 0) {
+        return .{ .active_seconds = state.daily_active_seconds, .streak_days = state.streak_days };
+    }
+    const today = utc_now_sec / 86_400;
+    if (today == state.daily_utc_day) {
+        return .{ .active_seconds = state.daily_active_seconds, .streak_days = state.streak_days };
+    }
+    const lapsed = today > @as(u64, state.daily_utc_day) + 1;
+    return .{ .active_seconds = 0, .streak_days = if (lapsed) 0 else state.streak_days };
+}
+
 /// Atomically writes `state.zon` (create dirs -> temp file -> sync -> atomic replace).
 pub fn saveState(
     gpa: std.mem.Allocator,
@@ -192,10 +210,14 @@ pub fn loadState(
 
     const bytes = dir.readFileAlloc(io, state_filename, gpa, .limited(max_state_bytes)) catch |err| switch (err) {
         error.FileNotFound => return .{ .arena = arena, .state = .{}, .existed = false },
-        else => {
+        // Oversized content is a content problem; back it up like a parse failure.
+        error.StreamTooLong => {
             backupCorrupt(io, dir);
             return .{ .arena = arena, .state = .{}, .existed = true, .recovered_from_corrupt = true };
         },
+        // A transient read failure (sharing violation, permissions) must not
+        // rename a good file or let a fresh state be saved over it.
+        else => return err,
     };
     defer gpa.free(bytes);
 
@@ -244,7 +266,16 @@ pub fn appendRun(
     // Windows needs read access on the handle to stat it for the append offset.
     var file = try dir.createFile(io, runs_filename, .{ .truncate = false, .read = true });
     defer file.close(io);
-    const end_pos = (try file.stat(io)).size;
+    var end_pos = (try file.stat(io)).size;
+    if (end_pos > 0) {
+        // A crash can leave a partial last line; terminate it so this record
+        // stays on its own line instead of being merged into the fragment.
+        var last: [1]u8 = undefined;
+        if (try file.readPositionalAll(io, &last, end_pos - 1) == 1 and last[0] != '\n') {
+            try file.writePositionalAll(io, "\n", end_pos);
+            end_pos += 1;
+        }
+    }
     try file.writePositionalAll(io, out.written(), end_pos);
 }
 
@@ -599,18 +630,53 @@ test "runs.jsonl append, multi-round readback, and recovery from truncated final
     var rel_buf: [96]u8 = undefined;
     var pdir = try tmp.dir.openDir(t.io, profileRelPath(hash, &rel_buf), .{});
     defer pdir.close(t.io);
-    var file = try pdir.createFile(t.io, runs_filename, .{ .truncate = false, .read = false });
-    defer file.close(t.io);
-    const end = (try file.stat(t.io)).size;
-    try file.writePositionalAll(t.io, "{\"utc_timestamp\":1700000120,\"stage\":2,\"wpm\":", end);
+    {
+        var file = try pdir.createFile(t.io, runs_filename, .{ .truncate = false, .read = true });
+        defer file.close(t.io);
+        const end = (try file.stat(t.io)).size;
+        try file.writePositionalAll(t.io, "{\"utc_timestamp\":1700000120,\"stage\":2,\"wpm\":", end);
+    }
 
-    var loaded = try loadRuns(t.allocator, t.io, tmp.dir, hash);
-    defer loaded.deinit();
-    try t.expectEqual(@as(usize, 2), loaded.runs.len);
-    try t.expectEqual(@as(usize, 1), loaded.skipped_lines);
-    try t.expectApproxEqAbs(@as(f32, 34.5), loaded.runs[0].wpm, 0.01);
-    try t.expectEqual(@as(?u32, 'e'), loaded.runs[1].unlocked_char);
-    try t.expectEqual(@as(u32, 'f'), loaded.runs[0].top_weak_keys[0]);
+    {
+        var loaded = try loadRuns(t.allocator, t.io, tmp.dir, hash);
+        defer loaded.deinit();
+        try t.expectEqual(@as(usize, 2), loaded.runs.len);
+        try t.expectEqual(@as(usize, 1), loaded.skipped_lines);
+        try t.expectApproxEqAbs(@as(f32, 34.5), loaded.runs[0].wpm, 0.01);
+        try t.expectEqual(@as(?u32, 'e'), loaded.runs[1].unlocked_char);
+        try t.expectEqual(@as(u32, 'f'), loaded.runs[0].top_weak_keys[0]);
+    }
+
+    // The next round after the crash lands on its own line and survives.
+    try appendRun(t.allocator, t.io, tmp.dir, hash, .{
+        .utc_timestamp = 1_700_000_180,
+        .stage = 3,
+        .wpm = 40.0,
+        .accuracy = 99.0,
+        .active_seconds = 30.0,
+    });
+    var after = try loadRuns(t.allocator, t.io, tmp.dir, hash);
+    defer after.deinit();
+    try t.expectEqual(@as(usize, 3), after.runs.len);
+    try t.expectEqual(@as(usize, 1), after.skipped_lines);
+    try t.expectEqual(@as(u8, 3), after.runs[2].stage);
+}
+
+test "dailyView rolls daily seconds and lapses the streak without mutating state" {
+    const t = std.testing;
+    const day: u32 = 20_000;
+    const st: ProfileState = .{ .daily_utc_day = day, .daily_active_seconds = 840, .streak_days = 4 };
+    const same = dailyView(st, @as(u64, day) * 86_400 + 100);
+    try t.expectEqual(@as(u32, 840), same.active_seconds);
+    try t.expectEqual(@as(u32, 4), same.streak_days);
+    const next = dailyView(st, @as(u64, day + 1) * 86_400 + 100);
+    try t.expectEqual(@as(u32, 0), next.active_seconds);
+    try t.expectEqual(@as(u32, 4), next.streak_days);
+    const skipped = dailyView(st, @as(u64, day + 2) * 86_400 + 100);
+    try t.expectEqual(@as(u32, 0), skipped.active_seconds);
+    try t.expectEqual(@as(u32, 0), skipped.streak_days);
+    const unknown = dailyView(st, 0);
+    try t.expectEqual(@as(u32, 840), unknown.active_seconds);
 }
 
 test "daily goal, UTC streak rollover, and layout-diff partial reset integration" {

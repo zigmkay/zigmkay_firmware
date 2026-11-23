@@ -225,11 +225,16 @@ pub const Controller = struct {
         self.profile_bound = true;
 
         if (loaded_state) |st| {
+            // One sanitized target for the UI, the persisted copy and the model.
+            const target_wpm: f32 = if (std.math.isFinite(st.target_wpm))
+                std.math.clamp(st.target_wpm, 15.0, 140.0)
+            else
+                35.0;
             self.persisted = .{
                 .schema_version = storage.schema_version,
                 .language = st.language,
                 .active_stage = st.active_stage,
-                .target_wpm = st.target_wpm,
+                .target_wpm = target_wpm,
                 .guidance_mode = st.guidance_mode,
                 .error_mode = st.error_mode,
                 .daily_goal_minutes = st.daily_goal_minutes,
@@ -241,14 +246,16 @@ pub const Controller = struct {
                 .total_rounds = st.total_rounds,
             };
             self.config.stage = Stage.fromNumber(st.active_stage);
-            self.config.target_wpm = std.math.clamp(st.target_wpm, 15.0, 140.0);
+            self.config.target_wpm = target_wpm;
             self.config.guidance = st.guidance_mode;
             self.config.error_mode = switch (st.error_mode) {
                 .stop_on_error => .stop_on_error,
                 .flow_backspace => .flow_backspace,
             };
             self.config.daily_goal_minutes = std.math.clamp(st.daily_goal_minutes, 5, 120);
-            return storage.hydrateLearningModel(st, &self.profile, &self.learning);
+            const reset = storage.hydrateLearningModel(st, &self.profile, &self.learning);
+            self.learning.config.target_wpm = target_wpm;
+            return reset;
         } else {
             self.persisted = .{};
             const order = if (profile.unlock_len > 0) profile.unlockSlice() else layout_profile.english_letter_frequency;
@@ -686,8 +693,10 @@ pub const Controller = struct {
             return;
         }
 
-        if (self.pending_run) |pr| {
-            try storage.appendRun(gpa, io, base_dir, self.profile.profile_hash, .{
+        // A failed history append must not keep the learning state from saving;
+        // the record stays pending and the error is returned after the save.
+        const appended = if (self.pending_run) |pr|
+            storage.appendRun(gpa, io, base_dir, self.profile.profile_hash, .{
                 .utc_timestamp = pr.utc_timestamp,
                 .stage = pr.stage,
                 .wpm = pr.wpm,
@@ -697,9 +706,9 @@ pub const Controller = struct {
                 .unlocked_char = pr.unlocked_char,
                 .top_weak_keys = pr.weak_keys[0..pr.weak_key_len],
                 .top_weak_bigrams = pr.weak_bigrams[0..pr.weak_bigram_len],
-            });
-            self.pending_run = null;
-        }
+            })
+        else {};
+        if (appended) |_| self.pending_run = null else |_| {}
 
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
@@ -721,6 +730,7 @@ pub const Controller = struct {
             host_layout,
         );
         try storage.saveState(gpa, io, base_dir, self.profile.profile_hash, state);
+        try appended;
         self.needs_persist = false;
     }
 

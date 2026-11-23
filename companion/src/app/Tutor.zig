@@ -22,6 +22,16 @@ bound_board_id: [64]u8 = @splat(0),
 bound_board_id_len: usize = 0,
 bound_host_layout: [64]u8 = @splat(0),
 bound_host_layout_len: usize = 0,
+/// Set when the bound profile's saved state could not be read; nothing is
+/// saved over it until the next rebind.
+persistence_blocked: bool = false,
+/// Earliest monotonic time a failed save is retried.
+persist_retry_us: u64 = 0,
+/// Whether the last save failed; the failure is reported once per streak.
+persist_failing: bool = false,
+
+/// Time between retries of a failed progress save.
+const persist_retry_interval_us: u64 = 5 * std.time.us_per_s;
 
 /// The project a run practices on, frozen independently of later edits.
 pub const Snapshot = struct {
@@ -199,17 +209,30 @@ fn syncProfileAndPersistence(
     }
 
     // Load persisted state for this profile when running outside offline fixtures.
+    // A read failure is not "no saved state": bind fresh for this session but
+    // block saving, so the real progress on disk is never overwritten.
     var loaded: ?desktop.practice_storage.LoadedState = null;
     defer if (loaded) |*l| l.deinit();
+    var blocked = false;
     if (app.frame_limit == null) {
         if (app.user_paths) |owned| {
             if (std.Io.Dir.cwd().createDirPathOpen(app.io, owned.paths.data, .{})) |data_dir| {
                 var d = data_dir;
                 defer d.close(app.io);
-                loaded = desktop.practice_storage.loadState(app.gpa, app.io, d, derived.profile_hash) catch null;
-            } else |_| {}
+                loaded = desktop.practice_storage.loadState(app.gpa, app.io, d, derived.profile_hash) catch |err| failed: {
+                    blocked = true;
+                    app.view.report(err);
+                    break :failed null;
+                };
+            } else |err| {
+                blocked = true;
+                app.view.report(err);
+            }
         }
     }
+    self.persistence_blocked = blocked;
+    self.persist_failing = false;
+    self.persist_retry_us = 0;
 
     _ = self.controller.bindProfile(derived, if (loaded) |l| (if (l.existed) l.state else null) else null);
     self.bound_profile_hash = derived.profile_hash;
@@ -221,19 +244,33 @@ fn syncProfileAndPersistence(
     self.bound_host_layout_len = hl_len;
 }
 
-fn flushPersistence(app: *App) void {
+fn flushPersistence(app: *App, now_us: u64) void {
     const self = &app.tutor;
-    if (app.frame_limit != null or !self.controller.needs_persist) return;
+    if (app.frame_limit != null or !self.controller.needs_persist or self.persistence_blocked) return;
+    if (now_us < self.persist_retry_us) return;
     const owned = app.user_paths orelse return;
-    var data_dir = std.Io.Dir.cwd().createDirPathOpen(app.io, owned.paths.data, .{}) catch return;
+    persistTo(app, owned.paths.data) catch |err| {
+        // Retry with a backoff instead of every frame, and report once.
+        self.persist_retry_us = now_us +| persist_retry_interval_us;
+        if (!self.persist_failing) app.view.report(err);
+        self.persist_failing = true;
+        return;
+    };
+    self.persist_failing = false;
+    self.persist_retry_us = 0;
+}
+
+fn persistTo(app: *App, data_path: []const u8) !void {
+    const self = &app.tutor;
+    var data_dir = try std.Io.Dir.cwd().createDirPathOpen(app.io, data_path, .{});
     defer data_dir.close(app.io);
-    self.controller.persistPending(
+    try self.controller.persistPending(
         app.gpa,
         app.io,
         data_dir,
         self.bound_board_id[0..self.bound_board_id_len],
         self.bound_host_layout[0..self.bound_host_layout_len],
-    ) catch {};
+    );
 }
 
 /// Keeps the run's frozen project current and advances the run. Returns the
@@ -264,7 +301,7 @@ pub fn observe(app: *App, now_us: u64) !*desktop.model.Model {
         if (practice.failure) |failure| return failure;
         if (practice.session.len > 1) return error.DraftRepeatRoutingFailed;
     }
-    flushPersistence(app);
+    flushPersistence(app, now_us);
     return control_model;
 }
 
@@ -431,5 +468,5 @@ pub fn finishFrame(app: *App, outcome: Outcome, control_model: *desktop.model.Mo
         };
         app.applyPractice(effect, control_model, now_us);
     }
-    flushPersistence(app);
+    flushPersistence(app, now_us);
 }

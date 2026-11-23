@@ -168,7 +168,12 @@ fn pollRunner(app: *App) !App.Flow {
     prepared.runner = null;
     if (app.build.runner) |*old| old.deinit();
     app.build.runner = runner;
-    _ = try app.tutor.controller.choose(.{ .mode = .test_keys, .source = .draft }, 0);
+    // Keep the saved Tutor settings (stage, target WPM, goal, guidance); only
+    // the mode and the input source change for the draft runner.
+    var config = app.tutor.controller.config;
+    config.mode = .test_keys;
+    config.source = .draft;
+    _ = try app.tutor.controller.choose(config, 0);
     app.practicing = true;
     app.onboarding.active = false;
     return .proceed;

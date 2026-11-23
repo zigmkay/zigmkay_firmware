@@ -475,7 +475,7 @@ fn drawProgressSheet(
     });
     const subtitle = try std.fmt.allocPrint(arena, "Profile-scoped · {d} rounds · {d}-day streak · Local storage (ZON)", .{
         owner.learning.total_rounds,
-        owner.persisted.streak_days,
+        storage.dailyView(owner.persisted, owner.utc_now_sec).streak_days,
     });
 
     boldLabel(title, .{ .x = 24, .y = 22, .w = @max(120, cta_x - 36), .h = 30 }, 21, theme.text, 0xc091);

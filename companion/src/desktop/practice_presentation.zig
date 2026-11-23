@@ -298,7 +298,8 @@ pub fn typingCard(
 
     // Daily goal readout + progress bar on right
     const goal_mins: f32 = @floatFromInt(@max(@as(u16, 1), owner.config.daily_goal_minutes));
-    const done_mins: f32 = @as(f32, @floatFromInt(owner.persisted.daily_active_seconds)) / 60.0;
+    const daily = desktop.practice_storage.dailyView(owner.persisted, owner.utc_now_sec);
+    const done_mins: f32 = @as(f32, @floatFromInt(daily.active_seconds)) / 60.0;
     const goal_frac = std.math.clamp(done_mins / goal_mins, 0.0, 1.0);
     const goal_text = try std.fmt.allocPrint(arena, "Daily goal {d:.0}/{d}m", .{ @floor(done_mins), owner.config.daily_goal_minutes });
     const bar_w: f32 = 76;

@@ -127,6 +127,9 @@ fn insertText(owner: *control.Controller, effect: *control.Effect, text: []const
     effect.reset_text = inserted.reset_text or effect.reset_text;
 }
 
+/// Continue keys arriving this soon after the last keystroke of a round are ignored.
+const rundown_settle_us: u64 = 300_000;
+
 fn consumeInput(
     owner: *control.Controller,
     view: *View,
@@ -196,20 +199,24 @@ fn consumeInput(
         return effect;
     }
 
-    // Inline Rundown keyboard-only continuation: Enter or Space immediately starts next round.
+    // Inline Rundown keyboard-only continuation: Enter or Space starts the next
+    // round. A habitual trailing Space right after the last letter is swallowed
+    // so the rundown stays visible.
     if (owner.session.state == .complete) {
+        const completed_at = owner.session.last_event_us orelse 0;
+        const settled = input.now_us -| completed_at >= rundown_settle_us;
         for (dvui.events()) |*event| {
             if (event.handled) continue;
             switch (event.evt) {
                 .key => |key| {
                     if (key.action != .up and (key.code == .enter or key.code == .space)) {
-                        if (pending.* == null) pending.* = .next_round;
+                        if (settled and pending.* == null) pending.* = .next_round;
                         event.handle(@src(), data);
                     }
                 },
                 .text => |text| {
                     if (text.action == .value and std.mem.eql(u8, text.action.value.txt, " ")) {
-                        if (pending.* == null) pending.* = .next_round;
+                        if (settled and pending.* == null) pending.* = .next_round;
                         event.handle(@src(), data);
                     }
                 },

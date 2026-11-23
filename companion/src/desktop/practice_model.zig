@@ -572,10 +572,12 @@ pub const LearningModel = struct {
         for (self.stats[0..self.stat_len]) |*st| {
             const prev_pos = findPosition(prev_positions, st.cp);
             const cur_pos = findPosition(cur_positions, st.cp);
+            // A character with no derived route in either layout (Stage 6 prose)
+            // has not moved; only an added, removed or changed route resets it.
             const unchanged = if (prev_pos != null and cur_pos != null)
                 prev_pos.?.eql(cur_pos.?)
             else
-                false;
+                prev_pos == null and cur_pos == null;
             if (!unchanged) {
                 st.reset();
                 if (moved_len < moved_cps.len) {
