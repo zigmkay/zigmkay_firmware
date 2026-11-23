@@ -31,6 +31,7 @@ pub const project_files = @import("project_files.zig");
 pub const project_worker = @import("project_worker.zig");
 pub const build_worker = @import("build_worker.zig");
 pub const application_bundle = @import("application_bundle.zig");
+pub const practice_profile_source = @import("practice_profile_source.zig");
 pub const runner_runtime = @import("runner_runtime.zig");
 pub const try_state = @import("try_state.zig");
 pub const flash_controller = @import("flash-controller");

@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) !void {
 fn disableUnconfigured(b: *std.Build, cfg: Config, steps: Steps) void {
     if (cfg.only) |only| {
         const message = b.fmt("this step is unavailable with -Donly={t}", .{only});
-        for ([_]*std.Build.Step{ steps.check, steps.@"test", steps.test_desktop, steps.test_native, steps.run, steps.bundle, steps.check_firmware, steps.check_firmware_defaults, steps.build_project, steps.hardware_tools }) |step|
+        for ([_]*std.Build.Step{ steps.check, steps.@"test", steps.test_tutor_learner, steps.test_desktop, steps.test_native, steps.run, steps.bundle, steps.check_firmware, steps.check_firmware_defaults, steps.build_project, steps.hardware_tools }) |step|
             Steps.unavailable(b, step, message);
         if (only == .diagnostic) for ([_]*std.Build.Step{ steps.test_practice, steps.test_jobs }) |step|
             Steps.unavailable(b, step, message);

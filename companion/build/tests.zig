@@ -212,6 +212,15 @@ pub fn addHost(s: *Suite, fixtures: *Fixtures) void {
     _ = s.add(step, .core, integration);
     fixtures.app_tests = s.unit(step, .core, "src/app/test_all.zig", h.app_test_deps);
 
+    // The simulated learner is compiled by `check` but runs only on request.
+    const offline_translator = b.createModule(.{ .root_source_file = b.path("src/app/OfflineTranslator.zig"), .imports = &.{.{ .name = "zkeymap", .module = h.keymap }} });
+    _ = s.unit(s.steps.test_tutor_learner, .core, "tests/tutor_learner.zig", &.{
+        .{ .name = "desktop-core", .module = h.desktop_core },
+        .{ .name = "catalog", .module = h.catalog },
+        .{ .name = "catalog-project", .module = h.catalog_project },
+        .{ .name = "offline-translator", .module = offline_translator },
+    });
+
     // Nested analysis builds run against the bundled runtime closure, exactly
     // as the installed application does, with the repository's import fixtures.
     const importer_options = b.addOptions();
