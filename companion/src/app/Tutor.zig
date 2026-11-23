@@ -304,7 +304,7 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
     // Practice types on the connected keyboard. Say so when that keyboard is
     // not known to run the layout the editor holds.
     const layout_notice: tutor.LayoutNotice = if (app.frame_limit != null)
-        .none
+        app.fixture.layout_notice
     else if (!live)
         .unverified
     else if (sameLayout(&app.live.model, &app.model)) .none else .editor_changed;

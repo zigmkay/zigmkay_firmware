@@ -18,6 +18,8 @@ pub const State = struct {
     /// The companion fixture's unsaved draft, which must survive hiding.
     retained: ?[32]u8 = null,
     build_checked: bool = false,
+    /// The layout notice the tutor gallery shows; fixtures have no keyboard.
+    layout_notice: @import("practice-ui").LayoutNotice = .none,
 };
 
 /// Scripts that replace the project or the onboarding stage before a frame.
@@ -30,7 +32,7 @@ pub fn beforeFrame(app: *App) !void {
     if (app.mode.isTutorGallery()) try showTutor(app);
 }
 
-/// The tutor gallery renders 8 scenes for 4 frames each (2 Dark + 2 Light):
+/// The tutor gallery renders 15 scenes for 4 frames each (2 Dark + 2 Light):
 /// 0: Active Stage 2 · All letters (with populated confidences & focus key)
 /// 1: Stage 3 · Shift & capitals (opposite-hand Shift hold + tap bridge)
 /// 2: Stage 5 · Layers & combos (layer auto-preview / 2-key combo arc)
@@ -38,7 +40,14 @@ pub fn beforeFrame(app: *App) !void {
 /// 4: Stages sheet (6-stage learning path)
 /// 5: Progress sheet (KPI cards, WPM trend chart, weakest keys)
 /// 6: Test keys mode (clean keyboard + telemetry bar)
-/// 7: Narrow viewport responsive audit (960x640, Stage 2 active)
+/// 7: Settings popover
+/// 8: Notice that no keyboard is verified for the layout (Stage 2)
+/// 9: Notice that the editor holds unflashed changes (Test layout)
+/// 10: Stage 1 · Home row
+/// 11: Stage 4 · Punctuation & numbers
+/// 12: Stage 6 · Free text
+/// 13: Paused round with the Resume banner
+/// 14: Narrow viewport responsive audit (960x640, Stage 2 active)
 fn showTutor(app: *App) !void {
     app.view.toolbar.light = app.count % 4 >= 2;
     const is_scene_start = (app.count == 1) or (app.count >= 4 and app.count % 4 == 0);
@@ -50,6 +59,7 @@ fn showTutor(app: *App) !void {
     app.tutor.view.sheet = .none;
     app.tutor.view.settings_open = false;
     app.tutor.view.confirm_reset = false;
+    app.fixture.layout_notice = .none;
 
     // Seed realistic learning progress & synthetic history once profile is bound (frame 1).
     if (scene == 0) {
@@ -57,10 +67,23 @@ fn showTutor(app: *App) !void {
     }
 
     switch (scene) {
-        0, 7 => {
+        0, 7, 8, 13, 14 => {
             try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
             try practice.start();
             try typeSessionPrefix(&practice.session, @min(36, practice.session.reference_len / 2), now, true);
+            if (scene == 7) app.tutor.view.settings_open = true;
+            if (scene == 8) app.fixture.layout_notice = .unverified;
+            if (scene == 13) practice.pause(now);
+        },
+        10, 11, 12 => {
+            const stage: desktop.practice_controller.Stage = switch (scene) {
+                10 => .home_row,
+                11 => .punctuation_numbers,
+                else => .free_text,
+            };
+            try practice.choose(.{ .mode = .tutor, .stage = stage, .guidance = .guided }, now);
+            try practice.start();
+            try typeSessionPrefix(&practice.session, @min(18, practice.session.reference_len / 2), now, false);
         },
         1 => {
             try practice.choose(.{ .mode = .tutor, .stage = .shift, .guidance = .guided }, now);
@@ -106,7 +129,8 @@ fn showTutor(app: *App) !void {
             practice.persisted.daily_active_seconds = 420;
             app.tutor.view.sheet = .progress;
         },
-        6 => {
+        6, 9 => {
+            if (scene == 9) app.fixture.layout_notice = .editor_changed;
             try practice.choose(.{ .mode = .test_keys }, now);
             practice.test_keys.clearScratchpad();
             practice.test_keys.setLastText("!");
@@ -486,7 +510,7 @@ pub fn resizeStatusWindow(app: *App) void {
     if (app.mode.isDrawers() and app.count == 1) _ = c.SDL_SetWindowSize(app.native.window, 1440, 1000);
     if (app.mode.isTutorGallery()) {
         if (app.count == 1) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
-        if (app.count == 29) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
+        if (app.count == 57) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
     }
     if (!app.mode.isStatus() or (app.count != 1 and app.count != 21 and app.count != 25)) return;
     const narrow = app.count == 21;

@@ -140,8 +140,8 @@ zig build test-practice -Donly=practice
 ```
 
 Run the full desktop test suite and headless SDL GUI fixtures (including
-`--offline-practice-frames 3` and the 8-scene
-Dark/Light `--offline-tutor-frames 32` gallery):
+`--offline-practice-frames 3` and the 15-scene
+Dark/Light `--offline-tutor-frames 60` gallery):
 
 ```sh
 zig build test-desktop -Ddesktop
@@ -156,9 +156,36 @@ that progress never moves backwards and that saved progress reloads unchanged.
 zig build test-tutor-learner
 ```
 
-To render native GPU screenshots of the same 8-scene Dark/Light gallery into
+To render native GPU screenshots of the same 15-scene Dark/Light gallery into
 `companion/.zig-cache/typing-practice-gallery/`:
 
 ```sh
-zig build -Ddesktop && ./zig-out/bin/zigmkay-companion --native-tutor-frames 32
+zig build -Ddesktop && ./zig-out/bin/zigmkay-companion --native-tutor-frames 60
 ```
+
+## Manual hardware checklist
+
+Automated tests never touch a keyboard. Before a release, walk through this
+list once per layout type with a real board (for example a Molekula and an
+LK07 running the same layout):
+
+1. **Try it out** with the flashed layout connected: Test layout opens, the
+   status pill reads live and no notice is shown above the keyboard.
+2. Change a key in the editor without flashing: the notice about unflashed
+   editor changes appears; after flashing it disappears.
+3. Unplug the keyboard: the Tutor waits for a keyboard that runs the layout
+   instead of scoring text against the wrong layout.
+4. Test layout: every key lights up when pressed; holding a layer key switches
+   the shown layer; held modifiers appear in the telemetry bar.
+5. Test layout: a two-key combo shows "Combo keys held" and the character lands
+   in the scratchpad.
+6. Tutor Stage 2: finish a round; the rundown appears, **Enter** starts the
+   next round, and a wrong key flashes red on the keyboard.
+7. Tutor Stage 3 and 5: the hint shows the Shift, layer or combo keys that the
+   layout really uses for the highlighted character.
+8. Quit and restart the application: unlocked letters, streak and round count
+   are unchanged.
+9. Connect the second board with the same layout: the same progress is shown
+   and no key statistics are reset.
+10. **Settings → Reset profile progress** resets only the active profile; a
+    different layout type keeps its progress.
