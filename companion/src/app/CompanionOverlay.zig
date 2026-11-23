@@ -93,13 +93,14 @@ fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void
             app.live.frame.active
         else if (draft.owner != null) draft.active_layers else desktop.practice.layerMask(layer);
         const hint = if (next < session.reference_len)
-            try desktop.practice.hintWithProfile(
+            try desktop.practice.hintForDrill(
                 if (tutor.profile_bound) &tutor.profile else null,
                 labels.practiceLabels(),
                 layer,
                 modifiers.toByte(),
                 session.reference[next],
                 active_layers,
+                tutor.drillsCombos(),
             )
         else
             null;

@@ -782,7 +782,7 @@ pub fn testKeysTelemetryBar(
     const emitted = if (owner.test_keys.active_combo_cp) |ccp| blk: {
         var gbuf: [4]u8 = undefined;
         const g = view.glyph(ccp, true, &gbuf);
-        break :blk try std.fmt.allocPrint(arena, "Combo active → {s}", .{g});
+        break :blk try std.fmt.allocPrint(arena, "Combo keys held → {s}", .{g});
     } else if (owner.test_keys.pressed_count >= 2)
         try std.fmt.allocPrint(arena, "{d} keys held simultaneously", .{owner.test_keys.pressed_count})
     else if (last_txt.len > 0)

@@ -599,13 +599,14 @@ fn drawTutorWorkspace(
     if (input.frame) |frame| {
         if (running(owner) and focus < owner.session.reference_len) {
             const layer = @min(frame.layer, frame.labels.layer_count - 1);
-            resolved_hint = try desktop.practice.hintWithProfile(
+            resolved_hint = try desktop.practice.hintForDrill(
                 if (owner.profile_bound) &owner.profile else null,
                 frame.labels.practiceLabels(),
                 layer,
                 frame.modifiers.toByte(),
                 owner.session.reference[focus],
                 frame.active_layers,
+                owner.drillsCombos(),
             );
         }
     }

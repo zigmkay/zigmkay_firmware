@@ -405,6 +405,32 @@ pub fn matches(entry: Label, cp: u21) bool {
 }
 
 /// Profile-backed hint lookup supporting base, Shift, layer-hold, one-shot, and 2-key combo routes.
+/// `hintWithProfile` for a drill that practises combos: a character that a
+/// combo produces is shown as that combo, even when a plain key makes it too.
+pub fn hintForDrill(
+    profile: ?*const layout_profile.LayoutProfile,
+    labels: Labels,
+    layer: usize,
+    modifiers: u8,
+    cp: u21,
+    active: u16,
+    prefer_combo: bool,
+) !?Hint {
+    if (prefer_combo) if (profile) |p| {
+        if (p.key_count == labels.key_count and p.layer_count == labels.layer_count) {
+            if (p.comboFor(cp)) |combo| return .{
+                .layer = combo.layer,
+                .key = combo.key_index,
+                .modifiers = combo.modifiers,
+                .combo_key = combo.combo_key_index,
+                .layer_activator = combo.layer_activator,
+                .layer_one_shot = combo.layer_one_shot,
+            };
+        }
+    };
+    return hintWithProfile(profile, labels, layer, modifiers, cp, active);
+}
+
 pub fn hintWithProfile(
     profile: ?*const layout_profile.LayoutProfile,
     labels: Labels,
@@ -699,6 +725,18 @@ test "combo and one-shot Shift/Layer guidance highlight both combo triggers and 
     try t.expect(layer_hint.layer_one_shot);
     try guidanceWithProfile(&profile, labels, null, 0, 0, layer_hint, out);
     try t.expect(taps[0] and holds[3] and os[3]);
+
+    // 4. A combo drill shows the combo for a character a plain key makes too.
+    const both = [_]layout_profile.ComboInput{
+        .{ .layer = 0, .key_indices = .{ 1, 2 }, .output_cp = 'a' },
+    };
+    const doubled = try layout_profile.derive(&geo, labels, .{ .combos = &both });
+    const plain = (try hintForDrill(&doubled, labels, 0, 0, 'a', 1, false)).?;
+    try t.expectEqual(@as(usize, 0), plain.key);
+    try t.expectEqual(@as(?usize, null), plain.combo_key);
+    const drilled = (try hintForDrill(&doubled, labels, 0, 0, 'a', 1, true)).?;
+    try t.expect(drilled.combo_key != null);
+    try t.expect(drilled.key != 0 or drilled.combo_key.? != 0);
 }
 
 test "Unicode corrections, pauses and literal scoring (flow_backspace mode)" {

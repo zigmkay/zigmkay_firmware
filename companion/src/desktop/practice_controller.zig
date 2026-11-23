@@ -749,6 +749,13 @@ pub const Controller = struct {
         self.needs_persist = false;
     }
 
+    /// Whether the running round practises combos, so hints show the combo
+    /// for a character that a plain key produces as well.
+    pub fn drillsCombos(self: *const Controller) bool {
+        return self.active and self.captured_config.stage == .layers_combos and
+            self.captured_config.stage5_filter != .specific_layer;
+    }
+
     pub fn shouldShowKeyboardGuidance(self: *const Controller, now_us: u64) bool {
         if (self.config.mode == .test_keys) return false;
         if (!self.active or self.session.state == .complete) return false;
