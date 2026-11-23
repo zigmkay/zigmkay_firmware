@@ -200,7 +200,9 @@ pub const Session = struct {
 
                 // Matching keystroke advances the cursor.
                 self.correct_attempts += 1;
-                if (self.current_error) self.corrected += 1;
+                // A position that saw a wrong keystroke and is now typed correctly
+                // counts as corrected, whether or not Backspace cleared the red mark.
+                if (self.position_had_error) self.corrected += 1;
                 const had_err = self.position_had_error;
                 self.current_error = false;
                 self.position_had_error = false;

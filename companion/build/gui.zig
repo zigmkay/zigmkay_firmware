@@ -28,6 +28,8 @@ pub const deferred_test_files = [_][]const u8{
     "src/desktop/onboarding_ui.zig",
     "src/desktop/keyboard_ui.zig",
     "src/desktop/key_editor_ui.zig",
+    "src/desktop/practice_keyboard_ui.zig",
+    "src/desktop/practice_sheets_ui.zig",
     "src/platform/companion_window.zig",
 };
 

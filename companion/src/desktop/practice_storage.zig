@@ -241,7 +241,8 @@ pub fn appendRun(
     try std.json.Stringify.value(record, .{ .whitespace = .minified }, &out.writer);
     try out.writer.writeByte('\n');
 
-    var file = try dir.createFile(io, runs_filename, .{ .truncate = false, .read = false });
+    // Windows needs read access on the handle to stat it for the append offset.
+    var file = try dir.createFile(io, runs_filename, .{ .truncate = false, .read = true });
     defer file.close(io);
     const end_pos = (try file.stat(io)).size;
     try file.writePositionalAll(io, out.written(), end_pos);
