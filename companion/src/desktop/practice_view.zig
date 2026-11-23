@@ -72,7 +72,7 @@ pub fn glyph(cp: u21, explicit_space: bool, buffer: *[4]u8) []const u8 {
 
 test "word focus follows Unicode, whitespace, mistakes and correction" {
     var s: Session = .{ .error_mode = .flow_backspace };
-    try s.load("The café.\n", .os);
+    try s.load("The café.\n");
     try std.testing.expectEqualDeep(
         Range{ .start = 0, .end = 3 },
         word(s.reference[0..s.reference_len], focus(&s)),
@@ -94,7 +94,7 @@ test "word focus follows Unicode, whitespace, mistakes and correction" {
 
 test "wrapped context covers every character including indentation and newline" {
     var s: Session = .{};
-    try s.load("a long word\n    return value;\n", .os);
+    try s.load("a long word\n    return value;\n");
     var buffer: [32]Range = undefined;
     const result = lines(s.reference[0..s.reference_len], 8, &buffer);
     var next: usize = 0;

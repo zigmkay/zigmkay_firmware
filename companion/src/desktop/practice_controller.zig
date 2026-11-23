@@ -1,7 +1,7 @@
 //! Adaptive typing tutor controller over `practice.Session`, `LayoutProfile`,
 //! `LearningModel`, 6-stage generator, and lightweight persistence.
 //! Supports strict `Tutor | Test keys` mode separation, zero-friction rounds,
-//! inline rundowns, and explicit draft runner effects.
+//! and inline rundowns.
 const std = @import("std");
 const practice = @import("practice.zig");
 const layout_profile = @import("practice_layout_profile.zig");
@@ -18,7 +18,6 @@ pub const ErrorMode = practice.ErrorMode;
 pub const Config = struct {
     mode: Mode = .tutor,
     stage: Stage = .home_row,
-    source: practice.Source = .os,
     guidance: GuidanceMode = .guided,
     error_mode: ErrorMode = .stop_on_error,
     target_wpm: f32 = 35.0,
@@ -37,20 +36,6 @@ pub const Config = struct {
             self.zig_lesson_index >= practice.lessons.len) return error.InvalidExerciseLevel;
     }
 };
-
-pub const Operation = struct { generation: u64, snapshot: Digest };
-pub const RunnerState = enum { idle, preparing, prepared, running, stopping, failed, stale };
-pub const Replacement = struct { previous: ?Operation, operation: Operation };
-
-pub const RunnerEffect = union(enum) {
-    none,
-    stop: Operation,
-    stop_then_prepare: Replacement,
-    stop_then_start: Replacement,
-    start: Operation,
-};
-
-pub const Effect = struct { runner: RunnerEffect = .none, reset_text: bool = false };
 
 pub const Rundown = struct {
     wpm: f32 = 0.0,
@@ -172,7 +157,7 @@ pub const Intent = union(enum) {
     choose: Config,
     set_mode: Mode,
     set_stage: Stage,
-    start: bool,
+    start,
     new_exercise,
     next_round,
     start_weak_spot,
@@ -198,8 +183,6 @@ pub const Controller = struct {
     generation: u64 = 0,
     active: bool = false,
     seed: u64 = 1,
-    runner_state: RunnerState = .idle,
-    last_sequence: ?u64 = null,
     failure: ?anyerror = null,
 
     profile: layout_profile.LayoutProfile = .{},
@@ -220,10 +203,6 @@ pub const Controller = struct {
 
     pub fn init(snapshot: Digest) Controller {
         return .{ .current = snapshot };
-    }
-
-    pub fn operation(self: *const Controller) Operation {
-        return .{ .generation = self.generation, .snapshot = self.captured };
     }
 
     pub fn action(self: *const Controller, intent: Intent) Action {
@@ -298,37 +277,37 @@ pub const Controller = struct {
     }
 
     /// Ensures Tutor opens immediately with a ready round (zero-friction entry).
-    pub fn ensureReady(self: *Controller, prepared_snapshot: ?Digest, now: u64) !Effect {
-        if (self.config.mode == .test_keys) return .{};
-        if (self.active and self.session.reference_len > 0) return .{};
-        return self.start(true, prepared_snapshot, now);
+    pub fn ensureReady(self: *Controller) !void {
+        if (self.config.mode == .test_keys) return;
+        if (self.active and self.session.reference_len > 0) return;
+        return self.start();
     }
 
     /// Apply one rendered control after drawing.
-    pub fn dispatch(self: *Controller, rendered: Action, prepared_snapshot: ?Digest, now: u64) !Effect {
+    pub fn dispatch(self: *Controller, rendered: Action, now: u64) !void {
         if (rendered.generation != self.generation or
             !std.mem.eql(u8, &rendered.snapshot, &self.current)) return error.StalePracticeAction;
         return switch (rendered.intent) {
             .choose => |config| try self.choose(config, now),
-            .set_mode => |mode| try self.setMode(mode, prepared_snapshot, now),
+            .set_mode => |mode| try self.setMode(mode, now),
             .set_stage => |stage| blk: {
                 var next = self.config;
                 next.mode = .tutor;
                 next.stage = stage;
                 next.weak_spot_active = false;
                 _ = try self.choose(next, now);
-                break :blk try self.start(true, prepared_snapshot, now);
+                break :blk try self.start();
             },
-            .start => |fresh_exercise| try self.start(fresh_exercise, prepared_snapshot, now),
+            .start => try self.start(),
             .new_exercise => blk: {
                 try self.config.validate();
                 if (self.generation == std.math.maxInt(u64)) return error.OperationExhausted;
                 if (self.config.stage == .free_text and self.config.stage6_source == .zig_code) {
                     self.config.zig_lesson_index = (self.config.zig_lesson_index + 1) % practice.lessons.len;
                 }
-                break :blk try self.start(true, prepared_snapshot, now);
+                break :blk try self.start();
             },
-            .next_round => try self.start(true, prepared_snapshot, now),
+            .next_round => try self.start(),
             .start_weak_spot => blk: {
                 var next = self.config;
                 next.mode = .tutor;
@@ -336,7 +315,7 @@ pub const Controller = struct {
                 next.stage6_source = .weak_spot;
                 next.weak_spot_active = true;
                 _ = try self.choose(next, now);
-                break :blk try self.start(true, prepared_snapshot, now);
+                break :blk try self.start();
             },
             .pause => self.pause(now),
             .resume_run => try self.resumeRun(now),
@@ -347,20 +326,20 @@ pub const Controller = struct {
                 self.learning.config.target_wpm = clamped;
                 self.persisted.target_wpm = clamped;
                 self.needs_persist = true;
-                break :blk .{};
+                break :blk;
             },
             .set_guidance => |g| blk: {
                 self.config.guidance = g;
                 self.persisted.guidance_mode = g;
                 self.needs_persist = true;
-                break :blk .{};
+                break :blk;
             },
             .set_daily_goal => |mins| blk: {
                 const clamped = std.math.clamp(mins, 5, 120);
                 self.config.daily_goal_minutes = clamped;
                 self.persisted.daily_goal_minutes = clamped;
                 self.needs_persist = true;
-                break :blk .{};
+                break :blk;
             },
             .set_stage5_filter => |sf| blk: {
                 var next = self.config;
@@ -369,7 +348,7 @@ pub const Controller = struct {
                 next.stage5_layer = sf.layer;
                 next.weak_spot_active = false;
                 _ = try self.choose(next, now);
-                break :blk try self.start(true, prepared_snapshot, now);
+                break :blk try self.start();
             },
             .set_stage6_source => |s6| blk: {
                 var next = self.config;
@@ -378,28 +357,28 @@ pub const Controller = struct {
                 next.zig_lesson_index = s6.zig_lesson % practice.lessons.len;
                 next.weak_spot_active = (s6.source == .weak_spot);
                 _ = try self.choose(next, now);
-                break :blk try self.start(true, prepared_snapshot, now);
+                break :blk try self.start();
             },
             .reset_progress => blk: {
                 self.resetProgress();
-                break :blk try self.start(true, prepared_snapshot, now);
+                break :blk try self.start();
             },
         };
     }
 
-    pub fn setMode(self: *Controller, mode: Mode, prepared_snapshot: ?Digest, now: u64) !Effect {
-        if (self.config.mode == mode) return .{};
+    pub fn setMode(self: *Controller, mode: Mode, now: u64) !void {
+        if (self.config.mode == mode) return;
         if (mode == .test_keys) {
-            const effect = self.pause(now);
+            self.pause(now);
             self.config.mode = .test_keys;
             self.rundown = null;
-            return effect;
+            return;
         }
         self.config.mode = .tutor;
         if (!self.active or self.session.reference_len == 0) {
-            return self.start(true, prepared_snapshot, now);
+            return self.start();
         }
-        return .{};
+        return;
     }
 
     pub fn resetProgress(self: *Controller) void {
@@ -431,14 +410,10 @@ pub const Controller = struct {
         return std.mem.eql(u8, &self.current, &self.captured);
     }
 
-    fn accepts(self: *const Controller, operation_value: Operation) bool {
-        return self.active and self.fresh() and std.meta.eql(self.operation(), operation_value);
-    }
-
-    pub fn choose(self: *Controller, config: Config, now: u64) !Effect {
+    pub fn choose(self: *Controller, config: Config, now: u64) !void {
         try config.validate();
-        if (std.meta.eql(config, self.config)) return .{};
-        const effect = self.pause(now);
+        if (std.meta.eql(config, self.config)) return;
+        self.pause(now);
         self.config = config;
         self.learning.config.target_wpm = config.target_wpm;
         self.persisted.active_stage = config.stage.number();
@@ -448,15 +423,13 @@ pub const Controller = struct {
         if (config.mode == .tutor) {
             self.active = false;
         }
-        return effect;
     }
 
     /// Generates and loads a fresh round for the active stage.
-    pub fn start(self: *Controller, _: bool, prepared_snapshot: ?Digest, now: u64) !Effect {
+    pub fn start(self: *Controller) !void {
         try self.config.validate();
         if (self.generation == std.math.maxInt(u64)) return error.OperationExhausted;
-        if (self.config.mode == .test_keys) return .{};
-        const previous: ?Operation = if (self.generation == 0) null else self.operation();
+        if (self.config.mode == .test_keys) return;
         var buffer: [8192]u8 = undefined;
         self.seed +%= 0x9e3779b97f4a7c15;
         var text = try self.reference(&buffer);
@@ -467,29 +440,15 @@ pub const Controller = struct {
                 text = try self.reference(&buffer);
             }
         }
-        try self.session.loadWithMode(text, self.config.source, self.config.error_mode);
+        try self.session.loadWithMode(text, self.config.error_mode);
         self.generation += 1;
         self.captured = self.current;
         self.captured_config = self.config;
         self.active = true;
         self.failure = null;
-        self.last_sequence = null;
         self.rundown = null;
         self.round_recorded = false;
-        if (self.session.source == .os) {
-            self.runner_state = .idle;
-            return .{ .runner = if (previous) |old| .{ .stop = old } else .none, .reset_text = true };
-        }
-        const already_prepared = if (prepared_snapshot) |snapshot| std.mem.eql(u8, &snapshot, &self.current) else false;
-        self.runner_state = if (already_prepared) .running else .preparing;
-        if (!already_prepared) self.session.pause(now);
-        const replacement: Replacement = .{ .previous = previous, .operation = self.operation() };
-        return .{
-            .runner = if (already_prepared) .{ .stop_then_start = replacement } else .{
-                .stop_then_prepare = replacement,
-            },
-            .reset_text = true,
-        };
+        return;
     }
 
     fn reference(self: *const Controller, buffer: []u8) ![]const u8 {
@@ -513,124 +472,65 @@ pub const Controller = struct {
         });
     }
 
-    pub fn prepared(self: *Controller, op: Operation, success: bool) bool {
-        if (!self.accepts(op) or self.runner_state != .preparing) return false;
-        self.runner_state = if (success) .prepared else .failed;
-        self.failure = if (success) null else error.DraftPreparationFailed;
-        return true;
-    }
-
-    pub fn stopped(self: *Controller, op: Operation, prepared_snapshot: ?Digest) bool {
-        if (!std.meta.eql(op, self.operation()) or self.runner_state != .stopping) return false;
-        const prepared_current = if (prepared_snapshot) |snapshot| self.fresh() and std.mem.eql(u8, &snapshot, &self.current) else false;
-        self.runner_state = if (prepared_current) .prepared else .idle;
-        return true;
-    }
-
-    pub fn resumeRun(self: *Controller, now: u64) !Effect {
+    pub fn resumeRun(self: *Controller, now: u64) !void {
         if (self.failure) |failure| if (failure == error.PracticeContextChanged) return error.PracticeContextChanged;
         if (!self.active or self.session.state != .paused) return error.ExerciseNotPaused;
-        if (self.session.source == .draft) {
-            if (!self.fresh()) return error.DraftChangedRestartPractice;
-            if (self.runner_state == .stopping) return error.RunnerStopping;
-            if (self.generation == std.math.maxInt(u64)) return error.OperationExhausted;
-            const previous = self.operation();
-            self.generation += 1;
-            if (self.runner_state != .prepared) {
-                self.runner_state = .preparing;
-                return .{ .runner = .{ .stop_then_prepare = .{
-                    .previous = previous,
-                    .operation = self.operation(),
-                } }, .reset_text = true };
-            }
-            self.runner_state = .running;
-            self.last_sequence = null;
-            self.session.resumeRun(now);
-            return .{ .runner = .{ .start = self.operation() }, .reset_text = true };
-        }
         self.session.resumeRun(now);
-        return .{ .reset_text = true };
+        return;
     }
 
-    pub fn pause(self: *Controller, now: u64) Effect {
-        if (!self.active) return .{};
+    pub fn pause(self: *Controller, now: u64) void {
+        if (!self.active) return;
         self.session.pause(now);
-        if (self.session.source == .draft) {
-            self.runner_state = .stopping;
-            return .{ .runner = .{ .stop = self.operation() }, .reset_text = true };
-        }
-        return .{ .reset_text = true };
+        return;
     }
 
-    pub fn stop(self: *Controller, now: u64) Effect {
-        const effect = self.pause(now);
+    pub fn stop(self: *Controller, now: u64) void {
+        self.pause(now);
         self.active = false;
-        return effect;
     }
 
-    pub fn observe(self: *Controller, snapshot: Digest, now: u64) Effect {
-        if (std.mem.eql(u8, &snapshot, &self.current)) return .{};
+    /// Follows the project that practice runs on.
+    pub fn observe(self: *Controller, snapshot: Digest) void {
         self.current = snapshot;
-        if (!self.active or self.session.source != .draft) return .{};
-        const effect = self.pause(now);
-        self.failure = error.DraftChangedRestartPractice;
-        return effect;
     }
 
     pub fn acceptingOsText(self: *const Controller, focused: bool) bool {
         if (self.config.mode == .test_keys) return false;
-        return focused and self.active and self.session.source == .os and
+        return focused and self.active and
             (self.session.state == .ready or self.session.state == .running);
     }
 
     /// Handles Enter/Space in rundown or normal OS text input in Tutor mode.
-    pub fn insertOs(self: *Controller, focused: bool, bytes: []const u8, now: u64, paste: bool) !Effect {
+    pub fn insertOs(self: *Controller, focused: bool, bytes: []const u8, now: u64, paste: bool) !void {
         if (self.config.mode == .test_keys) {
             if (focused and bytes.len > 0) {
                 self.test_keys.setLastText(bytes);
                 self.test_keys.appendScratchpad(bytes);
             }
-            return .{};
+            return;
         }
-        if (!self.acceptingOsText(focused)) return .{};
+        if (!self.acceptingOsText(focused)) return;
         try self.session.insert(bytes, now, paste);
         return self.finish(now);
     }
 
-    pub fn insertDraft(self: *Controller, op: Operation, sequence: u64, bytes: []const u8, now: u64) !Effect {
-        if (self.config.mode == .test_keys) {
-            if (bytes.len > 0) {
-                self.test_keys.setLastText(bytes);
-                self.test_keys.appendScratchpad(bytes);
-            }
-            return .{};
-        }
-        if (!self.accepts(op) or self.runner_state != .running or self.session.source != .draft) return .{};
-        if (self.last_sequence) |last| if (sequence <= last) return .{};
-        try self.session.insert(bytes, now, false);
-        self.last_sequence = sequence;
-        return self.finish(now);
-    }
-
     /// Handles keyboard shortcuts in Tutor mode: Enter/Space in rundown starts next round.
-    pub fn handleRundownContinue(self: *Controller, prepared_snapshot: ?Digest, now: u64) !?Effect {
-        if (self.config.mode != .tutor or self.rundown == null) return null;
-        return try self.start(true, prepared_snapshot, now);
+    /// Returns whether a new round started.
+    pub fn handleRundownContinue(self: *Controller) !bool {
+        if (self.config.mode != .tutor or self.rundown == null) return false;
+        try self.start();
+        return true;
     }
 
-    pub fn finish(self: *Controller, now: u64) Effect {
-        if (self.config.mode == .test_keys) return .{};
-        if (!self.active or self.session.state != .complete) return .{};
+    pub fn finish(self: *Controller, now: u64) void {
+        if (self.config.mode == .test_keys) return;
+        if (!self.active or self.session.state != .complete) return;
 
         if (!self.round_recorded and self.session.scored) {
             self.recordCompletedRound(now);
         }
-
-        if (self.session.source == .draft and self.runner_state == .running) {
-            self.runner_state = .stopping;
-            return .{ .runner = .{ .stop = self.operation() }, .reset_text = true };
-        }
-        return .{};
+        return;
     }
 
     fn recordCompletedRound(self: *Controller, now: u64) void {
@@ -798,8 +698,8 @@ test "round completion updates model, unlocks key, persists state.zon + runs.jso
     const drill = "asasasasasasasasasasasasasasasasasasasasasas";
     var now: u64 = 1_000_000;
     for (0..2) |round_idx| {
-        _ = try owner.start(true, null, now);
-        try owner.session.loadWithMode(drill, .os, .stop_on_error);
+        _ = try owner.start();
+        try owner.session.loadWithMode(drill, .stop_on_error);
         for (drill) |ch| {
             now += 200_000;
             const buf = [_]u8{ch};
@@ -814,8 +714,7 @@ test "round completion updates model, unlocks key, persists state.zon + runs.jso
         try t.expect(!owner.needs_persist);
 
         // Press Enter/Space in rundown -> immediately starts next round
-        const next_eff = try owner.handleRundownContinue(null, now + 500_000);
-        try t.expect(next_eff != null);
+        try t.expect(try owner.handleRundownContinue());
         try t.expect(owner.rundown == null);
         try t.expectEqual(practice.State.ready, owner.session.state);
     }
@@ -835,13 +734,13 @@ test "round completion updates model, unlocks key, persists state.zon + runs.jso
 test "Tutor <-> Test keys mode switch pauses safely and never pollutes stats or persistence" {
     const t = std.testing;
     var owner = Controller.init(@splat(1));
-    _ = try owner.ensureReady(null, 0);
-    try owner.session.load("ab", .os);
+    _ = try owner.ensureReady();
+    try owner.session.load("ab");
     _ = try owner.insertOs(true, "a", 1_000_000, false);
     try t.expectEqual(practice.State.running, owner.session.state);
 
     // Switch to Test keys -> pauses tutor cleanly, ignores scoring, records telemetry text only
-    _ = try owner.dispatch(owner.action(.{ .set_mode = .test_keys }), null, 1_200_000);
+    _ = try owner.dispatch(owner.action(.{ .set_mode = .test_keys }), 1_200_000);
     try t.expectEqual(Mode.test_keys, owner.config.mode);
     try t.expectEqual(practice.State.paused, owner.session.state);
     try t.expect(!owner.acceptingOsText(true));
@@ -851,61 +750,16 @@ test "Tutor <-> Test keys mode switch pauses safely and never pollutes stats or 
     try t.expect(!owner.needs_persist);
 
     // Switch back to Tutor -> still paused cleanly, no corrupted samples
-    _ = try owner.dispatch(owner.action(.{ .set_mode = .tutor }), null, 2_000_000);
+    _ = try owner.dispatch(owner.action(.{ .set_mode = .tutor }), 2_000_000);
     try t.expectEqual(Mode.tutor, owner.config.mode);
     try t.expectEqual(practice.State.paused, owner.session.state);
-}
-
-test "draft preparation is explicit resume rejects edits and stale completions" {
-    const t = std.testing;
-    var owner = Controller.init(@splat(1));
-    _ = try owner.choose(.{ .source = .draft }, 0);
-    const effect = try owner.start(true, null, 0);
-    try t.expect(effect.runner == .stop_then_prepare);
-    try t.expectEqual(practice.State.paused, owner.session.state);
-    const op = owner.operation();
-    try t.expect(owner.prepared(op, true));
-    try t.expectEqual(practice.State.paused, owner.session.state);
-    try t.expect((try owner.resumeRun(10)).runner == .start);
-    const running_op = owner.operation();
-    try owner.session.load("ab", .draft);
-    _ = try owner.insertDraft(op, 1, "stale preparation output", 19);
-    _ = try owner.insertDraft(running_op, 1, "a", 20);
-    _ = try owner.insertDraft(running_op, 1, "duplicate", 21);
-    try t.expectEqual(@as(usize, 1), owner.session.len);
-    const stopped_effect = owner.observe(@splat(2), 30);
-    try t.expect(stopped_effect.runner == .stop);
-    try t.expectError(error.DraftChangedRestartPractice, owner.resumeRun(31));
-    _ = try owner.start(true, null, 40);
-    try t.expect(!owner.prepared(op, true));
-    try t.expectEqual(@as(usize, 0), owner.session.len);
-}
-
-test "restart binds the prior runner and failed preparation retry gets a new ticket" {
-    const t = std.testing;
-    var owner = Controller.init(@splat(1));
-    _ = try owner.choose(.{ .source = .draft }, 0);
-    const first = try owner.start(true, null, 0);
-    const old = first.runner.stop_then_prepare.operation;
-    try t.expect(first.runner.stop_then_prepare.previous == null);
-    try t.expect(owner.prepared(old, false));
-    const retry = try owner.resumeRun(1);
-    try t.expectEqualDeep(old, retry.runner.stop_then_prepare.previous.?);
-    try t.expect(!owner.prepared(old, true));
-    try t.expect(owner.prepared(retry.runner.stop_then_prepare.operation, true));
-    const replacement = try owner.start(false, @as(Digest, @splat(1)), 2);
-    try t.expectEqualDeep(
-        retry.runner.stop_then_prepare.operation,
-        replacement.runner.stop_then_start.previous.?,
-    );
-    try t.expect(!owner.prepared(retry.runner.stop_then_prepare.operation, true));
 }
 
 test "OS text respects focus pause and paste remains unscored" {
     const t = std.testing;
     var owner = Controller.init(@splat(1));
-    _ = try owner.start(true, null, 0);
-    try owner.session.load("ab", .os);
+    _ = try owner.start();
+    try owner.session.load("ab");
     _ = try owner.insertOs(false, "ignored", 1, false);
     try t.expectEqual(@as(usize, 0), owner.session.len);
     _ = try owner.insertOs(true, "a", 2, true);
@@ -921,12 +775,12 @@ test "OS text respects focus pause and paste remains unscored" {
 test "rendered tutor actions reject changed project and replaced operation" {
     const t = std.testing;
     var owner = Controller.init(@splat(1));
-    const old = owner.action(.{ .start = true });
-    _ = owner.observe(@splat(2), 0);
-    try t.expectError(error.StalePracticeAction, owner.dispatch(old, null, 0));
-    const current = owner.action(.{ .start = true });
-    _ = try owner.dispatch(current, null, 1);
-    try t.expectError(error.StalePracticeAction, owner.dispatch(current, null, 2));
+    const old = owner.action(.start);
+    _ = owner.observe(@splat(2));
+    try t.expectError(error.StalePracticeAction, owner.dispatch(old, 0));
+    const current = owner.action(.start);
+    _ = try owner.dispatch(current, 1);
+    try t.expectError(error.StalePracticeAction, owner.dispatch(current, 2));
 }
 
 test "Test layout buffers keep whole codepoints when multibyte text overflows them" {

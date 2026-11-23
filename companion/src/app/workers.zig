@@ -39,19 +39,16 @@ pub const Jobs = struct {
     file: ?FileJob = null,
     source: ?SourceJob = null,
     build: ?BuildJob = null,
-    /// Native tutor runner build started from onboarding.
-    runner: ?BuildJob = null,
 
     pub fn busy(self: *const Jobs) bool {
         return self.file != null or self.source != null or
-            self.build != null or self.runner != null;
+            self.build != null;
     }
 
     pub fn cancel(self: *Jobs) void {
         if (self.file) |job| job.worker.destroy();
         if (self.source) |job| job.worker.destroy();
         if (self.build) |job| job.worker.destroy();
-        if (self.runner) |job| job.worker.destroy();
         self.* = .{};
     }
 };

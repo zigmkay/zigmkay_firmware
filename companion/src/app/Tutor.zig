@@ -79,7 +79,6 @@ pub const Frame = struct {
 pub const Outcome = struct {
     leave: bool = false,
     action: ?desktop.practice_controller.Action = null,
-    input_effect: desktop.practice_controller.Effect = .{},
 };
 
 pub fn deinit(self: *Tutor) void {
@@ -214,7 +213,7 @@ fn persistTo(app: *App, data_path: []const u8) !void {
 
 /// Keeps the run's frozen project current and advances the run. Returns the
 /// project that controls practice input.
-pub fn observe(app: *App, now_us: u64) !*desktop.model.Model {
+pub fn observe(app: *App, now_us: u64) !void {
     const self = &app.tutor;
     const practice = &self.controller;
     const utc_ns = std.Io.Timestamp.now(app.io, .real).nanoseconds;
@@ -225,29 +224,18 @@ pub fn observe(app: *App, now_us: u64) !*desktop.model.Model {
         self.snapshot = null;
     }
     if (practice.active and self.snapshot == null and app.frame_limit == null) {
-        const live = practice.captured_config.source == .os and app.live.verified();
+        const live = app.live.verified();
         const selected = if (live) &app.live.model else &app.model;
         self.snapshot = try Snapshot.init(app, selected, live);
     }
-    const control_model = if (self.snapshot) |*value| &value.model else &app.model;
-    const control_id = if (self.snapshot) |*value| value.control else try app.model.id();
-    app.applyPractice(practice.observe(control_id, now_us), control_model, now_us);
-    app.draft_runtime.poll(practice, control_model, now_us) catch |err| {
-        app.draft_runtime.fail(practice, err, now_us);
-        app.view.report(err);
-    };
-    if (app.checkingDraft()) {
-        if (practice.failure) |failure| return failure;
-        if (practice.session.len > 1) return error.DraftRepeatRoutingFailed;
-    }
+    practice.observe(if (self.snapshot) |*value| value.control else try app.model.id());
     flushPersistence(app, now_us);
-    return control_model;
 }
 
 pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
     const self = &app.tutor;
     const practice = &self.controller;
-    const live = if (self.snapshot) |*value| value.live else practice.config.source == .os and app.live.verified();
+    const live = if (self.snapshot) |*value| value.live else app.live.verified();
     const labels = if (self.snapshot) |*value|
         &value.captions.labels
     else if (live) &app.live.captions.labels else &app.captions.labels;
@@ -262,11 +250,7 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
 
     // Zero-friction entry: when entering Tutor mode in interactive use, immediately prepare a ready round.
     if (app.practicing and app.frame_limit == null and practice.config.mode == .tutor and !practice.active) {
-        const now_us: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
-        const prepared = if (app.build.runner) |runner| runner.record.inputs.project_digest else null;
-        if (practice.ensureReady(prepared, now_us)) |eff| {
-            app.applyPractice(eff, model, now_us);
-        } else |_| {}
+        practice.ensureReady() catch {};
     }
 
     const arena = app.window.arena();
@@ -278,18 +262,15 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
         .home_row = key.home_row,
     };
 
-    const draft = &app.draft_runtime;
     const pressed = try arena.alloc(bool, labels.key_count);
     @memset(pressed, false);
     if (live and app.live.frame.pressed.len == pressed.len) {
         @memcpy(pressed, app.live.frame.pressed);
-    } else if (draft.owner) |runner| if (runner.pressed.len == pressed.len) {
-        @memcpy(pressed, runner.pressed);
-    };
+    }
 
-    const layer = if (live) app.live.frame.layer else if (draft.owner != null) draft.highest_layer else 0;
-    const active_layers = if (live) app.live.frame.active else if (draft.owner != null) draft.active_layers else 1;
-    const modifiers = if (live) app.live.frame.modifiers else @as(@TypeOf(app.live.frame.modifiers), @bitCast(draft.modifiers));
+    const layer = if (live) app.live.frame.layer else 0;
+    const active_layers = if (live) app.live.frame.active else 1;
+    const modifiers: @TypeOf(app.live.frame.modifiers) = if (live) app.live.frame.modifiers else .{};
 
     // Mirror telemetry into Test keys mode without touching tutor scoring or persistence.
     if (practice.config.mode == .test_keys) {
@@ -328,7 +309,7 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
         .unverified
     else if (sameLayout(&app.live.model, &app.model)) .none else .editor_changed;
     return .{ .labels = labels, .live = live, .metadata = metadata, .keyboard = .{
-        .source = if (live) .live else if (draft.owner != null) .simulated else .draft,
+        .source = if (live) .live else .guide,
         .labels = labels,
         .geometry = geometry,
         .metadata = metadata,
@@ -362,7 +343,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
     defer canvas.deinit();
     var outcome: Outcome = .{};
     // A run on the OS source waits for the live keyboard to verify itself.
-    const waiting_for_live = practice.config.source == .os and app.live_enabled and !frame.live;
+    const waiting_for_live = app.live_enabled and !frame.live;
     // Load runs.jsonl on demand only while the Progress sheet is open; free when closed.
     if (self.view.sheet == .progress) {
         if (self.loaded_runs == null and app.frame_limit == null and practice.profile_bound) {
@@ -397,29 +378,22 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
     };
     outcome.leave = drawn.leave;
     outcome.action = drawn.action;
-    outcome.input_effect = drawn.input_effect;
     return outcome;
 }
 
 /// Applies the input and the action of the displayed frame.
-pub fn finishFrame(app: *App, outcome: Outcome, control_model: *desktop.model.Model, now_us: u64) void {
+pub fn finishFrame(app: *App, outcome: Outcome, now_us: u64) void {
     const self = &app.tutor;
     const practice = &self.controller;
-    app.applyPractice(outcome.input_effect, control_model, now_us);
     if (outcome.leave) {
-        app.applyPractice(practice.pause(now_us), &app.model, now_us);
+        practice.pause(now_us);
         app.practicing = false;
     } else if (outcome.action) |action| {
         if (action.intent == .reset_progress) {
             if (self.loaded_runs) |*runs| runs.deinit();
             self.loaded_runs = null;
         }
-        const prepared = if (app.build.runner) |runner| runner.record.inputs.project_digest else null;
-        const effect = tutor.apply(practice, &self.view, action, .{ .now_us = now_us, .prepared_snapshot = prepared }) catch |err| failed: {
-            app.view.report(err);
-            break :failed desktop.practice_controller.Effect{};
-        };
-        app.applyPractice(effect, control_model, now_us);
+        tutor.apply(practice, &self.view, action, .{ .now_us = now_us }) catch |err| app.view.report(err);
     }
     flushPersistence(app, now_us);
 }

@@ -61,7 +61,7 @@ pub fn updateResidency(app: *App) void {
 /// windows. SDL waits for native events between bounded tray polls.
 pub fn waitWhileIdle(app: *App) !App.Flow {
     if (app.frame_limit != null or app.life.editor_visible or app.life.companion_visible) return .proceed;
-    if (app.jobs.busy() or !app.flash.idle() or app.draft_runtime.owner != null) return .proceed;
+    if (app.jobs.busy() or !app.flash.idle()) return .proceed;
     app.tray.update(.{ .live_mode = app.live_enabled, .status = app.live.status(), .companion_visible = false });
     var event: Backend.c.SDL_Event = undefined;
     while (Backend.c.SDL_PollEvent(&event)) _ = try app.events.raw(event);

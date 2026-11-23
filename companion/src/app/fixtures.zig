@@ -17,7 +17,6 @@ const overlay_flags = c.SDL_WINDOW_BORDERLESS | c.SDL_WINDOW_ALWAYS_ON_TOP | c.S
 pub const State = struct {
     /// The companion fixture's unsaved draft, which must survive hiding.
     retained: ?[32]u8 = null,
-    draft_phase: enum { starting, input, paused } = .starting,
     build_checked: bool = false,
 };
 
@@ -59,31 +58,31 @@ fn showTutor(app: *App) !void {
 
     switch (scene) {
         0, 7 => {
-            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now), &app.model, now);
-            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
             try typeSessionPrefix(&practice.session, @min(36, practice.session.reference_len / 2), now, true);
         },
         1 => {
-            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .shift, .guidance = .guided }, now), &app.model, now);
-            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            try practice.choose(.{ .mode = .tutor, .stage = .shift, .guidance = .guided }, now);
+            try practice.start();
             // Advance until the focus character is an uppercase letter so Shift guidance is active.
             const target = findFirstUppercase(&practice.session) orelse @min(10, practice.session.reference_len / 2);
             try typeSessionPrefix(&practice.session, target, now, false);
         },
         2 => {
-            app.applyPractice(try practice.choose(.{
+            try practice.choose(.{
                 .mode = .tutor,
                 .stage = .layers_combos,
                 .stage5_filter = .mixed,
                 .guidance = .guided,
-            }, now), &app.model, now);
-            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            }, now);
+            try practice.start();
             const target = findFirstLayerOrCombo(practice) orelse findFirstNonAlpha(&practice.session) orelse @min(12, practice.session.reference_len / 2);
             try typeSessionPrefix(&practice.session, target, now, false);
         },
         3 => {
-            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now), &app.model, now);
-            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
             try typeSessionPrefix(&practice.session, practice.session.reference_len, now, false);
             _ = practice.finish(now);
             // Highlight an unlock celebration banner in the rundown showcase.
@@ -96,19 +95,19 @@ fn showTutor(app: *App) !void {
             }
         },
         4 => {
-            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now), &app.model, now);
-            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
             app.tutor.view.sheet = .stages;
         },
         5 => {
-            app.applyPractice(try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now), &app.model, now);
-            app.applyPractice(try practice.start(true, null, now), &app.model, now);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
             practice.persisted.streak_days = 5;
             practice.persisted.daily_active_seconds = 420;
             app.tutor.view.sheet = .progress;
         },
         6 => {
-            app.applyPractice(try practice.choose(.{ .mode = .test_keys }, now), &app.model, now);
+            try practice.choose(.{ .mode = .test_keys }, now);
             practice.test_keys.clearScratchpad();
             practice.test_keys.setLastText("!");
             practice.test_keys.appendScratchpad("Testing my Keycaprio layout — layers, holds & combos feel crisp!");
@@ -349,17 +348,8 @@ fn sampleLibrary(app: *App) !desktop.library.Library {
     });
 }
 
-/// Starts a draft run on the native runner, typing "aa".
-pub fn startDraftRun(app: *App, digest: anytype, now_us: u64) !void {
-    const practice = &app.tutor.controller;
-    _ = try practice.choose(.{ .source = .draft }, now_us);
-    const effect = try practice.start(true, digest, now_us);
-    try practice.session.load("aa", .draft);
-    try app.draft_runtime.apply(practice, effect, app.build.runner, &app.model, now_us);
-}
-
-/// Once the managed startup build finished, verifies it and starts a draft run
-/// on its runner.
+/// Once the managed startup build finished, verifies it. The frame loop then
+/// stops.
 pub fn checkBuild(app: *App) !void {
     if (!app.mode.is(.build) or app.fixture.build_checked or app.count < 2 or app.jobs.build != null) return;
     const artifact = app.build.artifact orelse {
@@ -370,8 +360,6 @@ pub fn checkBuild(app: *App) !void {
     const runner = app.build.runner orelse return error.ManagedEditorRunnerMissing;
     try runner.verifyFile(app.gpa, app.io, artifact.inputs);
     app.fixture.build_checked = true;
-    app.practicing = true;
-    try startDraftRun(app, artifact.inputs.project_digest, @intCast(@max(0, app.native.nanoTime()) / 1000));
 }
 
 /// Clicks Build on the second frame of the managed startup build fixture.
@@ -563,27 +551,10 @@ pub fn statusToolbar(app: *const App, toolbar: *@FieldType(editor.Frame, "toolba
     };
 }
 
-/// Injects the SDL events of the practice and draft fixtures before the pump.
+/// Injects the SDL events of the practice and status fixtures before the pump.
 pub fn injectEvents(app: *App) !void {
     if (app.mode.is(.practice) and app.count == 3) try pushFocusLost(app);
     if (app.mode.isStatus() and app.count == 13) try clickCanvas(app, 480, 32);
-    if (!app.checkingDraft()) return;
-    const state = &app.fixture;
-    if (state.draft_phase == .starting and app.draft_runtime.router.runner_running) {
-        // A key press and its auto-repeat must produce one practice input.
-        var key: c.SDL_Event = std.mem.zeroes(c.SDL_Event);
-        key.key.type = c.SDL_EVENT_KEY_DOWN;
-        key.key.windowID = app.events.root;
-        key.key.scancode = 4;
-        key.key.down = true;
-        try pushEvent(&key);
-        key.key.repeat = true;
-        try pushEvent(&key);
-        state.draft_phase = .input;
-    } else if (state.draft_phase == .input and app.tutor.controller.session.len == 1) {
-        try pushFocusLost(app);
-        state.draft_phase = .paused;
-    }
 }
 
 /// Types the first reference codepoint as OS text after the pump.
@@ -716,8 +687,6 @@ pub fn finish(app: *App) !void {
     const session = &app.tutor.controller.session;
     const typed_once = session.len == 1 and session.matched() == 1 and session.state == .paused;
     if (app.mode.is(.practice) and !typed_once) return error.PracticeTextRoutingFailed;
-    if (app.mode.isDraft() and (app.fixture.draft_phase != .paused or !typed_once or app.draft_runtime.owner != null))
-        return error.DraftProcessorRoutingFailed;
     if (app.mode.is(.build) and !app.fixture.build_checked) return error.ManagedEditorBuildIncomplete;
     if (app.mode.is(.companion)) {
         const retained = app.fixture.retained orelse return error.ResidentDraftRetentionFailed;

@@ -76,11 +76,6 @@ pub const Mode = union(enum) {
     pub fn isTutorGallery(mode: Mode) bool {
         return mode.is(.tutor) or mode.is(.native_tutor);
     }
-
-    /// Draft fixtures feed key events through the native runner processor.
-    pub fn isDraft(mode: Mode) bool {
-        return mode.is(.draft) or mode.is(.build);
-    }
 };
 
 pub const Editor = struct {
@@ -125,8 +120,6 @@ pub const Fixture = struct {
         native_tray,
         source_refresh,
         build,
-        /// Absolute path of the runner manifest.
-        draft: []const u8,
 
         fn minimumFrames(kind: Kind) usize {
             return switch (kind) {
@@ -141,7 +134,6 @@ pub const Fixture = struct {
         fn maximumFrames(kind: Kind) usize {
             return switch (kind) {
                 .build => 30_000,
-                .draft => 1000,
                 else => 100,
             };
         }
@@ -165,7 +157,6 @@ pub const Environment = struct {
 pub const Error = error{
     Usage,
     InvalidFrameLimit,
-    AbsoluteRunnerManifestRequired,
     NativeVideoRequired,
     DummyVideoRequired,
     ExplicitFlashAuthorizationRequired,
@@ -209,12 +200,10 @@ fn parseVisibility(flag: []const u8) ?Editor.Visibility {
 }
 
 fn parseFixture(args: []const [:0]const u8, environment: Environment) Error!Fixture {
-    const draft = std.mem.eql(u8, args[1], "--offline-draft-frames");
-    if (args.len != @as(usize, if (draft) 4 else 3)) return error.Usage;
-    const kind: Fixture.Kind = if (draft) .{ .draft = args[3] } else try parseKind(args[1]);
+    if (args.len != 3) return error.Usage;
+    const kind = try parseKind(args[1]);
     const frames = try std.fmt.parseInt(usize, args[2], 10);
     if (frames < kind.minimumFrames() or frames > kind.maximumFrames()) return error.InvalidFrameLimit;
-    if (kind == .draft and !std.fs.path.isAbsolute(kind.draft)) return error.AbsoluteRunnerManifestRequired;
     const dummy = if (environment.video_driver) |driver| std.mem.eql(u8, driver, "dummy") else false;
     if (kind.needsNativeVideo()) {
         if (dummy) return error.NativeVideoRequired;
@@ -283,19 +272,13 @@ test "fixture modes keep their frame bounds and video requirements" {
     try expectFixture(.{ .kind = .launch, .frames = 3 }, &.{ "app", "--offline-frames", "3" }, dummy_video);
     try expectFixture(.{ .kind = .drawers, .frames = 24 }, &.{ "app", "--offline-drawers-frames", "24" }, dummy_video);
     try expectFixture(.{ .kind = .build, .frames = 30_000 }, &.{ "app", "--offline-build-frames", "30000" }, dummy_video);
-    try expectFixture(
-        .{ .kind = .{ .draft = "/m.zon" }, .frames = 600 },
-        &.{ "app", "--offline-draft-frames", "600", "/m.zon" },
-        dummy_video,
-    );
     try expectFixture(.{ .kind = .tutor, .frames = 32 }, &.{ "app", "--offline-tutor-frames", "32" }, dummy_video);
     try expectFixture(.{ .kind = .native_tutor, .frames = 32 }, &.{ "app", "--native-tutor-frames", "32" }, .{});
     try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--native-tutor-frames", "31" }, .{}));
     try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--offline-frames", "101" }, dummy_video));
     try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tutor-frames", "32" }, dummy_video));
-    try t.expectError(error.AbsoluteRunnerManifestRequired, parse(&.{ "app", "--offline-draft-frames", "9", "m" }, dummy_video));
     try t.expectError(error.DummyVideoRequired, parse(&.{ "app", "--offline-frames", "3" }, .{}));
     try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tray-frames", "3" }, dummy_video));
     try t.expectError(error.Usage, parse(&.{ "app", "--native-layout-status-frames", "3" }, .{}));
-    try t.expectError(error.Usage, parse(&.{ "app", "--offline-draft-frames", "9" }, dummy_video));
+    try t.expectError(error.Usage, parse(&.{ "app", "--offline-frames", "3", "extra" }, dummy_video));
 }

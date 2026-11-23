@@ -26,7 +26,6 @@ pub fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame, c
     var toolbar = try toolbarFrame(app, board, can_build, now_us);
     fixtures.statusToolbar(app, &toolbar);
     var screen: Screen = .{};
-    app.onboarding.preparing_tutor = app.jobs.runner != null;
     if (app.onboarding.active) {
         screen.onboarding = try keyboard_onboarding.draw(&app.onboarding, .{
             .dirty = app.unsavedChanges(),

@@ -54,8 +54,7 @@ fn switchProject(app: *App, opened: *desktop.onboarding.Opened) !void {
     app.owner = try desktop.editor_dispatch.State.init(&app.model);
     app.owner_generation = try std.math.add(u64, app.owner_generation, 1);
     app.accepted_editor_generation = app.owner_generation;
-    if (app.tutor.controller.active or app.draft_runtime.owner != null)
-        app.draft_runtime.fail(&app.tutor.controller, error.PracticeProjectSwitched, 0);
+    app.interruptPractice(error.PracticeProjectSwitched, 0);
     app.practicing = false;
     try keyboard_onboarding.State.set(&app.view.paths.project, opened.path);
     onboarding.selected = true;
@@ -85,9 +84,7 @@ pub fn apply(app: *App, action: keyboard_onboarding.Action) !void {
     switch (action) {
         .none => {},
         .cancel => onboarding.reset(),
-        .cancel_tutor => cancelRunnerBuild(app),
         .editor => if (onboarding.selected) {
-            cancelRunnerBuild(app);
             onboarding.active = false;
         },
         .tutor => openTutor(app),
@@ -100,11 +97,6 @@ pub fn apply(app: *App, action: keyboard_onboarding.Action) !void {
         .choose_open => try chooseFolder(app, .onboarding_open),
         .inspect, .analyze, .prepare, .create, .add_existing => try start(app, action),
     }
-}
-
-fn cancelRunnerBuild(app: *App) void {
-    if (app.jobs.runner) |job| job.worker.destroy();
-    app.jobs.runner = null;
 }
 
 /// Opens the Tutor on the selected project. Practice always types on the

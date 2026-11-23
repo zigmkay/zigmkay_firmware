@@ -131,10 +131,10 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
 
     for (rounds_per_stage) |plan| {
         const stage, const count = plan;
-        _ = try owner.dispatch(owner.action(.{ .set_stage = stage }), null, now);
+        _ = try owner.dispatch(owner.action(.{ .set_stage = stage }), now);
         for (0..count) |_| {
             const unlocked_before = owner.learning.unlocked_count;
-            _ = try owner.start(true, null, now);
+            _ = try owner.start();
             const session = &owner.session;
             const reference = session.reference[0..session.reference_len];
             try t.expect(reference.len > 0);
@@ -171,7 +171,7 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
             try t.expect(!owner.needs_persist);
             owner.utc_now_sec += 3 * 3600;
             now += 2_000_000;
-            _ = try owner.handleRundownContinue(null, now);
+            _ = try owner.handleRundownContinue();
         }
     }
 

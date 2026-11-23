@@ -50,7 +50,6 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     const b = s.b;
     const mods = s.mods;
     const g = mods.gui.?;
-    const h = mods.host.?;
     const step = s.steps.test_desktop;
 
     const desktop_gui_tests = mods.root("src/desktop/test_gui_all.zig", g.desktop_gui_test_deps);
@@ -68,14 +67,6 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
         app.root_module.addWin32ResourceFile(.{ .file = g.icon_files.path(b, "application.rc") });
     s.steps.check.dependOn(&app.step);
     for (fixtures) |fixture| step.dependOn(&tests.addGuiFixture(b, app, &.{ fixture[0], fixture[1] }).step);
-
-    // Draft scoring through the real native processor.
-    const manifest_fixture = b.addExecutable(.{ .name = "runner-manifest-fixture", .root_module = mods.root("src/runner/manifest_fixture.zig", h.manifest_fixture_deps) });
-    const prepare = b.addRunArtifact(manifest_fixture);
-    prepare.addArtifactArg(test_fixtures.runner.?);
-    const draft = tests.addGuiFixture(b, app, &.{ "--offline-draft-frames", "600" });
-    draft.addFileArg2(prepare.addOutputFileArg("runner-manifest.zon"), .{ .make_absolute = true });
-    step.dependOn(&draft.step);
 
     // Installs and removes a real tray icon with a hidden window.
     const tray = b.addRunArtifact(app);

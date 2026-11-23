@@ -140,8 +140,6 @@ pub fn headless(run: *std.Build.Step.Run) void {
 pub const Fixtures = struct {
     /// Options shared by the jobs, picotool and desktop integration tests.
     picotool: *std.Build.Step.Options,
-    /// The basic native runner the GUI draft fixture drives.
-    runner: ?*Compile = null,
     /// The catalog board exporter (`tools/catalog_export.zig`).
     catalog_export: ?*Compile = null,
     /// Exported projects of the pinned import fixtures, for firmware checks.
@@ -234,7 +232,7 @@ pub fn addHost(s: *Suite, fixtures: *Fixtures) void {
     _ = s.add(step, .core, importer);
 
     fixtures.catalog_export = addCatalogProcessors(s, h);
-    fixtures.runner = addRunner(s, h);
+    addRunner(s, h);
     fixtures.imports = addImportProcessors(s, h, importer_options);
     addProject(s, h);
 
@@ -310,8 +308,8 @@ fn addCatalogProcessors(s: *Suite, h: Modules.Host) *Compile {
     return export_tool;
 }
 
-/// The real-processor subprocess matrix. Returns the basic runner.
-fn addRunner(s: *Suite, h: Modules.Host) *Compile {
+/// The real-processor subprocess matrix.
+fn addRunner(s: *Suite, h: Modules.Host) void {
     const b = s.b;
     const basic_profile = b.createModule(.{ .root_source_file = runnerFixture(s, h, "runner-fixture", null), .imports = h.zigmkay_only });
     const basic = runner_build.runner(b, "keymap-test", h.zigmkay, basic_profile, h.runner_protocol, null);
@@ -319,23 +317,16 @@ fn addRunner(s: *Suite, h: Modules.Host) *Compile {
     rejected.expect_errors = .{ .contains = "Export snapshot identity mismatch" };
     s.steps.@"test".dependOn(&rejected.step);
     s.steps.check.dependOn(&rejected.step);
-    const invalid = b.addExecutable(.{ .name = "invalid-runner-fixture", .root_module = b.createModule(.{
-        .root_source_file = b.path("src/runner/invalid_fixture.zig"),
-        .target = b.graph.host,
-        .imports = &.{ .{ .name = "runner-protocol", .module = h.runner_protocol }, .{ .name = "test-profile", .module = basic_profile }, .{ .name = "zigmkay", .module = h.zigmkay } },
-    }) });
     const action_profile = b.createModule(.{ .root_source_file = runnerFixture(s, h, "runner-actions", "all-actions"), .imports = &.{ .{ .name = "zigmkay", .module = h.zigmkay }, .{ .name = "callback_0", .module = h.runner_callback_fixture } } });
     const registered_profile = b.createModule(.{ .root_source_file = runnerFixture(s, h, "runner-registered", "danish"), .imports = &.{ .{ .name = "zigmkay", .module = h.zigmkay }, .{ .name = "callback_0", .module = h.profile } } });
     const options = b.addOptions();
     options.addOptionPath("runner_path", basic.getEmittedBin());
-    options.addOptionPath("invalid_runner_path", invalid.getEmittedBin());
     options.addOptionPath("action_runner_path", runner_build.runner(b, "action-runner", h.zigmkay, action_profile, h.runner_protocol, null).getEmittedBin());
     options.addOptionPath("registered_runner_path", runner_build.runner(b, "registered-runner", h.zigmkay, registered_profile, h.runner_protocol, null).getEmittedBin());
     const tests = b.createModule(.{ .root_source_file = b.path("src/runner/test_runner.zig"), .target = b.graph.host, .imports = h.runner_test_deps });
     tests.addImport("test-profile", basic_profile);
     tests.addOptions("options", options);
     _ = s.add(s.steps.@"test", .core, tests);
-    return basic;
 }
 
 fn runnerFixture(s: *Suite, h: Modules.Host, name: []const u8, mode: ?[]const u8) std.Build.LazyPath {

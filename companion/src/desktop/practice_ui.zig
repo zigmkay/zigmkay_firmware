@@ -18,7 +18,8 @@ pub const Sheet = sheets_ui.Sheet;
 
 pub const Frame = struct {
     /// Live frames must come from the coherent identity-checked session adapter.
-    source: enum { draft, simulated, live },
+    /// `guide` shows the editor layout without a verified keyboard.
+    source: enum { guide, live },
     labels: *const desktop.label_cache.LabelCache,
     geometry: []const model.physical_layout.Key,
     metadata: ?[]const desktop.practice.KeyMetadata = null,
@@ -55,7 +56,6 @@ pub const Input = struct {
     now_us: u64,
     window_focused: bool = false,
     owns_input: bool = false,
-    prepared_snapshot: ?control.Digest = null,
     frame: ?Frame = null,
     resources: geometry.Resources = .{},
     fixture: bool = false,
@@ -83,7 +83,6 @@ pub const View = struct {
 
 pub const DrawResult = struct {
     leave: bool = false,
-    input_effect: control.Effect = .{},
     action: ?control.Action = null,
 };
 
@@ -141,9 +140,8 @@ fn nativeEventTime(times: []const desktop.practice.EventTime, number: u16) ?u64 
     return null;
 }
 
-fn insertText(owner: *control.Controller, effect: *control.Effect, text: []const u8, at: u64, paste: bool) !void {
-    const inserted = try owner.insertOs(true, text, at, paste);
-    effect.reset_text = inserted.reset_text or effect.reset_text;
+fn insertText(owner: *control.Controller, text: []const u8, at: u64, paste: bool) !void {
+    try owner.insertOs(true, text, at, paste);
 }
 
 /// Continue keys arriving this soon after the last keystroke of a round are ignored.
@@ -155,9 +153,8 @@ fn consumeInput(
     data: *dvui.WidgetData,
     input: Input,
     pending: *?control.Intent,
-) !control.Effect {
-    var effect: control.Effect = .{};
-    if (!input.owns_input or !input.window_focused) return effect;
+) !void {
+    if (!input.owns_input or !input.window_focused) return;
     if (view.sheet != .none or view.settings_open) {
         // Esc closes any open sheet or settings popover cleanly.
         for (dvui.events()) |*event| {
@@ -169,7 +166,7 @@ fn consumeInput(
                 event.handle(@src(), data);
             }
         }
-        return effect;
+        return;
     }
 
     if (owner.config.mode == .test_keys) {
@@ -215,7 +212,7 @@ fn consumeInput(
                 else => {},
             }
         }
-        return effect;
+        return;
     }
 
     // Inline Rundown keyboard-only continuation: Enter or Space starts the next
@@ -242,7 +239,7 @@ fn consumeInput(
                 else => {},
             }
         }
-        return effect;
+        return;
     }
 
     // Paused state: Esc or Enter resumes cleanly.
@@ -259,10 +256,10 @@ fn consumeInput(
                 }
             }
         }
-        return effect;
+        return;
     }
 
-    if (!owner.acceptingOsText(true)) return effect;
+    if (!owner.acceptingOsText(true)) return;
     dvui.wantTextInput(data.borderRectScale().r.toNatural());
     const prev_errors = owner.session.error_count;
     for (dvui.events()) |*event| {
@@ -271,12 +268,12 @@ fn consumeInput(
         switch (event.evt) {
             .text => |text| {
                 if (text.action == .value and !text.action.value.selected) {
-                    try insertText(owner, &effect, text.action.value.txt, at, false);
+                    try insertText(owner, text.action.value.txt, at, false);
                 }
                 event.handle(@src(), data);
             },
             .key => |key| {
-                if (key.action != .up) try handleKey(owner, &effect, key, at, pending);
+                if (key.action != .up) try handleKey(owner, key, at, pending);
                 event.handle(@src(), data);
             },
             else => {},
@@ -295,30 +292,28 @@ fn consumeInput(
             }
         }
     }
-    return effect;
 }
 
 fn handleKey(
     owner: *control.Controller,
-    effect: *control.Effect,
     key: dvui.Event.Key,
     at: u64,
     pending: *?control.Intent,
 ) !void {
-    if (key.matchBind("paste")) return insertText(owner, effect, dvui.clipboardText(), at, true);
+    if (key.matchBind("paste")) return insertText(owner, dvui.clipboardText(), at, true);
     if (key.mod.control() or key.mod.command()) return;
     const is_zig = owner.config.stage == .free_text and owner.config.stage6_source == .zig_code;
     switch (key.code) {
         .backspace => owner.session.backspace(),
         .tab => {
             if (is_zig) {
-                try insertText(owner, effect, "    ", at, false);
+                try insertText(owner, "    ", at, false);
             } else if (pending.* == null) {
                 pending.* = .new_exercise;
             }
         },
-        .enter => try insertText(owner, effect, "\n", at, false),
-        .escape => effect.reset_text = owner.pause(at).reset_text or effect.reset_text,
+        .enter => try insertText(owner, "\n", at, false),
+        .escape => owner.pause(at),
         else => {},
     }
 }
@@ -344,10 +339,9 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     }
     view.drawn_panel = true;
 
-    const focus_effect = trackWindowFocus(owner, view, input);
+    trackWindowFocus(owner, view, input);
     var pending: ?control.Intent = null;
-    var input_effect = try consumeInput(owner, view, root.data(), input, &pending);
-    if (focus_effect.runner != .none or focus_effect.reset_text) input_effect = focus_effect;
+    try consumeInput(owner, view, root.data(), input, &pending);
 
     // 1. Unified Editor-style Top Bar (64px height matching Editor toolbar scale)
     const topbar_h: f32 = 64;
@@ -380,7 +374,6 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     view.drawn_len = owner.session.len;
     return .{
         .leave = leave,
-        .input_effect = input_effect,
         .action = if (pending) |intent| owner.action(intent) else null,
     };
 }
@@ -647,7 +640,7 @@ fn drawTutorWorkspace(
         resolved_hint,
         if (input.frame) |f| f.labels else null,
         input.now_us,
-        runnerStatus(owner, input),
+        statusNote(owner, input),
         shift_nudge,
         pending,
     );
@@ -770,7 +763,7 @@ fn drawKeyboardArea(
 
     const hold_source_layer = layer;
     if (guided) if (resolved_hint) |h| {
-        if (frame.source == .draft or h.layer != layer) {
+        if (frame.source == .guide or h.layer != layer) {
             layer = h.layer;
             mods = @bitCast(h.modifiers);
             active = 1 | (@as(u16, 1) << @intCast(layer));
@@ -785,8 +778,7 @@ fn drawKeyboardArea(
 
     const source_title = switch (frame.source) {
         .live => if (frame.stale) "Live keyboard · stale" else "Live keyboard",
-        .simulated => "Draft simulation",
-        .draft => "Layout guide",
+        .guide => "Layout guide",
     };
     const src_caption = try std.fmt.allocPrint(arena, "{s} · {s}", .{ source_title, frame.profile });
     const dim_locked = !is_test_keys and (owner.config.stage == .home_row or owner.config.stage == .all_letters);
@@ -820,41 +812,22 @@ fn drawKeyboardArea(
 }
 
 /// Pauses a run when the window loses focus.
-fn trackWindowFocus(owner: *control.Controller, view: *View, input: Input) control.Effect {
-    var effect: control.Effect = .{};
+fn trackWindowFocus(owner: *control.Controller, view: *View, input: Input) void {
     if (running(owner)) if (view.was_focused) |previous| {
-        if (previous and !input.window_focused) effect = owner.pause(input.now_us);
+        if (previous and !input.window_focused) owner.pause(input.now_us);
     };
     view.was_focused = input.window_focused;
-    return effect;
 }
 
-fn runnerStatus(owner: *const control.Controller, input: Input) []const u8 {
-    const diagnostic = if (owner.failure) |failure| switch (failure) {
-        error.PracticeContextChanged => "Input source changed · start a fresh exercise",
-        error.DraftChangedRestartPractice => "Draft changed · restart the exercise",
-        error.DraftPreparationFailed => "Draft preparation failed · retry with Resume",
-        error.RunnerArtifactNotPrepared => "Build the current draft before starting practice",
-        error.StaleBuild => "Build the current draft before starting practice",
-        error.RunnerArtifactChanged => "The prepared draft runner changed · rebuild the draft",
-        error.RunnerHostMismatch => "This draft runner was built for another system",
-        error.HostMappingUnavailable => "Draft practice has no host key mapping for this board",
-        else => input.diagnostic,
-    } else input.diagnostic;
-    if (owner.config.source != .draft or !owner.active) return diagnostic;
-    return switch (owner.runner_state) {
-        .preparing => "Preparing the current draft…",
-        .prepared => "Draft ready · press Resume",
-        .stopping => "Stopping draft practice…",
-        .idle => "Build the current draft, then press Resume",
-        .failed => if (diagnostic.len != 0) diagnostic else "Draft practice failed · build or retry",
-        .stale => "Draft changed · restart the exercise",
-        .running => diagnostic,
-    };
+/// What the typing card says instead of the generic pause note.
+fn statusNote(owner: *const control.Controller, input: Input) []const u8 {
+    if (owner.failure) |failure| if (failure == error.PracticeContextChanged)
+        return "Input source changed · start a fresh exercise";
+    return input.diagnostic;
 }
 
-pub fn apply(owner: *control.Controller, view: *View, rendered: control.Action, input: Input) !control.Effect {
-    const effect = try owner.dispatch(rendered, input.prepared_snapshot, input.now_us);
+pub fn apply(owner: *control.Controller, view: *View, rendered: control.Action, input: Input) !void {
+    try owner.dispatch(rendered, input.now_us);
     switch (rendered.intent) {
         .start, .new_exercise, .next_round, .set_stage, .start_weak_spot, .reset_progress => {
             view.scroll.at = null;
@@ -867,5 +840,4 @@ pub fn apply(owner: *control.Controller, view: *View, rendered: control.Action, 
         },
         else => {},
     }
-    return effect;
 }

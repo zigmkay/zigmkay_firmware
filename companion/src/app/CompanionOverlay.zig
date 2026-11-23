@@ -65,20 +65,17 @@ pub fn update(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame)
     }
 }
 
-/// Shows the live keyboard when monitoring, otherwise the editor project with
-/// the draft runner's state.
+/// Shows the live keyboard when monitoring, otherwise the editor project.
 fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void {
     const arena = dvui.currentWindow().arena();
     const live = app.live_enabled;
-    const draft = &app.draft_runtime;
     const model = if (live) &app.live.model else &app.model;
     const held = try arena.alloc(bool, app.model.document().key_ids.len);
     @memset(held, false);
-    if (draft.owner) |active| if (active.pressed.len == held.len) @memcpy(held, active.pressed);
     const labels = if (live) &app.live.captions.labels else &app.captions.labels;
-    const layer = if (live) app.live.frame.layer else if (draft.owner != null) draft.highest_layer else app.model.layer;
+    const layer = if (live) app.live.frame.layer else app.model.layer;
     const Modifiers = @TypeOf(app.live.frame.modifiers);
-    const modifiers: Modifiers = if (live) app.live.frame.modifiers else if (draft.owner != null) @bitCast(draft.modifiers) else .{};
+    const modifiers: Modifiers = if (live) app.live.frame.modifiers else .{};
     const targets = try arena.alloc(bool, labels.key_count);
     const holds = try arena.alloc(bool, labels.key_count);
     @memset(targets, false);
@@ -89,9 +86,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void
     {
         const session = &tutor.session;
         const next = desktop.practice_view.focus(session);
-        const active_layers = if (live)
-            app.live.frame.active
-        else if (draft.owner != null) draft.active_layers else desktop.practice.layerMask(layer);
+        const active_layers = if (live) app.live.frame.active else desktop.practice.layerMask(layer);
         const hint = if (next < session.reference_len)
             try desktop.practice.hintForDrill(
                 if (tutor.profile_bound) &tutor.profile else null,

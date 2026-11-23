@@ -1,6 +1,5 @@
 //! Offline desktop ownership. GUI/native execution remains explicit in adapters.
 pub const model = @import("model.zig");
-pub const text = @import("text.zig");
 pub const labels = @import("labels.zig");
 pub const label_cache = @import("label_cache.zig");
 pub const practice = @import("practice.zig");
@@ -9,9 +8,7 @@ pub const practice_model = @import("practice_model.zig");
 pub const practice_storage = @import("practice_storage.zig");
 pub const practice_view = @import("practice_view.zig");
 pub const practice_controller = @import("practice_controller.zig");
-pub const practice_output = @import("practice_output.zig");
 pub const host_input = @import("host_input.zig");
-pub const draft_input = @import("draft_input.zig");
 pub const live_keyboard = @import("live_keyboard.zig");
 pub const action_form = @import("action_form.zig");
 pub const inspector_session = @import("inspector_session.zig");
@@ -32,7 +29,6 @@ pub const project_worker = @import("project_worker.zig");
 pub const build_worker = @import("build_worker.zig");
 pub const application_bundle = @import("application_bundle.zig");
 pub const practice_profile_source = @import("practice_profile_source.zig");
-pub const runner_runtime = @import("runner_runtime.zig");
 pub const try_state = @import("try_state.zig");
 pub const flash_controller = @import("flash-controller");
 pub const flash_presenter = @import("flash-presenter");

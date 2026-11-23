@@ -104,7 +104,6 @@ live: LiveKeyboard,
 
 practicing: bool,
 tutor: Tutor,
-draft_runtime: desktop.runner_runtime.Runtime,
 
 job_generation: u64 = 0,
 jobs: workers.Jobs = .{},
@@ -136,9 +135,8 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
         .life = undefined,
         .events = undefined,
         .live = undefined,
-        .practicing = mode.is(.practice) or mode.isTutorGallery() or mode.is(.draft) or mode.light() == .tutor,
+        .practicing = mode.is(.practice) or mode.isTutorGallery() or mode.light() == .tutor,
         .tutor = undefined,
-        .draft_runtime = undefined,
     };
     errdefer app.model.deinit();
     errdefer app.registry.deinit();
@@ -191,18 +189,10 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     errdefer if (app.build.resources) |*resources| resources.deinit();
     try app.loadBundle();
     errdefer if (app.build.runner) |*runner| runner.deinit();
-    app.draft_runtime = desktop.runner_runtime.Runtime.init(gpa, io, app.events.root, frame_limit != null);
-    errdefer app.draft_runtime.deinit();
-    app.events.draft = &app.draft_runtime;
-    app.events.practice = &app.tutor.controller;
-    app.events.model = &app.model;
-    app.events.view = &app.view;
-    if (mode.fixtureKind()) |kind| if (kind == .draft) try app.loadRunnerManifest(kind.draft);
 }
 
 /// Releases everything in the reverse order of `init`.
 pub fn deinit(app: *App) void {
-    app.draft_runtime.deinit();
     if (app.build.runner) |*runner| runner.deinit();
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.flash.deinit();
@@ -233,7 +223,7 @@ fn initialModel(gpa: std.mem.Allocator, mode: cli.Mode) !desktop.model.Model {
         defer template.deinit();
         return desktop.model.Model.init(gpa, selected.board, template.snapshot);
     }
-    var template = try project.profiles.create(gpa, if (mode.is(.draft)) .eurkey else .qwerty);
+    var template = try project.profiles.create(gpa, .qwerty);
     defer template.deinit();
     return desktop.model.Model.init(gpa, project.profiles.board, template.snapshot);
 }
@@ -313,7 +303,7 @@ fn initLive(app: *App) !void {
 fn initTutor(app: *App) !void {
     app.tutor = .{ .controller = desktop.practice_controller.Controller.init(try app.model.id()) };
     const practice = &app.tutor.controller;
-    if (app.mode.is(.practice)) _ = try practice.dispatch(practice.action(.{ .start = true }), null, 0);
+    if (app.mode.is(.practice)) _ = try practice.dispatch(practice.action(.start), 0);
     if (app.frame_limit == null) try std.Io.randomSecure(app.io, std.mem.asBytes(&practice.seed));
 }
 
@@ -338,14 +328,6 @@ fn loadBundle(app: *App) !void {
     app.build.tools = try desktop.application_bundle.tools(app.gpa, app.build.resources.?);
 }
 
-/// Prepares a draft run on the runner of the `--offline-draft-frames` manifest.
-fn loadRunnerManifest(app: *App, path: []const u8) !void {
-    const bytes = try std.Io.Dir.cwd().readFileAlloc(app.io, path, app.gpa, .limited(32 * 1024));
-    defer app.gpa.free(bytes);
-    app.build.runner = try desktop.build_worker.Runner.parse(app.gpa, bytes);
-    try fixtures.startDraftRun(app, app.build.runner.?.record.inputs.project_digest, 0);
-}
-
 pub fn run(app: *App) !void {
     while (!app.owner.closed) {
         if (try app.frame() == .stop) break;
@@ -359,7 +341,7 @@ fn frame(app: *App) !Flow {
     if (try Flash.monitorTrial(app) == .stop) return .stop;
     try app.pollLive();
     try fixtures.checkBuild(app);
-    if (app.draftFinished()) return .stop;
+    if (app.mode.is(.build) and app.fixture.build_checked) return .stop;
     if (app.frame_limit) |limit| if (app.count == limit) return .stop;
     app.count += 1;
 
@@ -375,15 +357,14 @@ fn frame(app: *App) !Flow {
     app.acceptEditorGeneration(now_us);
     try Flash.step(app, now_us);
     try app.refreshSource(now_us);
-    const control_model = try Tutor.observe(app, now_us);
-    app.prepareEvents(control_model, now_us);
+    try Tutor.observe(app, now_us);
     try app.refreshCaptions();
     try app.pollFolderDialog();
 
     var board = try boards.OwnedBoard.fromDocument(app.gpa, app.model.document());
     defer board.deinit();
     const drawn = try app.draw(&board, now_us);
-    return app.finishFrame(&board, drawn, control_model, now_us);
+    return app.finishFrame(&board, drawn, now_us);
 }
 
 /// Values of the displayed frame that are acted on after it.
@@ -414,7 +395,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     try fixtures.injectText(app);
     if (app.events.lost_focus) {
         app.events.lost_focus = false;
-        app.applyPractice(app.tutor.controller.pause(now_us), &app.model, now_us);
+        app.tutor.controller.pause(now_us);
     }
 
     const can_build = app.canBuild(board);
@@ -450,8 +431,8 @@ fn fitWindow(app: *App) void {
     window.themeSet(editor_ui.dvuiTheme(window, app.view.toolbar.light));
 }
 
-fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, control_model: *desktop.model.Model, now_us: u64) !Flow {
-    Tutor.finishFrame(app, drawn.screen.tutor, control_model, now_us);
+fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, now_us: u64) !Flow {
+    Tutor.finishFrame(app, drawn.screen.tutor, now_us);
     try Flash.afterFrame(app, drawn.flash_panel, now_us);
     try onboarding_flow.apply(app, drawn.screen.onboarding);
     if (try commands.apply(app, drawn.screen.rendered, board, drawn.can_build) != .proceed) return .next_frame;
@@ -463,22 +444,11 @@ fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, control
         return .stop;
     }
     if (app.frame_limit == null) {
-        const busy = app.jobs.busy() or app.draft_runtime.owner != null;
+        const busy = app.jobs.busy();
         const budget = desktop.live_keyboard.waitBudget(app.live_enabled, busy, false);
         app.interrupted = try app.native.waitEventTimeout(@min(app.window.waitTime(drawn.delay), budget));
     }
-    if (app.mode.isDraft()) try std.Io.sleep(app.io, .fromMilliseconds(10), .awake);
     return .proceed;
-}
-
-fn draftFinished(app: *const App) bool {
-    return app.checkingDraft() and app.fixture.draft_phase == .paused and
-        app.tutor.controller.session.state == .paused and app.draft_runtime.owner == null;
-}
-
-/// Whether a draft fixture is feeding key events through the runner.
-pub fn checkingDraft(app: *const App) bool {
-    return app.mode.is(.draft) or (app.mode.is(.build) and app.fixture.build_checked);
 }
 
 fn pollLive(app: *App) !void {
@@ -508,8 +478,15 @@ fn acceptEditorGeneration(app: *App, now_us: u64) void {
     app.closePopups();
     app.view.host.drag = null;
     app.view.keyboard.drag = null;
-    if (app.tutor.controller.active or app.draft_runtime.owner != null)
-        app.draft_runtime.fail(&app.tutor.controller, error.PracticeProjectSwitched, now_us);
+    app.interruptPractice(error.PracticeProjectSwitched, now_us);
+}
+
+/// Pauses a running exercise whose project or input changed under it.
+pub fn interruptPractice(app: *App, reason: anyerror, now_us: u64) void {
+    const practice = &app.tutor.controller;
+    if (!practice.active) return;
+    practice.pause(now_us);
+    practice.failure = reason;
 }
 
 /// A host input source change pauses the run, which can no longer be scored.
@@ -518,18 +495,11 @@ fn refreshSource(app: *App, now_us: u64) !void {
     if (!source.refresh()) return;
     app.revision = try std.math.add(u64, app.revision, 1);
     const practice = &app.tutor.controller;
-    app.applyPractice(practice.pause(now_us), &app.model, now_us);
+    practice.pause(now_us);
     if (practice.active) {
         practice.session.scored = false;
         practice.failure = error.PracticeContextChanged;
     }
-}
-
-fn prepareEvents(app: *App, control_model: *desktop.model.Model, now_us: u64) void {
-    app.events.now_us = now_us;
-    app.events.model = control_model;
-    app.draft_runtime.router.owns_practice_input = app.practicing;
-    app.draft_runtime.router.focused = app.focused();
 }
 
 fn refreshCaptions(app: *App) !void {
@@ -592,7 +562,7 @@ fn handleWindowRequests(app: *App, now_us: u64) !void {
 fn leaveEditorModes(app: *App, now_us: u64) void {
     app.closePopups();
     app.practicing = false;
-    app.applyPractice(app.tutor.controller.pause(now_us), &app.model, now_us);
+    app.tutor.controller.pause(now_us);
 }
 
 /// Starts an automatic build once the editor settles on a new snapshot.
@@ -617,14 +587,6 @@ fn canBuild(app: *App, board: *const boards.OwnedBoard) bool {
     const plan = app.build.plan orelse return false;
     return !app.jobs.busy() and std.mem.eql(u8, &plan.config.board_id, &app.model.board.id) and
         std.mem.eql(u8, plan.config.build_board, board.entry.selector);
-}
-
-pub fn applyPractice(app: *App, effect: desktop.practice_controller.Effect, model: *const desktop.model.Model, now_us: u64) void {
-    const practice = &app.tutor.controller;
-    app.draft_runtime.apply(practice, effect, app.build.runner, model, now_us) catch |err| {
-        app.draft_runtime.fail(practice, err, now_us);
-        app.view.report(err);
-    };
 }
 
 pub fn focused(app: *const App) bool {

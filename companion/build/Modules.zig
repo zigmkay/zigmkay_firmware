@@ -65,8 +65,6 @@ pub const Host = struct {
     /// The importer package's own imports, for its test root with `test-options`.
     importer_deps: []const Import,
     runner_protocol: *Module,
-    runner_client: *Module,
-    runner_async: *Module,
     session: *Module,
     /// `layout-model` and `device-protocol`: the session package's own imports.
     session_deps: []const Import,
@@ -89,7 +87,6 @@ pub const Host = struct {
     catalog_export_deps: []const Import,
     keymap_project: []const Import,
     runner_test_deps: []const Import,
-    manifest_fixture_deps: []const Import,
     import_fixture_deps: []const Import,
     native_hid_only: []const Import,
     project_only: []const Import,
@@ -125,7 +122,6 @@ pub const Gui = struct {
     physical_ui: *Module,
     practice_ui: *Module,
     editor_frame_ui: *Module,
-    native_draft_input: *Module,
     icon_resources: *Module,
     onboarding_ui: *Module,
     keyboard_ui: *Module,
@@ -234,16 +230,6 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .{ .name = "zigmkay", .module = zigmkay },
         .{ .name = "owned-zon", .module = core.owned_zon },
     }) });
-    const runner_client = b.createModule(.{ .root_source_file = b.path("src/runner/client.zig"), .imports = dupe(b, &.{
-        .{ .name = "runner-protocol", .module = runner_protocol },
-        .{ .name = "companion-jobs", .module = core.jobs },
-        .{ .name = "owned-zon", .module = core.owned_zon },
-    }) });
-    const runner_async = b.createModule(.{ .root_source_file = b.path("src/runner/async_client.zig"), .imports = dupe(b, &.{
-        .{ .name = "runner-client", .module = runner_client },
-        .{ .name = "runner-protocol", .module = runner_protocol },
-        .{ .name = "companion-jobs", .module = core.jobs },
-    }) });
     const session_deps = dupe(b, &.{ .{ .name = "layout-model", .module = layout }, .{ .name = "device-protocol", .module = protocol } });
     const session = b.createModule(.{ .root_source_file = b.path("src/session/root.zig"), .imports = session_deps });
     const live_adapter = b.createModule(.{ .root_source_file = b.path("src/session/live_adapter.zig"), .imports = dupe(b, &.{
@@ -277,7 +263,6 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .{ .name = "tray-lifecycle", .module = core.tray_lifecycle },
         .{ .name = "device-protocol", .module = protocol },
         .{ .name = "keymap-importer", .module = importer },
-        .{ .name = "runner-async", .module = runner_async },
         .{ .name = "session", .module = session },
     });
     const desktop_core = b.createModule(.{ .root_source_file = b.path("src/desktop/root.zig"), .target = t, .optimize = o, .imports = desktop_core_imports });
@@ -306,8 +291,6 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .importer = importer,
         .importer_deps = importer_deps,
         .runner_protocol = runner_protocol,
-        .runner_client = runner_client,
-        .runner_async = runner_async,
         .session = session,
         .session_deps = session_deps,
         .session_test_deps = dupe(b, &.{
@@ -350,12 +333,9 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
             .{ .name = "zigmkay", .module = zigmkay },
             .{ .name = "companion-jobs", .module = core.jobs },
             .{ .name = "owned-zon", .module = core.owned_zon },
-            .{ .name = "runner-client", .module = runner_client },
             .{ .name = "project", .module = project },
-            .{ .name = "runner-async", .module = runner_async },
             .{ .name = "desktop-core", .module = desktop_core },
         }),
-        .manifest_fixture_deps = dupe(b, &.{ .{ .name = "project", .module = project }, .{ .name = "companion-jobs", .module = core.jobs } }),
         .import_fixture_deps = dupe(b, &.{ .{ .name = "keymap-importer", .module = importer }, .{ .name = "project", .module = project } }),
         .native_hid_only = dupe(b, &.{.{ .name = "native-hid", .module = native_hid }}),
     };
@@ -484,10 +464,6 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .{ .name = "callback-ui", .module = callback_ui },
         .{ .name = "encoder-ui", .module = encoder_ui },
     }));
-    const native_draft_input = desktopModule(b, cfg, "draft_input_native.zig", &.{
-        .{ .name = "desktop-core", .module = dc },
-        .{ .name = "dvui_backend", .module = backend },
-    });
     const onboarding_ui = desktopModule(b, cfg, "onboarding_ui.zig", &(editor ++ [_]Import{.{ .name = "project", .module = host.project }}));
     const companion_ui = desktopModule(b, cfg, "companion_ui.zig", &.{
         .{ .name = "dvui", .module = dvui },
@@ -510,7 +486,6 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .{ .name = "paths-ui", .module = paths_ui },
         .{ .name = "callback-ui", .module = callback_ui },
         .{ .name = "practice-ui", .module = practice_ui },
-        .{ .name = "native-draft-input", .module = native_draft_input },
     };
     return .{
         .dvui = dvui,
@@ -528,7 +503,6 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .physical_ui = physical_ui,
         .practice_ui = practice_ui,
         .editor_frame_ui = editor_frame_ui,
-        .native_draft_input = native_draft_input,
         .icon_resources = icon_resources,
         .onboarding_ui = onboarding_ui,
         .keyboard_ui = keyboard_ui,

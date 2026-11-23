@@ -7,7 +7,6 @@ const layout_profile = @import("practice_layout_profile.zig");
 const model = @import("practice_model.zig");
 
 pub const State = enum { ready, running, paused, complete };
-pub const Source = enum { os, draft };
 pub const ErrorMode = enum { stop_on_error, flow_backspace };
 
 /// The arrival time the platform layer recorded for the DVUI event `number`.
@@ -86,7 +85,6 @@ pub const Session = struct {
     typed: [8192]u21 = undefined,
     len: usize = 0,
     state: State = .ready,
-    source: Source = .os,
     error_mode: ErrorMode = .stop_on_error,
     attempts: usize = 0,
     correct_attempts: usize = 0,
@@ -104,11 +102,11 @@ pub const Session = struct {
     previous_cr: bool = false,
     collector: model.RoundCollector = .{},
 
-    pub fn load(self: *Session, bytes: []const u8, source: Source) !void {
-        try self.loadWithMode(bytes, source, self.error_mode);
+    pub fn load(self: *Session, bytes: []const u8) !void {
+        try self.loadWithMode(bytes, self.error_mode);
     }
 
-    pub fn loadWithMode(self: *Session, bytes: []const u8, source: Source, error_mode: ErrorMode) !void {
+    pub fn loadWithMode(self: *Session, bytes: []const u8, error_mode: ErrorMode) !void {
         var view = try std.unicode.Utf8View.init(bytes);
         var it = view.iterator();
         var count: usize = 0;
@@ -125,7 +123,6 @@ pub const Session = struct {
             count += 1;
         }
         self.reference_len = count;
-        self.source = source;
         self.error_mode = error_mode;
         self.restart();
     }
@@ -626,7 +623,7 @@ pub fn guidance(
 test "Stop-on-error keeps cursor waiting, counts accuracy, invalidates latency on error/pause, and tracks hesitation" {
     const t = std.testing;
     var s: Session = .{};
-    try s.load("ab c", .os);
+    try s.load("ab c");
     try t.expectEqual(ErrorMode.stop_on_error, s.error_mode);
 
     // Wrong key before start marks error without advancing cursor or starting clock
@@ -741,7 +738,7 @@ test "combo and one-shot Shift/Layer guidance highlight both combo triggers and 
 
 test "Unicode corrections, pauses and literal scoring (flow_backspace mode)" {
     var s: Session = .{ .error_mode = .flow_backspace };
-    try s.load("é a\n", .os);
+    try s.load("é a\n");
     try s.insert("é", 1_000_000, false);
     try std.testing.expectEqual(@as(f64, 0), s.wpm(1_000_000));
     try s.insert("x", 2_000_000, false);
@@ -763,7 +760,7 @@ test "Unicode corrections, pauses and literal scoring (flow_backspace mode)" {
 
 test "ready pauses, UTF-8 validation and split CRLF preserve character attempts" {
     var s: Session = .{ .error_mode = .flow_backspace };
-    try s.load("a\nb", .os);
+    try s.load("a\nb");
     try s.insert("", 10, false);
     try std.testing.expect(s.started == null);
     s.pause(20);
@@ -778,7 +775,7 @@ test "ready pauses, UTF-8 validation and split CRLF preserve character attempts"
 
 test "wrong text lowers accuracy and must be corrected before completion" {
     var s: Session = .{ .error_mode = .flow_backspace };
-    try s.load("aa", .os);
+    try s.load("aa");
     try s.insert("xx", 10, false);
     try std.testing.expectEqual(State.running, s.state);
     s.backspace();
@@ -855,7 +852,7 @@ test "lesson corpus remains original text and bounded exercise scoring uses inje
         std.crypto.hash.sha2.Sha256.hash(lesson, &hash, .{});
         try t.expectEqualStrings(expected, &std.fmt.bytesToHex(hash, .lower));
         var session: Session = .{};
-        try session.load(lesson, .draft);
+        try session.load(lesson);
         try session.insert(lesson, 123, false);
         try t.expectEqual(State.complete, session.state);
         try t.expectEqual(@as(f64, 100), session.accuracy());
@@ -863,8 +860,8 @@ test "lesson corpus remains original text and bounded exercise scoring uses inje
     }
     var session: Session = .{ .error_mode = .flow_backspace };
     const long: [8193]u8 = @splat('a');
-    try t.expectError(error.ExerciseTooLong, session.load(&long, .os));
-    try session.load("a", .os);
+    try t.expectError(error.ExerciseTooLong, session.load(&long));
+    try session.load("a");
     try session.insert("x", 100, false);
     session.backspace();
     try session.insert("a", 50, false);
@@ -913,7 +910,7 @@ test "opposite home row outranks dedicated Shift without assuming letter placeme
 
 test "split CRLF completes the text and later input is ignored" {
     var session: Session = .{ .error_mode = .flow_backspace };
-    try session.load("éa\n", .os);
+    try session.load("éa\n");
     try session.insert("é", 10, false);
     session.backspace();
     try session.insert("éXxx", 30, false);
