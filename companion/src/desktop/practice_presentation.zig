@@ -875,7 +875,9 @@ pub fn testLayoutScratchpad(
     // Decode UTF-8 scratchpad text into codepoints and wrap into up to 3 trailing lines.
     var cps: [512]u21 = undefined;
     var cp_len: usize = 0;
-    var it = std.unicode.Utf8View.initUnchecked(text).iterator();
+    // Clipboard and IME text is not trusted to be valid UTF-8.
+    const utf8 = std.unicode.Utf8View.init(text) catch return;
+    var it = utf8.iterator();
     while (it.nextCodepoint()) |cp| {
         if (cp_len >= cps.len) break;
         cps[cp_len] = cp;

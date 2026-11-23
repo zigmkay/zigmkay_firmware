@@ -193,6 +193,12 @@ pub fn maskFromSlice(letters: []const u8) u32 {
 }
 
 fn effectiveMask(req: DrillRequest) u32 {
+    // Stage 1 stays on the home row even after off-row letters unlock;
+    // the progressive unlock mask belongs to Stage 2.
+    if (req.stage == .home_row) if (req.profile) |p| {
+        const m = maskFromSlice(p.zone1Letters());
+        if (m != 0) return m;
+    };
     if (req.unlocked_mask != 0) return req.unlocked_mask & 0x03ff_ffff;
     if (req.learning) |lm| {
         const m = lm.unlockedMask();

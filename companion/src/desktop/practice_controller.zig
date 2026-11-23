@@ -84,13 +84,23 @@ pub const TestKeysTelemetry = struct {
     active_combo_cp: ?u21 = null,
 
     pub fn setLastText(self: *TestKeysTelemetry, text: []const u8) void {
-        const n = @min(text.len, self.last_text.len);
-        @memcpy(self.last_text[0..n], text[0..n]);
-        self.last_text_len = n;
+        const kept = utf8Prefix(text, self.last_text.len);
+        @memcpy(self.last_text[0..kept.len], kept);
+        self.last_text_len = kept.len;
     }
 
     pub fn appendScratchpad(self: *TestKeysTelemetry, text: []const u8) void {
         if (text.len == 0) return;
+        if (text.len >= self.scratchpad.len) {
+            // A paste larger than the buffer replaces it with its own tail,
+            // starting on a codepoint boundary.
+            var start = text.len - self.scratchpad.len;
+            while (start < text.len and (text[start] & 0xC0) == 0x80) : (start += 1) {}
+            const tail = text[start..];
+            @memcpy(self.scratchpad[0..tail.len], tail);
+            self.scratchpad_len = tail.len;
+            return;
+        }
         // Keep the latest tail when the buffer reaches capacity, trimming on UTF-8 boundaries.
         if (self.scratchpad_len + text.len > self.scratchpad.len) {
             const overflow = (self.scratchpad_len + text.len) - self.scratchpad.len;
@@ -100,10 +110,17 @@ pub const TestKeysTelemetry = struct {
             std.mem.copyForwards(u8, self.scratchpad[0..keep], self.scratchpad[drop..self.scratchpad_len]);
             self.scratchpad_len = keep;
         }
-        const avail = self.scratchpad.len - self.scratchpad_len;
-        const n = @min(text.len, avail);
-        @memcpy(self.scratchpad[self.scratchpad_len .. self.scratchpad_len + n], text[0..n]);
-        self.scratchpad_len += n;
+        const kept = utf8Prefix(text, self.scratchpad.len - self.scratchpad_len);
+        @memcpy(self.scratchpad[self.scratchpad_len .. self.scratchpad_len + kept.len], kept);
+        self.scratchpad_len += kept.len;
+    }
+
+    /// The longest prefix of `text` of at most `max` bytes that ends on a codepoint boundary.
+    fn utf8Prefix(text: []const u8, max: usize) []const u8 {
+        if (text.len <= max) return text;
+        var n = max;
+        while (n > 0 and (text[n] & 0xC0) == 0x80) : (n -= 1) {}
+        return text[0..n];
     }
 
     pub fn backspaceScratchpad(self: *TestKeysTelemetry) void {
@@ -216,6 +233,13 @@ pub const Controller = struct {
 
     /// Binds a derived `LayoutProfile` and optional persisted `ProfileState`.
     /// Applies layout-diff partial reset when persisted key positions exist.
+    /// Drops unsaved work of the bound profile before another profile is bound.
+    pub fn discardPending(self: *Controller) void {
+        self.pending_run = null;
+        self.reset_requested = false;
+        self.needs_persist = false;
+    }
+
     pub fn bindProfile(
         self: *Controller,
         profile: layout_profile.LayoutProfile,
@@ -489,7 +513,8 @@ pub const Controller = struct {
             .focus_cp = self.learning.focus_cp,
             .profile = profile_ptr,
             .learning = &self.learning,
-            .punct_group = self.config.punct_group,
+            // Rotate through the punctuation and digit groups round by round.
+            .punct_group = self.config.punct_group +% self.learning.total_rounds,
             .stage5_filter = self.config.stage5_filter,
             .stage5_layer = self.config.stage5_layer,
             .stage6_source = self.config.stage6_source,
@@ -905,4 +930,36 @@ test "rendered tutor actions reject changed project and replaced operation" {
     const current = owner.action(.{ .start = true });
     _ = try owner.dispatch(current, null, 1);
     try t.expectError(error.StalePracticeAction, owner.dispatch(current, null, 2));
+}
+
+test "Test layout buffers keep whole codepoints when multibyte text overflows them" {
+    const t = std.testing;
+    var telemetry: TestKeysTelemetry = .{};
+    const euro = "€"; // three bytes
+    var paste: [171 * euro.len]u8 = undefined;
+    for (0..171) |i| @memcpy(paste[i * euro.len ..][0..euro.len], euro);
+
+    telemetry.appendScratchpad(&paste);
+    try t.expect(std.unicode.utf8ValidateSlice(telemetry.scratchpadSlice()));
+    try t.expectEqual(@as(usize, 170 * euro.len), telemetry.scratchpadSlice().len);
+
+    telemetry.clearScratchpad();
+    telemetry.appendScratchpad("ab");
+    telemetry.appendScratchpad(paste[0 .. 170 * euro.len]);
+    try t.expect(std.unicode.utf8ValidateSlice(telemetry.scratchpadSlice()));
+
+    telemetry.setLastText(&paste);
+    try t.expect(std.unicode.utf8ValidateSlice(telemetry.textSlice()));
+    try t.expectEqual(@as(usize, 10 * euro.len), telemetry.textSlice().len);
+}
+
+test "discardPending drops a confirmed reset and round record before a profile switch" {
+    var owner: Controller = .init(@splat(0));
+    owner.reset_requested = true;
+    owner.needs_persist = true;
+    owner.pending_run = .{ .utc_timestamp = 1, .stage = 1, .wpm = 30, .accuracy = 95, .active_seconds = 20 };
+    owner.discardPending();
+    try std.testing.expect(!owner.reset_requested);
+    try std.testing.expect(!owner.needs_persist);
+    try std.testing.expect(owner.pending_run == null);
 }

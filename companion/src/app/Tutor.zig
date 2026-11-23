@@ -208,6 +208,16 @@ fn syncProfileAndPersistence(
         return;
     }
 
+    // Pending work (a round record, a confirmed reset) belongs to the profile it
+    // was made in. Write it there while that profile is still bound, then drop
+    // it so it can never be applied to the next profile.
+    if (self.bound_profile_hash != null and self.controller.needs_persist and
+        !self.persistence_blocked and app.frame_limit == null)
+    {
+        if (app.user_paths) |owned| persistTo(app, owned.paths.data) catch |err| app.view.report(err);
+    }
+    self.controller.discardPending();
+
     // Load persisted state for this profile when running outside offline fixtures.
     // A read failure is not "no saved state": bind fresh for this session but
     // block saving, so the real progress on disk is never overwritten.
