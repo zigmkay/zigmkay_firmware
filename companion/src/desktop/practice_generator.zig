@@ -223,14 +223,49 @@ fn focusLower(req: DrillRequest, mask: u32) ?u8 {
 /// Primary 6-stage adaptive drill entrypoint.
 pub fn generateDrill(buffer: []u8, req: DrillRequest) ![]const u8 {
     _ = req.language; // .en active; reserved for future locales
-    return switch (req.stage) {
+    const text = try switch (req.stage) {
         .home_row => generateHomeRowOrTrigram(buffer, req),
         .all_letters => generateTrigramRound(buffer, req),
         .shift => generateShiftRound(buffer, req),
         .punctuation_numbers => generatePunctuationNumbersRound(buffer, req),
         .layers_combos => generateLayersCombosRound(buffer, req),
-        .free_text => generateFreeTextRound(buffer, req),
+        // Free text is real prose, code or the user's own text; it stays verbatim.
+        .free_text => return generateFreeTextRound(buffer, req),
     };
+    const profile = req.profile orelse return text;
+    // A profile without any route knows nothing about the layout.
+    if (profile.route_len == 0) return text;
+    return keepTypeable(buffer, text, profile);
+}
+
+/// Drops every character the layout cannot produce from a generated drill, so
+/// a round can always be finished. The stage generators fall back to fixed
+/// letters and unchecked words on sparse layouts; this is the one guarantee
+/// behind all of them. `text` must lie at the start of `buffer`.
+fn keepTypeable(buffer: []u8, text: []const u8, profile: *const layout_profile.LayoutProfile) ![]const u8 {
+    std.debug.assert(text.ptr == buffer.ptr);
+    var kept: usize = 0;
+    var index: usize = 0;
+    while (index < text.len) {
+        const len = std.unicode.utf8ByteSequenceLength(text[index]) catch 1;
+        const end = @min(text.len, index + len);
+        const cp: ?u21 = std.unicode.utf8Decode(text[index..end]) catch null;
+        const keep = if (cp) |value|
+            if (value == ' ')
+                kept > 0 and buffer[kept - 1] != ' '
+            else
+                profile.routeFor(value) != null or profile.comboFor(value) != null
+        else
+            false;
+        if (keep) {
+            std.mem.copyForwards(u8, buffer[kept..], text[index..end]);
+            kept += end - index;
+        }
+        index = end;
+    }
+    if (kept > 0 and buffer[kept - 1] == ' ') kept -= 1;
+    if (kept == 0) return error.NoTypeableDrill;
+    return buffer[0..kept];
 }
 
 /// Generates a ~20-word weak-spot drill heavily targeting weakest keys and slowest bigrams.
@@ -1292,4 +1327,34 @@ test "legacy tests have the chosen number of lowercase sentences and are reprodu
     try t.expectError(error.InvalidExerciseLevel, generate(&a, 1, 0));
     try t.expectError(error.InvalidExerciseLevel, generate(&a, 1, max_sentences + 1));
     try t.expectError(error.WriteFailed, generate(a[0..4], 1, 1));
+}
+
+test "generated drills only ask for characters a sparse layout can produce" {
+    const t = std.testing;
+
+    // Five lowercase letters and nothing else: no capitals, digits or symbols.
+    var profile: layout_profile.LayoutProfile = .{ .key_count = 5, .layer_count = 1 };
+    for ("aeint", 0..) |ch, i| {
+        profile.routes[profile.route_len] = .{ .cp = ch, .kind = .base, .layer = 0, .key_index = i };
+        profile.route_len += 1;
+    }
+    const stages = [_]Stage{ .home_row, .all_letters, .shift, .punctuation_numbers, .layers_combos };
+    var produced: usize = 0;
+    for (stages) |stage| for (0..6) |round| {
+        var buffer: [2048]u8 = undefined;
+        const text = generateDrill(&buffer, .{
+            .stage = stage,
+            .seed = 0x51ab + round,
+            .punct_group = @intCast(round),
+            .profile = &profile,
+        }) catch |err| {
+            try t.expectEqual(error.NoTypeableDrill, err);
+            continue;
+        };
+        produced += 1;
+        try t.expect(text[0] != ' ' and text[text.len - 1] != ' ');
+        for (text) |ch| try t.expect(ch == ' ' or profile.routeFor(ch) != null);
+    };
+    // The two letter stages must still produce drills.
+    try t.expect(produced >= 12);
 }

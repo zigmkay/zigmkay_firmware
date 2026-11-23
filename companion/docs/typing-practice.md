@@ -118,14 +118,14 @@ and unpersisted.
 
 ![Test layout mode with free-typing scratchpad, live layer/modifier telemetry, and shared Editor keyboard view](screenshots/typing-practice/test-keys.png)
 
-## Input Sources
+## Input Source
 
-- **OS keyboard text (Live keyboard):** Scores text delivered by your operating
-  system and overlays real physical telemetry when your verified Zigmkay
-  keyboard is connected (including a brief red flash on physical mis-keys).
-- **Unflashed draft:** Runs your editor's current draft through the prepared
-  native firmware processor so you can practice and test layout changes before
-  flashing.
+Practice and Test layout always score the text your operating system delivers
+from the connected keyboard, and overlay real physical telemetry when your
+verified Zigmkay keyboard is connected (including a brief red flash on physical
+mis-keys). A layout that is not flashed yet cannot be practised: the Tutor shows
+a notice above the keyboard when no keyboard is verified for the layout or when
+the editor holds changes the keyboard does not run yet. Flash the layout first.
 
 ## Tests & Fixtures
 
