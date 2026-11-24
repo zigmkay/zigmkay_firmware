@@ -1,7 +1,7 @@
 //! Clean-room adaptive per-key learning model for the Zigmkay typing tutor.
 //! Tracks filtered motor latencies, per-key EMA speed and first-try accuracy,
 //! confidence scores, sequential unlock cadence, linear-regression forecasts,
-//! bounded bigram bottlenecks, and layout-diff partial resets.
+//! bounded bigram bottlenecks, known key positions and per-character resets.
 const std = @import("std");
 const layout_profile = @import("practice_layout_profile.zig");
 
@@ -22,6 +22,10 @@ pub const max_bigrams: usize = 256;
 pub const max_round_samples_per_key: usize = 64;
 pub const max_round_keys: usize = 64;
 pub const max_round_bigrams: usize = 256;
+/// Positions a character keeps statistics for, one per keyboard it moved
+/// between; the oldest is forgotten first.
+pub const max_positions_per_key: usize = 4;
+pub const max_known_positions: usize = layout_profile.max_routes + max_tracked_keys * (max_positions_per_key - 1);
 
 pub const KeyStat = struct {
     cp: u21 = 0,
@@ -70,6 +74,26 @@ pub const KeySummary = struct {
 pub const ModelConfig = struct {
     language: Language = .en,
     target_wpm: f32 = 35.0,
+};
+
+/// The keys of one keyboard that last produced a known position, for the
+/// before/now comparison. `board` is `boardHash` of the board id.
+pub const SeenKey = struct {
+    board: u64 = 0,
+    key_index: u16 = 0,
+    combo_key_index: ?u16 = null,
+    /// The key held for the layer, when the position is on another layer.
+    layer_key_index: ?u16 = null,
+};
+
+pub fn boardHash(board_id: []const u8) u64 {
+    return std.hash.Wyhash.hash(0x7a69676d6b6179, board_id);
+}
+
+/// A position at which a character's statistics count as valid.
+pub const KnownPosition = struct {
+    pos: layout_profile.KeyPosition,
+    seen: ?SeenKey = null,
 };
 
 pub const RoundOutcome = struct {
@@ -288,6 +312,11 @@ pub const LearningModel = struct {
 
     bigrams: [max_bigrams]BigramStat = undefined,
     bigram_len: usize = 0,
+
+    /// Positions per character at which its statistics were made or kept,
+    /// oldest first. Moving a key never resets anything by itself.
+    known: [max_known_positions]KnownPosition = undefined,
+    known_len: usize = 0,
 
     pub fn init(unlock_order: []const u8, initial_unlocked: usize, config: ModelConfig) LearningModel {
         var model: LearningModel = .{
@@ -568,6 +597,195 @@ pub const LearningModel = struct {
         return out[0..count];
     }
 
+    /// Whether a character has any practice data worth keeping.
+    pub fn hasData(self: *const LearningModel, cp: u21) bool {
+        const st = self.getStat(cp) orelse return false;
+        return st.samples > 0 or st.acc_initialized;
+    }
+
+    pub fn knownSlice(self: *const LearningModel) []const KnownPosition {
+        return self.known[0..self.known_len];
+    }
+
+    /// The position a character was practised at most recently, if any.
+    pub fn lastKnownPosition(self: *const LearningModel, cp: u21) ?KnownPosition {
+        var i = self.known_len;
+        while (i > 0) {
+            i -= 1;
+            if (self.known[i].pos.cp == cp) return self.known[i];
+        }
+        return null;
+    }
+
+    fn knownIndex(self: *const LearningModel, pos: layout_profile.KeyPosition) ?usize {
+        for (self.known[0..self.known_len], 0..) |entry, i| {
+            if (entry.pos.eql(pos)) return i;
+        }
+        return null;
+    }
+
+    fn knownCount(self: *const LearningModel, cp: u21) usize {
+        var count: usize = 0;
+        for (self.known[0..self.known_len]) |entry| {
+            if (entry.pos.cp == cp) count += 1;
+        }
+        return count;
+    }
+
+    fn removeKnownAt(self: *LearningModel, index: usize) void {
+        std.mem.copyForwards(
+            KnownPosition,
+            self.known[index .. self.known_len - 1],
+            self.known[index + 1 .. self.known_len],
+        );
+        self.known_len -= 1;
+    }
+
+    fn removeKnown(self: *LearningModel, cp: u21) bool {
+        var write: usize = 0;
+        for (self.known[0..self.known_len]) |entry| {
+            if (entry.pos.cp == cp) continue;
+            self.known[write] = entry;
+            write += 1;
+        }
+        defer self.known_len = write;
+        return write != self.known_len;
+    }
+
+    /// Appends a position as the most recent one of its character. A full set
+    /// drops the character's oldest position; a full table drops the oldest
+    /// entry overall.
+    fn pushKnown(self: *LearningModel, entry: KnownPosition) void {
+        if (self.knownCount(entry.pos.cp) >= max_positions_per_key) {
+            for (self.known[0..self.known_len], 0..) |old, i| {
+                if (old.pos.cp == entry.pos.cp) {
+                    self.removeKnownAt(i);
+                    break;
+                }
+            }
+        }
+        if (self.known_len >= max_known_positions) self.removeKnownAt(0);
+        self.known[self.known_len] = entry;
+        self.known_len += 1;
+    }
+
+    /// Takes over the positions of the bound layout without touching any
+    /// statistic. A character without practice data simply moves along; a
+    /// practised one at a known position becomes its most recent position.
+    /// A practised character at an unknown position is left for the user to
+    /// decide (see `unconfirmedMoves`). Returns whether a practised
+    /// character's positions changed, which is worth saving.
+    pub fn adoptPositions(self: *LearningModel, current: []const KnownPosition) bool {
+        var changed = false;
+        for (current) |cur| {
+            const cp = cur.pos.cp;
+            if (!self.hasData(cp)) {
+                const count = self.knownCount(cp);
+                const same = count == 1 and if (self.knownIndex(cur.pos)) |i|
+                    std.meta.eql(self.known[i].seen, cur.seen) or cur.seen == null
+                else
+                    false;
+                if (!same) {
+                    _ = self.removeKnown(cp);
+                    self.pushKnown(cur);
+                }
+                continue;
+            }
+            if (self.knownIndex(cur.pos)) |i| {
+                var entry = self.known[i];
+                const newest = self.lastKnownIndex(cp) == i;
+                const seen_changed = cur.seen != null and !std.meta.eql(entry.seen, cur.seen);
+                if (newest and !seen_changed) continue;
+                if (cur.seen != null) entry.seen = cur.seen;
+                self.removeKnownAt(i);
+                self.known[self.known_len] = entry;
+                self.known_len += 1;
+                changed = true;
+            } else if (self.knownCount(cp) == 0) {
+                // Practised before positions were tracked: nothing to compare with.
+                self.pushKnown(cur);
+                changed = true;
+            }
+        }
+        // Forget the positions of characters that have neither data nor a route.
+        var write: usize = 0;
+        for (self.known[0..self.known_len]) |entry| {
+            if (!self.hasData(entry.pos.cp) and findCurrent(current, entry.pos.cp) == null) continue;
+            self.known[write] = entry;
+            write += 1;
+        }
+        self.known_len = write;
+        return changed;
+    }
+
+    fn lastKnownIndex(self: *const LearningModel, cp: u21) ?usize {
+        var i = self.known_len;
+        while (i > 0) {
+            i -= 1;
+            if (self.known[i].pos.cp == cp) return i;
+        }
+        return null;
+    }
+
+    /// Practised characters that the bound layout puts at a position their
+    /// statistics were not made at. Changes nothing.
+    pub fn unconfirmedMoves(self: *const LearningModel, current: []const KnownPosition, out: []u21) []u21 {
+        var len: usize = 0;
+        for (current) |cur| {
+            if (len >= out.len) break;
+            if (!self.hasData(cur.pos.cp)) continue;
+            if (self.knownCount(cur.pos.cp) == 0) continue;
+            if (self.knownIndex(cur.pos) != null) continue;
+            out[len] = cur.pos.cp;
+            len += 1;
+        }
+        return out[0..len];
+    }
+
+    /// Keeps the statistics of `cps` at their current positions: each current
+    /// position joins the character's known positions.
+    pub fn confirmPositions(self: *LearningModel, cps: []const u21, current: []const KnownPosition) void {
+        for (cps) |cp| {
+            const cur = findCurrent(current, cp) orelse continue;
+            if (self.knownIndex(cur.pos)) |i| {
+                if (cur.seen != null) self.known[i].seen = cur.seen;
+                continue;
+            }
+            self.pushKnown(cur);
+        }
+    }
+
+    /// Starts `cps` over: their statistics and every transition into or out
+    /// of them are dropped, and only their current position stays known.
+    /// Unlocked letters stay unlocked; since they no longer have full
+    /// confidence, they hold back the next unlock until they are mastered
+    /// again. Streaks, the daily goal and the run history are untouched.
+    pub fn resetKeys(self: *LearningModel, cps: []const u21, current: []const KnownPosition) void {
+        if (cps.len == 0) return;
+        for (cps) |cp| {
+            for (self.stats[0..self.stat_len]) |*st| {
+                if (st.cp == cp) st.reset();
+            }
+            _ = self.removeKnown(cp);
+            if (findCurrent(current, cp)) |cur| self.pushKnown(cur);
+        }
+        self.dropBigramsWith(cps);
+        if (self.focus_cp) |fcp| {
+            if (containsCp(cps, fcp)) self.focus_history_len = 0;
+        }
+        self.refreshFocusKey();
+    }
+
+    fn dropBigramsWith(self: *LearningModel, cps: []const u21) void {
+        var write_idx: usize = 0;
+        for (self.bigrams[0..self.bigram_len]) |b| {
+            if (containsCp(cps, b.prev) or containsCp(cps, b.cur)) continue;
+            self.bigrams[write_idx] = b;
+            write_idx += 1;
+        }
+        self.bigram_len = write_idx;
+    }
+
     /// Layout-diff partial reset: preserves stats for characters whose physical route
     /// did not change, and resets stats (plus affected bigrams) for characters that moved.
     /// Returns the number of characters reset.
@@ -625,6 +843,13 @@ pub const LearningModel = struct {
 fn findPosition(positions: []const layout_profile.KeyPosition, cp: u21) ?layout_profile.KeyPosition {
     for (positions) |pos| {
         if (pos.cp == cp) return pos;
+    }
+    return null;
+}
+
+fn findCurrent(current: []const KnownPosition, cp: u21) ?KnownPosition {
+    for (current) |entry| {
+        if (entry.pos.cp == cp) return entry;
     }
     return null;
 }
@@ -832,4 +1057,133 @@ test "an edited layout replaces the unlock order and keeps the unlocked count" {
     // A shorter order clamps the count.
     model.setUnlockOrder("as");
     try t.expectEqualStrings("as", model.activeLetters());
+}
+
+fn testPos(cp: u21, slot: u16, combo_slot: ?u16) KnownPosition {
+    return .{ .pos = .{ .cp = cp, .layer = 0, .slot = slot, .shift = false, .combo_slot = combo_slot } };
+}
+
+fn practised(model: *LearningModel, cp: u21) void {
+    model.getOrAddStat(cp).?.* = .{ .cp = cp, .ema_ms = 250.0, .ema_acc = 0.98, .samples = 25, .acc_initialized = true };
+}
+
+test "a moved key keeps its statistics and is reported once per new position" {
+    const t = std.testing;
+    var model = LearningModel.init("asz", 3, .{});
+    practised(&model, 'a');
+    practised(&model, 'z');
+    const board_a = [_]KnownPosition{ testPos('a', 10, null), testPos('s', 11, null), testPos('z', 20, null) };
+    // 'z' becomes a combo, the unpractised 's' moves as well.
+    const board_b = [_]KnownPosition{ testPos('a', 10, null), testPos('s', 12, null), testPos('z', 21, 22) };
+    try t.expect(model.adoptPositions(&board_a));
+    var buf: [8]u21 = undefined;
+    try t.expectEqual(@as(usize, 0), model.unconfirmedMoves(&board_a, &buf).len);
+
+    _ = model.adoptPositions(&board_b);
+    try t.expectEqualSlices(u21, &.{'z'}, model.unconfirmedMoves(&board_b, &buf));
+    try t.expectEqual(@as(u32, 25), model.getStat('z').?.samples);
+    try t.expectEqual(@as(u16, 20), model.lastKnownPosition('z').?.pos.slot);
+
+    // Keeping it makes both keyboards known: switching back and forth stays quiet.
+    model.confirmPositions(&.{'z'}, &board_b);
+    const before = model.stats;
+    for (0..3) |_| {
+        _ = model.adoptPositions(&board_a);
+        try t.expectEqual(@as(usize, 0), model.unconfirmedMoves(&board_a, &buf).len);
+        try t.expectEqual(@as(u16, 20), model.lastKnownPosition('z').?.pos.slot);
+        _ = model.adoptPositions(&board_b);
+        try t.expectEqual(@as(usize, 0), model.unconfirmedMoves(&board_b, &buf).len);
+        try t.expectEqual(@as(?u16, 22), model.lastKnownPosition('z').?.pos.combo_slot);
+    }
+    try t.expectEqualSlices(KeyStat, before[0..model.stat_len], model.stats[0..model.stat_len]);
+}
+
+test "a per-character reset clears statistics and transitions but keeps the unlock" {
+    const t = std.testing;
+    var model = LearningModel.init("asdf", 3, .{ .target_wpm = 30.0 });
+    for ("asd") |ch| practised(&model, ch);
+    model.recordBigramSample('a', 's', 200.0);
+    model.recordBigramSample('s', 'd', 200.0);
+    model.recordBigramSample('d', 'a', 200.0);
+    const board = [_]KnownPosition{ testPos('a', 1, null), testPos('s', 2, null), testPos('d', 3, null) };
+    _ = model.adoptPositions(&board);
+    // Fast, accurate rounds make every active letter fully confident.
+    var c: RoundCollector = .{};
+    var ts: u64 = 1_000_000;
+    c.recordCommit('a', ts, false);
+    for (0..22) |_| for ("asd") |ch| {
+        ts += 200_000;
+        c.recordCommit(ch, ts, false);
+    };
+    _ = model.completeRound(&c);
+    const focus_before = model.focus_cp;
+    try t.expect(focus_before != null);
+
+    model.resetKeys(&.{'s'}, &board);
+    try t.expectEqual(@as(u32, 0), model.getStat('s').?.samples);
+    try t.expect(!model.hasData('s'));
+    try t.expect(model.hasData('a'));
+    for (model.bigrams[0..model.bigram_len]) |b| {
+        try t.expect(b.prev != 's' and b.cur != 's');
+    }
+    // Other transitions stay.
+    var kept_da = false;
+    for (model.bigrams[0..model.bigram_len]) |b| kept_da = kept_da or (b.prev == 'd' and b.cur == 'a');
+    try t.expect(kept_da);
+    try t.expectEqual(@as(?u21, 's'), model.focus_cp);
+    try t.expectEqual(@as(usize, 0), model.focus_history_len);
+    try t.expectEqual(@as(usize, 3), model.unlocked_count);
+
+    // The reset letter holds back the next unlock until it is mastered again.
+    var only_ad: RoundCollector = .{};
+    ts = 1_000_000;
+    only_ad.recordCommit('a', ts, false);
+    for (0..22) |_| for ("ad") |ch| {
+        ts += 200_000;
+        only_ad.recordCommit(ch, ts, false);
+    };
+    for (0..3) |_| try t.expectEqual(@as(?u8, null), model.completeRound(&only_ad).newly_unlocked);
+    try t.expectEqual(@as(?u8, 'f'), model.completeRound(&c).newly_unlocked);
+}
+
+test "keys the layout cannot produce stay untouched and a full position set drops the oldest" {
+    const t = std.testing;
+    var model = LearningModel.init("az", 2, .{});
+    practised(&model, 'z');
+    var buf: [4]u21 = undefined;
+    _ = model.adoptPositions(&.{testPos('z', 1, null)});
+    // Not producible: never reported, statistics stay.
+    const without_z = [_]KnownPosition{testPos('a', 5, null)};
+    _ = model.adoptPositions(&without_z);
+    try t.expectEqual(@as(usize, 0), model.unconfirmedMoves(&without_z, &buf).len);
+    try t.expectEqual(@as(u32, 25), model.getStat('z').?.samples);
+    try t.expect(model.lastKnownPosition('z') != null);
+    // Back at its known position: quiet.
+    try t.expectEqual(@as(usize, 0), model.unconfirmedMoves(&.{testPos('z', 1, null)}, &buf).len);
+
+    for (2..7) |slot| model.confirmPositions(&.{'z'}, &.{testPos('z', @intCast(slot), null)});
+    var count: usize = 0;
+    for (model.knownSlice()) |entry| {
+        if (entry.pos.cp == 'z') count += 1;
+    }
+    try t.expectEqual(max_positions_per_key, count);
+    try t.expectEqualSlices(u21, &.{'z'}, model.unconfirmedMoves(&.{testPos('z', 1, null)}, &buf));
+    try t.expectEqual(@as(usize, 0), model.unconfirmedMoves(&.{testPos('z', 6, null)}, &buf).len);
+}
+
+test "the newest seen keys of a known position follow the keyboard" {
+    const t = std.testing;
+    var model = LearningModel.init("z", 1, .{});
+    practised(&model, 'z');
+    var on_a = testPos('z', 1, null);
+    on_a.seen = .{ .board = boardHash("a"), .key_index = 4 };
+    var on_b = testPos('z', 1, null);
+    on_b.seen = .{ .board = boardHash("b"), .key_index = 9 };
+    try t.expect(model.adoptPositions(&.{on_a}));
+    try t.expect(!model.adoptPositions(&.{on_a}));
+    try t.expect(model.adoptPositions(&.{on_b}));
+    try t.expectEqual(@as(u16, 9), model.lastKnownPosition('z').?.seen.?.key_index);
+    // A layout without board details keeps what was seen.
+    try t.expect(!model.adoptPositions(&.{testPos('z', 1, null)}));
+    try t.expectEqual(boardHash("b"), model.lastKnownPosition('z').?.seen.?.board);
 }

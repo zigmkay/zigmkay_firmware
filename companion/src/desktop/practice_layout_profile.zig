@@ -164,6 +164,57 @@ pub const KeyPosition = struct {
     }
 };
 
+/// How a character's position differs between two layouts, most telling first.
+pub const MoveReason = enum(u8) {
+    key_to_combo,
+    combo_to_key,
+    other_combo,
+    other_layer,
+    back_on_base_layer,
+    needs_shift,
+    drops_shift,
+    other_hand,
+    other_finger,
+    other_row,
+    other_column,
+};
+
+pub const max_move_reasons = @typeInfo(MoveReason).@"enum".field_values.len;
+
+/// Lists what changed between `old` and `new` positions of one character.
+pub fn describeMove(old: KeyPosition, new: KeyPosition, out: *[max_move_reasons]MoveReason) []const MoveReason {
+    var len: usize = 0;
+    const push = struct {
+        fn f(buf: *[max_move_reasons]MoveReason, n: *usize, reason: MoveReason) void {
+            buf[n.*] = reason;
+            n.* += 1;
+        }
+    }.f;
+    if (old.combo_slot == null and new.combo_slot != null) push(out, &len, .key_to_combo);
+    if (old.combo_slot != null and new.combo_slot == null) push(out, &len, .combo_to_key);
+    if (old.layer != new.layer) push(out, &len, if (new.layer == 0) .back_on_base_layer else .other_layer);
+    if (!old.shift and new.shift) push(out, &len, .needs_shift);
+    if (old.shift and !new.shift) push(out, &len, .drops_shift);
+    const both_combos = old.combo_slot != null and new.combo_slot != null;
+    if (both_combos and (old.slot != new.slot or old.combo_slot.? != new.combo_slot.?)) {
+        push(out, &len, .other_combo);
+    } else if (!both_combos and old.slot != new.slot) {
+        const old_finger: u16 = old.slot & 0xf;
+        const new_finger: u16 = new.slot & 0xf;
+        const old_hand = (@as(Finger, @fromBackingInt(@intCast(@min(old_finger, Finger.count - 1))))).hand();
+        const new_hand = (@as(Finger, @fromBackingInt(@intCast(@min(new_finger, Finger.count - 1))))).hand();
+        if (old_hand != new_hand and old_hand != .neutral and new_hand != .neutral) {
+            push(out, &len, .other_hand);
+        } else if (old_finger != new_finger) {
+            push(out, &len, .other_finger);
+        }
+        if (((old.slot >> 4) & 3) != ((new.slot >> 4) & 3)) push(out, &len, .other_row);
+        if (len == 0 or (old_finger == new_finger and ((old.slot >> 4) & 3) == ((new.slot >> 4) & 3)))
+            push(out, &len, .other_column);
+    }
+    return out[0..len];
+}
+
 pub const DeriveOptions = struct {
     host_layout: []const u8 = "default",
     fidelity: Fidelity = .schematic,
@@ -1546,4 +1597,33 @@ test "QWERTY vs Colemak-DH unlock zones, low-vowel detection, opposite-hand shif
         .host_layout = "de-DE",
     });
     try t.expect(!std.mem.eql(u8, &colemak.profile_hash, &colemak_de.profile_hash));
+}
+
+test "describeMove names combo, layer, shift and finger changes" {
+    const t = std.testing;
+    var buf: [max_move_reasons]MoveReason = undefined;
+    const left_index_home: u16 = @backingInt(Finger.left_index) | (2 << 4);
+    const right_index_home: u16 = @backingInt(Finger.right_index) | (2 << 4);
+    const left_index_bottom: u16 = @backingInt(Finger.left_index) | (3 << 4);
+    const key: KeyPosition = .{ .cp = 'z', .layer = 0, .slot = left_index_home, .shift = false };
+    var combo = key;
+    combo.combo_slot = left_index_bottom;
+    try t.expectEqualSlices(MoveReason, &.{.key_to_combo}, describeMove(key, combo, &buf));
+    try t.expectEqualSlices(MoveReason, &.{.combo_to_key}, describeMove(combo, key, &buf));
+    var layered = key;
+    layered.layer = 1;
+    try t.expectEqualSlices(MoveReason, &.{.other_layer}, describeMove(key, layered, &buf));
+    try t.expectEqualSlices(MoveReason, &.{.back_on_base_layer}, describeMove(layered, key, &buf));
+    var shifted = key;
+    shifted.shift = true;
+    try t.expectEqualSlices(MoveReason, &.{.needs_shift}, describeMove(key, shifted, &buf));
+    var lower = key;
+    lower.slot = left_index_bottom;
+    try t.expectEqualSlices(MoveReason, &.{.other_row}, describeMove(key, lower, &buf));
+    var right = key;
+    right.slot = right_index_home;
+    try t.expectEqualSlices(MoveReason, &.{.other_hand}, describeMove(key, right, &buf));
+    var inner = key;
+    inner.slot = left_index_home | (1 << 6);
+    try t.expectEqualSlices(MoveReason, &.{.other_column}, describeMove(key, inner, &buf));
 }
