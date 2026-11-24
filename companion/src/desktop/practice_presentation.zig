@@ -743,18 +743,19 @@ fn drawInlineRundown(
     if (rd) |r| {
         var weak_buf: [160]u8 = undefined;
         var w_writer: std.Io.Writer = .fixed(&weak_buf);
-        if (r.weak_key_len > 0) {
-            w_writer.writeAll("Weakest keys: ") catch {};
-            for (r.weak_keys[0..r.weak_key_len], 0..) |wk, i| {
-                if (i > 0) w_writer.writeAll(", ") catch {};
-                var cb: [4]u8 = undefined;
-                const cn = std.unicode.utf8Encode(wk.cp, &cb) catch 0;
-                if (cn == 1) cb[0] = std.ascii.toUpper(cb[0]);
-                w_writer.print("{s} ({d:.0}%)", .{ cb[0..cn], wk.confidence * 100.0 }) catch {};
-            }
+        // Mastered keys are not weak; list only keys still below full confidence.
+        var shown_keys: usize = 0;
+        for (r.weak_keys[0..r.weak_key_len]) |wk| {
+            if (wk.confidence >= 1.0) continue;
+            w_writer.writeAll(if (shown_keys == 0) "Weakest keys: " else ", ") catch {};
+            shown_keys += 1;
+            var cb: [4]u8 = undefined;
+            const cn = std.unicode.utf8Encode(wk.cp, &cb) catch 0;
+            if (cn == 1) cb[0] = std.ascii.toUpper(cb[0]);
+            w_writer.print("{s} ({d:.0}%)", .{ cb[0..cn], wk.confidence * 100.0 }) catch {};
         }
         if (r.weak_bigram_len > 0) {
-            if (r.weak_key_len > 0) w_writer.writeAll("  ·  ") catch {};
+            if (shown_keys > 0) w_writer.writeAll("  ·  ") catch {};
             w_writer.writeAll("Slowest: ") catch {};
             for (r.weak_bigrams[0..r.weak_bigram_len], 0..) |wb, i| {
                 if (i > 0) w_writer.writeAll(", ") catch {};
@@ -762,7 +763,10 @@ fn drawInlineRundown(
                 var b2: [4]u8 = undefined;
                 const n1 = std.unicode.utf8Encode(wb.prev, &b1) catch 0;
                 const n2 = std.unicode.utf8Encode(wb.cur, &b2) catch 0;
-                w_writer.print("{s}{s} ({d:.0}ms)", .{ b1[0..n1], b2[0..n2], wb.ema_ms }) catch {};
+                const p1 = if (wb.prev == ' ') "Space" else b1[0..n1];
+                const p2 = if (wb.cur == ' ') "Space" else b2[0..n2];
+                const sep = if (wb.prev == ' ' or wb.cur == ' ') " → " else "";
+                w_writer.print("{s}{s}{s} ({d:.0}ms)", .{ p1, sep, p2, wb.ema_ms }) catch {};
             }
         }
         const weak_summary = w_writer.buffered();
