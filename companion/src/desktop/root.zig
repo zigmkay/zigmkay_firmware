@@ -5,6 +5,7 @@ pub const label_cache = @import("label_cache.zig");
 pub const practice = @import("practice.zig");
 pub const practice_layout_profile = @import("practice_layout_profile.zig");
 pub const practice_model = @import("practice_model.zig");
+pub const practice_key_progress = @import("practice_key_progress.zig");
 pub const practice_storage = @import("practice_storage.zig");
 pub const practice_view = @import("practice_view.zig");
 pub const practice_controller = @import("practice_controller.zig");

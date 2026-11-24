@@ -32,6 +32,17 @@ derived directly from your layout's home row and English letter frequency:
   confidence (at most one new key unlocks per round, with a 2-round minimum
   cooldown so progress stays calm and steady).
 
+Two hairline bars under each practised chip show what the key still needs:
+speed toward the target on the left, first-try hits in its last 30 presses on
+the right, with a tick at the 28 it needs. Hover a chip for the numbers; the
+header names them for the focus key.
+
+When a letter has gone **four rounds without progress**, a calm note appears
+between rounds. If misses hold it back, it suggests slowing down and offers a
+**slow round** around that letter whose speed does not count. If only speed
+holds it back, it offers to lower the target by one preset step. **Dismiss**
+hides the note for that letter until it moves again.
+
 ### Calm typing stage & Stop-on-error flow
 
 The text card shows a clean three-line monospace window with live **WPM**,
@@ -44,6 +55,11 @@ The text card shows a clean three-line monospace window with live **WPM**,
   round (in Zig code drills, Tab inserts four spaces), and **Enter** or
   **Space** after a round completes to start the next round immediately.
 - Leaving the window automatically pauses the active round.
+
+After each round the rundown names the keys that turned green and, for letters
+that are not green yet, what changed this round (for example
+"hits 25 → 26 / 30 · 2 short" or "speed 17 → 19 WPM · needs 20"), what the
+next letter waits for, and which keys you missed.
 
 ![Inline round rundown with WPM delta, newly unlocked key badge, and Weak-spot drill CTA](screenshots/typing-practice/rundown.png)
 

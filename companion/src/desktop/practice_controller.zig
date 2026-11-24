@@ -8,6 +8,7 @@ const layout_profile = @import("practice_layout_profile.zig");
 const model = @import("practice_model.zig");
 const generator = @import("practice_generator.zig");
 const storage = @import("practice_storage.zig");
+const key_progress = @import("practice_key_progress.zig");
 
 pub const Digest = [32]u8;
 pub const Mode = enum { tutor, test_keys };
@@ -53,6 +54,57 @@ pub const Rundown = struct {
     weak_bigram_len: usize = 0,
     stage: Stage = .home_row,
     weak_spot_drill: bool = false,
+    /// Keys of this round that turned green or still are not, most telling first.
+    changes: [max_round_changes]KeyChange = undefined,
+    change_len: usize = 0,
+    /// The round was typed as a slow round; its speed did not count.
+    slow_round: bool = false,
+
+    pub fn changeSlice(self: *const Rundown) []const KeyChange {
+        return self.changes[0..self.change_len];
+    }
+};
+
+pub const max_round_changes: usize = 8;
+
+/// One key of a finished round, before and after the round was counted.
+pub const KeyChange = struct {
+    cp: u21,
+    before: model.KeyStat,
+    after: model.KeyStat,
+    presses: u32,
+    misses: u32,
+    newly_green: bool,
+};
+
+fn isUnlockedLetter(lm: *const model.LearningModel, cp: u21) bool {
+    return cp >= 'a' and cp <= 'z' and lm.isUnlocked(@intCast(cp));
+}
+
+/// The next lower target preset, if any.
+pub fn lowerPreset(target: f32) ?f32 {
+    var i = target_presets.len;
+    while (i > 0) : (i -= 1) {
+        if (target_presets[i - 1] < target - 0.5) return target_presets[i - 1];
+    }
+    return null;
+}
+
+/// Target speeds offered in Settings and by the stuck help, slowest first.
+pub const target_presets = [_]f32{ 15, 20, 25, 35, 45 };
+
+/// Rounds a letter may go without progress before the Tutor offers help.
+pub const stuck_after_rounds: u8 = 4;
+
+pub const StuckReason = enum { hits, speed };
+
+pub const StuckHelp = struct {
+    cp: u21,
+    reason: StuckReason,
+    progress: key_progress.KeyProgress,
+    rounds: u8,
+    /// The next lower target preset, when speed is what holds the key back.
+    lower_target: ?f32,
 };
 
 pub const TestKeysTelemetry = struct {
@@ -194,6 +246,10 @@ pub const Intent = union(enum) {
     reset_keys: KeyReset,
     /// Resets the listed moved characters and keeps the others.
     resolve_layout_changes: KeyReset,
+    /// Stops offering stuck help for this letter until it makes progress.
+    dismiss_stuck: u21,
+    /// Starts a round around this letter; a slow round does not count speed.
+    practise_key: struct { cp: u21, slow: bool },
 };
 
 pub const Action = struct { generation: u64, snapshot: Digest, intent: Intent };
@@ -227,6 +283,13 @@ pub const Controller = struct {
     boards: model.BoardSnapshots = .{},
     /// `model.boardHash` of the current keyboard; null until `adoptBoard`.
     board_hash: ?u64 = null,
+    /// Rounds in a row without progress, per position in the unlock order.
+    stall_rounds: [26]u8 = @splat(0),
+    stall_best: [26]f32 = @splat(0),
+    stall_dismissed: u32 = 0,
+    /// The next round, and the current one, are slow rounds.
+    slow_round_next: bool = false,
+    slow_round: bool = false,
 
     custom_text: [2048]u8 = @splat(0),
     custom_text_len: usize = 0,
@@ -243,6 +306,7 @@ pub const Controller = struct {
     /// Drops unsaved work of the bound profile before another profile is bound.
     pub fn discardPending(self: *Controller) void {
         self.review_len = 0;
+        self.clearStalls();
         self.pending_run = null;
         self.reset_requested = false;
         self.needs_persist = false;
@@ -256,6 +320,7 @@ pub const Controller = struct {
         profile: layout_profile.LayoutProfile,
         loaded_state: ?storage.ProfileState,
     ) usize {
+        self.clearStalls();
         self.profile = profile;
         self.profile_bound = true;
 
@@ -452,6 +517,8 @@ pub const Controller = struct {
                 self.learning.config.target_wpm = clamped;
                 self.persisted.target_wpm = clamped;
                 self.needs_persist = true;
+                // Progress is measured against the new target from here on.
+                self.clearStalls();
                 break :blk;
             },
             .set_guidance => |g| blk: {
@@ -492,6 +559,8 @@ pub const Controller = struct {
             .keep_moved_keys => |hash| try self.keepMovedKeys(hash),
             .reset_keys => |request| try self.resetKeys(request),
             .resolve_layout_changes => |request| try self.resolveLayoutChanges(request),
+            .dismiss_stuck => |cp| self.dismissStuck(cp),
+            .practise_key => |p| try self.practiseKey(p.cp, p.slow),
         };
     }
 
@@ -551,6 +620,115 @@ pub const Controller = struct {
         try self.resetKeys(request);
     }
 
+    /// Whether a key counts as learned for the strip and the unlock.
+    pub fn isGreen(self: *const Controller, st: model.KeyStat) bool {
+        return st.confidence(self.learning.config.target_wpm) >= 1.0;
+    }
+
+    const RoundChanges = struct { items: [max_round_changes]KeyChange = undefined, len: usize = 0 };
+
+    /// Keys of the finished round worth naming: those that just turned green
+    /// first, then unlocked letters that still are not green.
+    fn roundChanges(self: *const Controller, before: []const model.KeyStat) RoundChanges {
+        var out: RoundChanges = .{};
+        const collector = &self.session.collector;
+        for (0..2) |pass| {
+            for (collector.buckets[0..before.len], before) |b, old| {
+                if (out.len == max_round_changes) return out;
+                if (b.cp == ' ') continue;
+                const after = self.learning.getStat(b.cp) orelse continue;
+                const newly_green = !self.isGreen(old) and self.isGreen(after);
+                const still_open = !self.isGreen(after) and isUnlockedLetter(&self.learning, b.cp);
+                if ((pass == 0 and !newly_green) or (pass == 1 and !still_open)) continue;
+                out.items[out.len] = .{
+                    .cp = b.cp,
+                    .before = old,
+                    .after = after,
+                    .presses = b.total_positions,
+                    .misses = b.total_positions - b.first_try_hits,
+                    .newly_green = newly_green,
+                };
+                out.len += 1;
+            }
+        }
+        return out;
+    }
+
+    fn clearStalls(self: *Controller) void {
+        self.stall_rounds = @splat(0);
+        self.stall_best = @splat(0);
+        self.stall_dismissed = 0;
+        self.slow_round_next = false;
+    }
+
+    /// Counts, per unlocked letter typed this round, how many rounds in a row
+    /// its confidence did not rise.
+    fn trackStalls(self: *Controller) void {
+        const lm = &self.learning;
+        const collector = &self.session.collector;
+        for (lm.unlock_order[0..@min(lm.unlocked_count, 26)], 0..) |ch, i| {
+            const typed = for (collector.buckets[0..collector.bucket_len]) |b| {
+                if (b.cp == ch) break true;
+            } else false;
+            if (!typed) continue;
+            const st = lm.getStat(ch) orelse continue;
+            const conf = st.confidence(lm.config.target_wpm);
+            const bit = @as(u32, 1) << @intCast(i);
+            if (self.isGreen(st) or conf > self.stall_best[i] + 0.02) {
+                self.stall_best[i] = @max(self.stall_best[i], conf);
+                self.stall_rounds[i] = 0;
+                self.stall_dismissed &= ~bit;
+            } else {
+                self.stall_rounds[i] +|= 1;
+            }
+        }
+    }
+
+    /// The letter that has gone longest without progress, once it reached
+    /// `stuck_after_rounds`, with the reason that holds it back.
+    pub fn stuckHelp(self: *const Controller) ?StuckHelp {
+        if (self.config.mode != .tutor) return null;
+        const lm = &self.learning;
+        var pick: ?usize = null;
+        for (0..@min(lm.unlocked_count, 26)) |i| {
+            if (self.stall_rounds[i] < stuck_after_rounds) continue;
+            if (self.stall_dismissed & (@as(u32, 1) << @intCast(i)) != 0) continue;
+            if (pick == null or self.stall_rounds[i] > self.stall_rounds[pick.?]) pick = i;
+        }
+        const i = pick orelse return null;
+        const ch = lm.unlock_order[i];
+        const st = lm.getStat(ch) orelse return null;
+        if (self.isGreen(st)) return null;
+        const kp = key_progress.of(st, lm.config.target_wpm);
+        const reason: StuckReason = switch (kp.blocker) {
+            .hits => .hits,
+            .speed => .speed,
+            .presses, .none => return null,
+        };
+        return .{
+            .cp = ch,
+            .reason = reason,
+            .progress = kp,
+            .rounds = self.stall_rounds[i],
+            .lower_target = if (reason == .speed) lowerPreset(self.config.target_wpm) else null,
+        };
+    }
+
+    fn dismissStuck(self: *Controller, cp: u21) void {
+        const lm = &self.learning;
+        for (lm.unlock_order[0..@min(lm.unlock_len, 26)], 0..) |ch, i| {
+            if (ch == cp) self.stall_dismissed |= @as(u32, 1) << @intCast(i);
+        }
+    }
+
+    /// Starts a round built around `cp`; a slow round leaves its latencies out.
+    fn practiseKey(self: *Controller, cp: u21, slow: bool) !void {
+        self.dismissStuck(cp);
+        if (isUnlockedLetter(&self.learning, cp)) self.learning.focus_cp = cp;
+        self.slow_round_next = slow;
+        try self.start();
+    }
+
     pub fn resetProgress(self: *Controller) void {
         const order = if (self.profile_bound and self.profile.unlock_len > 0)
             self.profile.unlockSlice()
@@ -571,6 +749,7 @@ pub const Controller = struct {
         self.persisted.unlocked_count = @intCast(initial);
         self.adoptCurrent();
         self.last_round_wpm = null;
+        self.clearStalls();
         self.rundown = null;
         self.pending_run = null;
         self.reset_requested = true;
@@ -616,6 +795,8 @@ pub const Controller = struct {
         self.captured = self.current;
         self.captured_config = self.config;
         self.active = true;
+        self.slow_round = self.slow_round_next;
+        self.slow_round_next = false;
         self.failure = null;
         self.rundown = null;
         self.round_recorded = false;
@@ -710,7 +891,21 @@ pub const Controller = struct {
         const round_acc: f32 = @floatCast(self.session.accuracy());
         const active_sec: f32 = @as(f32, @floatFromInt(self.session.duration(now))) / 1_000_000.0;
 
-        const outcome = self.learning.completeRound(&self.session.collector);
+        const collector = &self.session.collector;
+        var before: [model.max_round_keys]model.KeyStat = undefined;
+        for (collector.buckets[0..collector.bucket_len], 0..) |b, i| {
+            before[i] = self.learning.getStat(b.cp) orelse .{ .cp = b.cp };
+        }
+        // A slow round trains clean presses; its latencies would only drag
+        // the speed estimate down.
+        if (self.slow_round) {
+            for (collector.buckets[0..collector.bucket_len]) |*b| b.dt_len = 0;
+            collector.bigram_len = 0;
+        }
+
+        const outcome = self.learning.completeRound(collector);
+        const changes = self.roundChanges(before[0..collector.bucket_len]);
+        self.trackStalls();
         if (self.utc_now_sec > 0) {
             storage.recordDailyPractice(&self.persisted, self.utc_now_sec, @intFromFloat(@max(1.0, @round(active_sec))));
         }
@@ -741,6 +936,9 @@ pub const Controller = struct {
         };
         @memcpy(rd.weak_keys[0..wk_slice.len], wk_slice);
         @memcpy(rd.weak_bigrams[0..wb_slice.len], wb_slice);
+        rd.changes = changes.items;
+        rd.change_len = changes.len;
+        rd.slow_round = self.slow_round;
         self.rundown = rd;
 
         var pr: PendingRun = .{
@@ -1149,4 +1347,67 @@ test "answering the layout question resets the chosen keys and keeps the rest" {
     owner.resetProgress();
     try t.expectEqual(@as(usize, 0), owner.reviewSlice().len);
     try t.expect(owner.learning.knownSlice().len > 0);
+}
+
+test "rundown names keys that turned green and stuck help appears after four flat rounds" {
+    const t = std.testing;
+    var owner = Controller.init(@splat(1));
+    var profile: layout_profile.LayoutProfile = .{
+        .unlock_len = 3,
+        .zone1_len = 2,
+        .profile_hash = @splat(0x45),
+    };
+    profile.unlock_order[0] = 'a';
+    profile.unlock_order[1] = 's';
+    profile.unlock_order[2] = 'd';
+    _ = owner.bindProfile(profile, null);
+
+    // 'a' comes quickly, 's' always takes 900 ms (about 13 WPM against 20).
+    const drill = "asasasasasasasasasasasasasasasasasasasasasas";
+    var now: u64 = 1_000_000;
+    const Play = struct {
+        fn round(o: *Controller, text: []const u8, clock: *u64) !void {
+            try o.session.loadWithMode(text, .stop_on_error);
+            for (text) |ch| {
+                clock.* += if (ch == 's') 900_000 else 200_000;
+                _ = try o.insertOs(true, &[_]u8{ch}, clock.*, false);
+            }
+        }
+    };
+    for (0..5) |round_idx| {
+        try owner.start();
+        try Play.round(&owner, drill, &now);
+        const rd = owner.rundown.?;
+        if (round_idx == 0) {
+            try t.expectEqual(@as(u21, 'a'), rd.changeSlice()[0].cp);
+            try t.expect(rd.changeSlice()[0].newly_green);
+        }
+        const open = rd.changeSlice()[rd.change_len - 1];
+        try t.expectEqual(@as(u21, 's'), open.cp);
+        try t.expect(!open.newly_green);
+        try t.expectEqual(@as(u32, 0), open.misses);
+        if (round_idx < 4) try t.expect(owner.stuckHelp() == null);
+    }
+    const help = owner.stuckHelp().?;
+    try t.expectEqual(@as(u21, 's'), help.cp);
+    try t.expectEqual(StuckReason.speed, help.reason);
+    try t.expectEqual(@as(?f32, 15), help.lower_target);
+
+    try owner.dispatch(owner.action(.{ .dismiss_stuck = 's' }), now);
+    try t.expect(owner.stuckHelp() == null);
+
+    // A slow round counts hits but leaves the latencies out.
+    const before = owner.learning.getStat('s').?;
+    try owner.dispatch(owner.action(.{ .practise_key = .{ .cp = 's', .slow = true } }), now);
+    try t.expect(owner.slow_round);
+    try Play.round(&owner, drill, &now);
+    try t.expect(owner.rundown.?.slow_round);
+    const after = owner.learning.getStat('s').?;
+    try t.expectEqual(before.ema_ms, after.ema_ms);
+    try t.expectEqual(before.samples, after.samples);
+    try owner.start();
+    try t.expect(!owner.slow_round);
+
+    try t.expectEqual(@as(?f32, 25), lowerPreset(35));
+    try t.expectEqual(@as(?f32, null), lowerPreset(15));
 }

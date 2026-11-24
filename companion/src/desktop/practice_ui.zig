@@ -607,6 +607,10 @@ fn drawTutorWorkspace(
         const choice = try presentation.layoutChangeStrip(owner, theme, .{ .x = bounds.x, .y = bounds.y + conf_h + gap, .w = bounds.w, .h = strip_h }, pending);
         if (choice == .review) sheets_ui.openSheet(&view.sheet, &view.picks, .layout_changes);
         top_h += gap + strip_h;
+    } else if (presentation.stuckHelp(owner)) |help| {
+        const strip_h = presentation.help_strip_h;
+        try presentation.stuckStrip(owner, theme, .{ .x = bounds.x, .y = bounds.y + conf_h + gap, .w = bounds.w, .h = strip_h }, help, pending);
+        top_h += gap + strip_h;
     }
 
     // Resolve active hint once for both typing-card footer and keyboard overlay
@@ -851,7 +855,7 @@ fn statusNote(owner: *const control.Controller, input: Input) []const u8 {
 pub fn apply(owner: *control.Controller, view: *View, rendered: control.Action, input: Input) !void {
     try owner.dispatch(rendered, input.now_us);
     switch (rendered.intent) {
-        .start, .new_exercise, .next_round, .set_stage, .start_weak_spot, .reset_progress, .reset_keys, .resolve_layout_changes => {
+        .start, .new_exercise, .next_round, .set_stage, .start_weak_spot, .reset_progress, .reset_keys, .resolve_layout_changes, .practise_key => {
             view.scroll.at = null;
             view.drawn_len = 0;
             view.sheet = .none;
