@@ -11,8 +11,10 @@ pub fn build(b: *std.Build) void {
     // An explicit Linux ABI makes host tools use Zig's shipped libc inputs.
     // Otherwise a detectable system compiler with unavailable SDK headers can
     // make native libc discovery fail before Zig uses its bundled fallback.
+    // It is glibc, the only Linux libc the bundle ships: when Zig cannot read
+    // the host's ABI from `/usr/bin/env` it would otherwise fall back to musl.
     if (b.graph.host.result.os.tag == .linux) {
-        b.graph.host.query.abi = b.graph.host.result.abi;
+        b.graph.host.query.abi = .gnu;
     }
     const step = b.step("build-project", "Build the exported firmware offline");
     b.default_step = step;
