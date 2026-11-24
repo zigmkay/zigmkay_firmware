@@ -11,6 +11,7 @@ const view = desktop.practice_view;
 const control = desktop.practice_controller;
 const lp = desktop.practice_layout_profile;
 const keyboard_view = @import("practice_keyboard_ui.zig");
+const key_change = @import("practice_key_change_ui.zig");
 
 pub const Scroll = struct { position: f32 = 0, at: ?u64 = null };
 
@@ -227,6 +228,23 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
             .margin = .{},
         });
 
+        // A moved practised letter waits for the layout-change answer.
+        const moved = for (owner.reviewSlice()) |cp| {
+            if (key_change.groupOf(cp) == ch) break true;
+        } else false;
+        if (moved) {
+            const dot = dvui.box(@src(), .{}, .{
+                .id_extra = 0x5400 + i,
+                .rect = .{ .x = chip_rect.x + chip_rect.w - 8, .y = chip_rect.y + 3, .w = 5, .h = 5 },
+                .background = true,
+                .color_fill = .{ .color = theme.warning },
+                .corners = .all(2.5),
+                .padding = .{},
+                .margin = .{},
+            });
+            dot.deinit();
+        }
+
         if (is_focus) {
             const bar_w = @min(10.0, chip_w * 0.5);
             const underline = dvui.box(@src(), .{}, .{
@@ -247,6 +265,100 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
 
 /// Calm Typing Panel: metrics + daily goal bar, single 3-line monospace text stage
 /// (or inline rundown on completion), run progress bar, and next-key/shortcut footer.
+pub const StripChoice = enum { none, review };
+
+pub const layout_change_strip_h: f32 = 46;
+
+/// Whether the layout-change question may show: practised characters moved
+/// and no round is being typed. It never interrupts a run.
+pub fn showsLayoutChangeStrip(owner: *const control.Controller) bool {
+    return owner.config.mode == .tutor and owner.reviewSlice().len > 0 and owner.session.state != .running;
+}
+
+/// Asks once whether practised characters that moved keep their statistics.
+pub fn layoutChangeStrip(
+    owner: *const control.Controller,
+    theme: ui.Theme,
+    bounds: dvui.Rect,
+    pending: *?control.Intent,
+) !StripChoice {
+    const strip = dvui.box(@src(), .{}, .{
+        .rect = bounds,
+        .background = true,
+        .color_fill = .{ .color = theme.panel },
+        .color_border = .{ .color = ui.mix(theme.panel, theme.warning, 0.55) },
+        .border = .all(1),
+        .corners = .all(10),
+        .padding = .{},
+        .margin = .{},
+        .tag = "practice.layout_changes.strip",
+    });
+    defer strip.deinit();
+
+    const arena = dvui.currentWindow().arena();
+    var group_buf: [desktop.practice_model.max_tracked_keys]u21 = undefined;
+    const entries = key_change.groups(owner.reviewSlice(), &group_buf);
+    if (entries.len == 0) return .none;
+    const dot = dvui.box(@src(), .{}, .{
+        .rect = .{ .x = 14, .y = bounds.h / 2 - 4, .w = 8, .h = 8 },
+        .background = true,
+        .color_fill = .{ .color = theme.warning },
+        .corners = .all(4),
+        .padding = .{},
+        .margin = .{},
+    });
+    dot.deinit();
+
+    var choice: StripChoice = .none;
+    const by: f32 = (bounds.h - 30) / 2;
+    var rx = bounds.w - 10;
+    var name_buf: [4]u8 = undefined;
+    const text = if (entries.len == 1) blk: {
+        const group = entries[0];
+        const name = key_change.displayOf(group, &name_buf);
+        const reset_lbl = try std.fmt.allocPrint(arena, "Reset {s}", .{name});
+        const reset_w = ui.editorFont(reset_lbl, 14).textSize(reset_lbl).w + 30;
+        rx -= reset_w;
+        if (ui.dangerButton(theme, null, reset_lbl, "practice.layout_changes.reset_one", .{ .x = rx, .y = by, .w = reset_w, .h = 30 }) and pending.* == null) {
+            var request: control.KeyReset = .{ .profile_hash = owner.profile.profile_hash };
+            request.add(group);
+            pending.* = .{ .resolve_layout_changes = request };
+        }
+        rx -= 8 + 132;
+        if (ui.button(theme, "Keep statistics", "practice.layout_changes.keep_one", .{ .x = rx, .y = by, .w = 132, .h = 30 }) and pending.* == null) {
+            pending.* = .{ .keep_moved_keys = owner.profile.profile_hash };
+        }
+        rx -= 8 + 116;
+        if (ui.button(theme, "Show change", "practice.layout_changes.show", .{ .x = rx, .y = by, .w = 116, .h = 30 })) choice = .review;
+
+        const cp = key_change.representative(group, owner.reviewSlice());
+        var buf: [desktop.practice_layout_profile.max_routes]desktop.practice_model.KnownPosition = undefined;
+        const now = for (owner.currentPositions(&buf)) |entry| {
+            if (entry.pos.cp == cp) break entry;
+        } else null;
+        const reason = if (owner.learning.lastKnownPosition(cp)) |old| if (now) |n|
+            try key_change.describe(arena, old.pos, n.pos)
+        else
+            "moved" else "moved";
+        break :blk try std.fmt.allocPrint(arena, "{s} sits elsewhere on this keyboard ({s}). Keep its statistics or practise it from scratch?", .{ name, reason });
+    } else blk: {
+        rx -= 150;
+        if (ui.iconButton(theme, null, "Review changes…", "practice.layout_changes.review", .{ .x = rx, .y = by, .w = 150, .h = 30 }, true)) choice = .review;
+        rx -= 8 + 100;
+        if (ui.button(theme, "Keep all", "practice.layout_changes.keep_all_strip", .{ .x = rx, .y = by, .w = 100, .h = 30 }) and pending.* == null) {
+            pending.* = .{ .keep_moved_keys = owner.profile.profile_hash };
+        }
+        var names: std.ArrayList(u8) = .empty;
+        for (entries, 0..) |group, i| {
+            if (i > 0) try names.appendSlice(arena, "  ");
+            try names.appendSlice(arena, key_change.displayOf(group, &name_buf));
+        }
+        break :blk try std.fmt.allocPrint(arena, "{d} practised characters sit elsewhere on this keyboard: {s}", .{ entries.len, names.items });
+    };
+    label(text, .{ .x = 32, .y = 0, .w = @max(0, rx - 44), .h = bounds.h }, 14, theme.text, "practice.layout_changes.question");
+    return choice;
+}
+
 pub fn typingCard(
     owner: *const control.Controller,
     theme: ui.Theme,

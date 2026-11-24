@@ -15,6 +15,9 @@ const control = desktop.practice_controller;
 const storage = desktop.practice_storage;
 
 pub const Sheet = sheets_ui.Sheet;
+pub const Picks = sheets_ui.Picks;
+pub const BoardInfo = sheets_ui.BoardInfo;
+pub const BoardLookup = sheets_ui.BoardLookup;
 
 pub const Frame = struct {
     /// Live frames must come from the coherent identity-checked session adapter.
@@ -62,6 +65,8 @@ pub const Input = struct {
     diagnostic: []const u8 = "",
     event_times: []const desktop.practice.EventTime = &.{},
     runs: []const storage.RunRecord = &.{},
+    /// Finds a keyboard of the catalog by id, for where a key used to be.
+    board_lookup: ?BoardLookup = null,
 };
 
 pub const View = struct {
@@ -74,6 +79,8 @@ pub const View = struct {
     sheet: Sheet = .none,
     settings_open: bool = false,
     confirm_reset: bool = false,
+    /// Characters chosen in the layout-changes and reset sheets.
+    picks: Picks = .{},
     custom_text_buf: [256]u8 = @splat(0),
     custom_text_seeded: bool = false,
     last_pressed_error_key: ?usize = null,
@@ -163,6 +170,7 @@ fn consumeInput(
                 view.sheet = .none;
                 view.settings_open = false;
                 view.confirm_reset = false;
+                view.picks.confirm = false;
                 event.handle(@src(), data);
             }
         }
@@ -368,8 +376,12 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
         .runs = input.runs,
         .custom_text_buf = &view.custom_text_buf,
         .custom_text_seeded = &view.custom_text_seeded,
+        .geometry = if (input.frame) |f| f.geometry else &.{},
+        .board_lookup = input.board_lookup,
+        .picks = &view.picks,
     }, &pending);
-    try sheets_ui.drawSettingsPopover(owner, &view.settings_open, &view.confirm_reset, theme, size.w - 16, topbar_h + 6, &pending);
+    if (try sheets_ui.drawSettingsPopover(owner, &view.settings_open, &view.confirm_reset, theme, size.w - 16, topbar_h + 6, &pending))
+        sheets_ui.openSheet(&view.sheet, &view.picks, .reset_keys);
 
     view.drawn_len = owner.session.len;
     return .{
@@ -587,6 +599,16 @@ fn drawTutorWorkspace(
     const conf_h: f32 = 84;
     try presentation.confidenceStrip(owner, theme, .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = conf_h });
 
+    // The layout-change question sits between the strip and the card, so it
+    // shows with any guidance, and only between rounds.
+    var top_h = conf_h;
+    if (presentation.showsLayoutChangeStrip(owner)) {
+        const strip_h = presentation.layout_change_strip_h;
+        const choice = try presentation.layoutChangeStrip(owner, theme, .{ .x = bounds.x, .y = bounds.y + conf_h + gap, .w = bounds.w, .h = strip_h }, pending);
+        if (choice == .review) sheets_ui.openSheet(&view.sheet, &view.picks, .layout_changes);
+        top_h += gap + strip_h;
+    }
+
     // Resolve active hint once for both typing-card footer and keyboard overlay
     var resolved_hint: ?desktop.practice.Hint = null;
     if (input.frame) |frame| {
@@ -605,8 +627,8 @@ fn drawTutorWorkspace(
     }
 
     // 2. Calm Typing Card (middle) + Physical Tap/Hold Keyboard (bottom)
-    const rem_y = bounds.y + conf_h + gap;
-    const rem_h = @max(180.0, bounds.h - conf_h - gap);
+    const rem_y = bounds.y + top_h + gap;
+    const rem_h = @max(180.0, bounds.h - top_h - gap);
     const show_kb = owner.config.guidance != .free;
     const card_h: f32 = if (show_kb)
         std.math.clamp(rem_h * 0.34, 196.0, 260.0)
@@ -829,10 +851,15 @@ fn statusNote(owner: *const control.Controller, input: Input) []const u8 {
 pub fn apply(owner: *control.Controller, view: *View, rendered: control.Action, input: Input) !void {
     try owner.dispatch(rendered, input.now_us);
     switch (rendered.intent) {
-        .start, .new_exercise, .next_round, .set_stage, .start_weak_spot, .reset_progress => {
+        .start, .new_exercise, .next_round, .set_stage, .start_weak_spot, .reset_progress, .reset_keys, .resolve_layout_changes => {
             view.scroll.at = null;
             view.drawn_len = 0;
             view.sheet = .none;
+            view.picks = .{};
+        },
+        .keep_moved_keys => {
+            if (view.sheet == .layout_changes) view.sheet = .none;
+            view.picks = .{};
         },
         .set_mode => {
             view.sheet = .none;

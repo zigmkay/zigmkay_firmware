@@ -12,8 +12,18 @@ const storage = desktop.practice_storage;
 const lp = desktop.practice_layout_profile;
 const model = desktop.practice_model;
 const presentation = @import("practice_presentation.zig");
+const key_change = @import("practice_key_change_ui.zig");
+const layout = @import("layout-model");
 
-pub const Sheet = enum { none, stages, progress };
+/// A keyboard of the board catalog, for showing where a key used to be.
+pub const BoardInfo = struct {
+    name: []const u8,
+    geometry: []const layout.physical_layout.Key,
+};
+
+pub const BoardLookup = *const fn (board_id: []const u8) ?BoardInfo;
+
+pub const Sheet = enum { none, stages, progress, layout_changes, reset_keys };
 
 pub const SheetContext = struct {
     board_name: []const u8 = "",
@@ -22,9 +32,13 @@ pub const SheetContext = struct {
     runs: []const storage.RunRecord = &.{},
     custom_text_buf: *[256]u8,
     custom_text_seeded: *bool,
+    /// The current keyboard.
+    geometry: []const layout.physical_layout.Key = &.{},
+    board_lookup: ?BoardLookup = null,
+    picks: *Picks,
 };
 
-/// Draws whichever secondary sheet (`stages` or `progress`) is open, if any.
+/// Draws whichever secondary sheet is open, if any.
 pub fn drawSheet(
     owner: *control.Controller,
     sheet: *Sheet,
@@ -36,10 +50,13 @@ pub fn drawSheet(
         .none => return,
         .stages => try drawStagesSheet(owner, sheet, theme, ctx, pending),
         .progress => try drawProgressSheet(owner, sheet, theme, ctx, pending),
+        .layout_changes => try drawLayoutChangesSheet(owner, sheet, theme, ctx, pending),
+        .reset_keys => try drawResetKeysSheet(owner, sheet, theme, ctx, pending),
     }
 }
 
 /// Compact floating Settings popover anchored under the top-right gear button.
+/// Returns whether the Reset characters sheet was asked for.
 pub fn drawSettingsPopover(
     owner: *const control.Controller,
     open: *bool,
@@ -48,10 +65,10 @@ pub fn drawSettingsPopover(
     anchor_right: f32,
     anchor_top: f32,
     pending: *?control.Intent,
-) !void {
-    if (!open.*) return;
+) !bool {
+    if (!open.*) return false;
     const pop_w: f32 = 324;
-    const pop_h: f32 = if (confirm_reset.*) 285 else 259;
+    const pop_h: f32 = if (confirm_reset.*) 325 else 299;
     const screen = dvui.windowRect();
     const x = std.math.clamp(anchor_right - pop_w, 12.0, @max(12.0, screen.w - pop_w - 12.0));
     const y = std.math.clamp(anchor_top, 12.0, @max(12.0, screen.h - pop_h - 12.0));
@@ -77,7 +94,7 @@ pub fn drawSettingsPopover(
     if (ui.iconButton(theme, ui.control_icons.remove, "", "practice.settings.close", .{ .x = pop_w - 38, .y = 9, .w = 26, .h = 26 }, false)) {
         open.* = false;
         confirm_reset.* = false;
-        return;
+        return false;
     }
     ui.divider(theme, .{ .x = 0, .y = 42, .w = pop_w, .h = 1 }, 0xa001);
 
@@ -128,8 +145,15 @@ pub fn drawSettingsPopover(
     }
     cy += 38;
 
-    // 4. Reset progress (inline two-step confirmation)
+    // 4. Reset single characters, then the whole profile (two-step confirmation)
     ui.divider(theme, .{ .x = pad, .y = cy - 6, .w = inner_w, .h = 1 }, 0xa002);
+    var reset_keys = false;
+    if (ui.button(theme, "Reset characters…", "practice.settings.reset_keys", .{ .x = pad, .y = cy + 4, .w = inner_w, .h = 30 })) {
+        reset_keys = true;
+        open.* = false;
+        confirm_reset.* = false;
+    }
+    cy += 40;
     if (!confirm_reset.*) {
         if (ui.dangerButton(theme, null, "Reset profile progress", "practice.settings.reset", .{ .x = pad, .y = cy + 4, .w = inner_w, .h = 30 })) {
             confirm_reset.* = true;
@@ -146,6 +170,7 @@ pub fn drawSettingsPopover(
             confirm_reset.* = false;
         }
     }
+    return reset_keys;
 }
 
 fn drawStagesSheet(
@@ -521,7 +546,7 @@ fn drawProgressSheet(
     const weak_h = if (stacked) lower_h - chart_h - 10 else lower_h;
 
     try drawWpmTrendPanel(owner, theme, .{ .x = pad, .y = lower_y, .w = left_w, .h = chart_h }, ctx.runs);
-    try drawWeakSpotsPanel(owner, sheet, theme, .{ .x = if (stacked) pad else pad + left_w + 14, .y = weak_y, .w = right_w, .h = weak_h }, pending);
+    try drawWeakSpotsPanel(owner, sheet, ctx.picks, theme, .{ .x = if (stacked) pad else pad + left_w + 14, .y = weak_y, .w = right_w, .h = weak_h }, pending);
 }
 
 fn drawKpiCard(
@@ -716,6 +741,7 @@ fn drawWpmTrendPanel(
 fn drawWeakSpotsPanel(
     owner: *const control.Controller,
     sheet: *Sheet,
+    picks: *Picks,
     theme: ui.Theme,
     rect: dvui.Rect,
     pending: *?control.Intent,
@@ -735,7 +761,13 @@ fn drawWeakSpotsPanel(
 
     const arena = dvui.currentWindow().arena();
     const pad: f32 = 14;
-    boldLabel("Weakest keys & transitions", .{ .x = pad, .y = 12, .w = rect.w - pad * 2, .h = 20 }, 14, theme.text, 0xd090);
+    const link = "Reset characters…";
+    const link_w = ui.editorFont(link, 12.5).textSize(link).w + 8;
+    boldLabel("Weakest keys & transitions", .{ .x = pad, .y = 12, .w = @max(0, rect.w - pad * 2 - link_w - 8), .h = 20 }, 14, theme.text, 0xd090);
+    if (linkButton(theme, link, .{ .x = rect.w - pad - link_w, .y = 12, .w = link_w, .h = 20 }, "practice.sheet.reset_keys")) {
+        openSheet(sheet, picks, .reset_keys);
+        return;
+    }
 
     var wk_buf: [4]model.KeySummary = undefined;
     const weak_keys = owner.learning.weakestKeys(&wk_buf);
@@ -1308,6 +1340,524 @@ fn pillButton(theme: ui.Theme, text: []const u8, rect: dvui.Rect, active: bool, 
     opts.color_fill = .{ .color = if (active) ui.mix(theme.panel, theme.accent, 0.24) else theme.control };
     opts.color_border = .{ .color = if (active) theme.accent else theme.border };
     opts.color_text = .{ .color = if (active) theme.text else theme.muted };
+    return dvui.button(@src(), text, .{}, opts);
+}
+
+// ---------------------------------------------------------------------------
+// Layout changes and per-character reset
+// ---------------------------------------------------------------------------
+
+/// The characters chosen in the layout-changes and reset sheets, as entries
+/// (`key_change.groupOf`): a letter stands for both of its cases.
+pub const Picks = struct {
+    cps: [control.max_key_reset]u21 = undefined,
+    len: usize = 0,
+    /// The entry the layout-changes comparison shows.
+    selected: ?u21 = null,
+    /// Whether the reset sheet asks for confirmation.
+    confirm: bool = false,
+
+    pub fn slice(self: *const Picks) []const u21 {
+        return self.cps[0..self.len];
+    }
+
+    pub fn has(self: *const Picks, cp: u21) bool {
+        return std.mem.indexOfScalar(u21, self.slice(), cp) != null;
+    }
+
+    pub fn set(self: *Picks, cp: u21, on: bool) void {
+        if (std.mem.indexOfScalar(u21, self.slice(), cp)) |i| {
+            if (on) return;
+            std.mem.copyForwards(u21, self.cps[i .. self.len - 1], self.cps[i + 1 .. self.len]);
+            self.len -= 1;
+        } else if (on and self.len < self.cps.len) {
+            self.cps[self.len] = cp;
+            self.len += 1;
+        }
+    }
+
+    pub fn request(self: *const Picks, profile_hash: control.Digest) control.KeyReset {
+        var out: control.KeyReset = .{ .profile_hash = profile_hash };
+        for (self.slice()) |cp| out.add(cp);
+        return out;
+    }
+};
+
+/// Opens a sheet of this section with a clean choice.
+pub fn openSheet(sheet: *Sheet, picks: *Picks, which: Sheet) void {
+    sheet.* = which;
+    picks.* = .{};
+}
+
+fn reviewGroups(owner: *const control.Controller, out: []u21) []u21 {
+    return key_change.groups(owner.reviewSlice(), out);
+}
+
+/// The current position of `cp` with the keys of the current keyboard.
+fn currentPosition(owner: *const control.Controller, cp: u21) ?model.KnownPosition {
+    var buf: [lp.max_routes]model.KnownPosition = undefined;
+    for (owner.currentPositions(&buf)) |entry| {
+        if (entry.pos.cp == cp) return entry;
+    }
+    return null;
+}
+
+fn snapshotLabels(owner: *const control.Controller, board: u64, layer: u8) []const u21 {
+    const snapshot = owner.boards.find(board) orelse return &.{};
+    return snapshot.layerLabels(layer) orelse snapshot.layerLabels(0) orelse &.{};
+}
+
+fn modalFrame(theme: ui.Theme, w: f32, h: f32, tag: []const u8) *dvui.FloatingWindowWidget {
+    const screen = dvui.windowRect();
+    return dvui.floatingWindow(@src(), .{ .modal = true }, .{
+        .rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h },
+        .padding = .{},
+        .background = true,
+        .color_fill = .{ .color = theme.bg },
+        .color_border = .{ .color = theme.border },
+        .border = .all(1),
+        .corners = .all(14),
+        .tag = tag,
+    });
+}
+
+fn sheetHeader(theme: ui.Theme, w: f32, title: []const u8, subtitle: []const u8, close_tag: []const u8) bool {
+    const header_bg = dvui.box(@src(), .{}, .{
+        .id_extra = 0xe090,
+        .rect = .{ .x = 1, .y = 1, .w = w - 2, .h = 83 },
+        .background = true,
+        .color_fill = .{ .color = theme.panel },
+        .corners = ui.topCorners(13),
+        .padding = .{},
+        .margin = .{},
+    });
+    header_bg.deinit();
+    boldLabel(title, .{ .x = 24, .y = 16, .w = w - 96, .h = 28 }, 20, theme.text, 0xe091);
+    presentation.label(subtitle, .{ .x = 24, .y = 48, .w = w - 96, .h = 22 }, 13.5, theme.muted, null);
+    ui.divider(theme, .{ .x = 0, .y = 84, .w = w, .h = 1 }, 0xe092);
+    return ui.iconButton(theme, ui.control_icons.remove, "", close_tag, .{ .x = w - 54, .y = 22, .w = 30, .h = 30 }, false);
+}
+
+fn statLine(arena: std.mem.Allocator, owner: *const control.Controller, cp: u21) ![]const u8 {
+    const st = owner.learning.getStat(cp) orelse return "no data";
+    return std.fmt.allocPrint(arena, "{d:.0}% · {d:.0} WPM", .{ st.confidence(owner.config.target_wpm) * 100.0, st.wpm() });
+}
+
+fn layerNote(arena: std.mem.Allocator, pos: lp.KeyPosition) ![]const u8 {
+    if (pos.combo_slot != null and pos.layer != 0) return std.fmt.allocPrint(arena, "combo on layer {d}", .{pos.layer});
+    if (pos.combo_slot != null) return "combo";
+    if (pos.layer != 0) return std.fmt.allocPrint(arena, "layer {d} · hold the teal key", .{pos.layer});
+    if (pos.shift) return "with Shift";
+    return "layer 0";
+}
+
+/// Layout changes: one row per moved practised character with Keep or Reset,
+/// and the selected one compared on the keyboard it was practised on and on
+/// the current one.
+fn drawLayoutChangesSheet(
+    owner: *const control.Controller,
+    sheet: *Sheet,
+    theme: ui.Theme,
+    ctx: SheetContext,
+    pending: *?control.Intent,
+) !void {
+    var group_buf: [model.max_tracked_keys]u21 = undefined;
+    const entries = reviewGroups(owner, &group_buf);
+    if (entries.len == 0) {
+        sheet.* = .none;
+        return;
+    }
+    const picks = ctx.picks;
+    if (picks.selected == null or std.mem.indexOfScalar(u21, entries, picks.selected.?) == null) picks.selected = entries[0];
+
+    const screen = dvui.windowRect();
+    const w: f32 = @min(@as(f32, 1000), screen.w - 40);
+    const h: f32 = @min(@as(f32, 600), screen.h - 40);
+    var fw = modalFrame(theme, w, h, "practice.sheet.layout_changes");
+    defer fw.deinit();
+
+    const arena = dvui.currentWindow().arena();
+    const board_name = if (ctx.board_name.len > 0) ctx.board_name else "this keyboard";
+    const subtitle = try std.fmt.allocPrint(arena, "Practised characters that sit elsewhere on {s}. Keep their statistics or start them over.", .{board_name});
+    if (sheetHeader(theme, w, "Layout changes", subtitle, "practice.layout_changes.close")) {
+        sheet.* = .none;
+        return;
+    }
+
+    const pad: f32 = 24;
+    const body_top: f32 = 102;
+    const footer_h: f32 = 58;
+    const body_h = h - body_top - footer_h - 8;
+    const list_w = std.math.clamp(w * 0.34, 250.0, 340.0);
+
+    // Left: one row per entry.
+    const row_h: f32 = 64;
+    var resets: usize = 0;
+    for (entries, 0..) |group, i| {
+        const y = body_top + @as(f32, @floatFromInt(i)) * (row_h + 8);
+        if (y + row_h > body_top + body_h) break;
+        const reset = picks.has(group);
+        if (reset) resets += 1;
+        const selected = picks.selected.? == group;
+        const row_rect: dvui.Rect = .{ .x = pad, .y = y, .w = list_w, .h = row_h };
+        var row_opts = ui.options(theme, row_rect, 13);
+        row_opts.id_extra = 0xe100 + i;
+        row_opts.background = true;
+        row_opts.border = .all(if (selected) 1.5 else 1);
+        row_opts.corners = .all(9);
+        row_opts.padding = .{};
+        row_opts.color_fill = .{ .color = if (selected) ui.mix(theme.panel, theme.accent, 0.10) else theme.panel };
+        row_opts.color_border = .{ .color = if (selected) theme.accent else theme.border };
+        row_opts.tag = if (i == 0) "practice.layout_changes.row" else null;
+        if (dvui.button(@src(), "", .{}, row_opts)) picks.selected = group;
+
+        var text_buf: [4]u8 = undefined;
+        const badge: dvui.Rect = .{ .x = pad + 10, .y = y + 14, .w = 36, .h = 36 };
+        const tint = if (reset) theme.danger else theme.warning;
+        const badge_box = dvui.box(@src(), .{}, .{
+            .id_extra = 0xe200 + i,
+            .rect = badge,
+            .background = true,
+            .color_fill = .{ .color = ui.mix(theme.panel, tint, 0.22) },
+            .color_border = .{ .color = ui.mix(theme.panel, tint, 0.65) },
+            .border = .all(1),
+            .corners = .all(7),
+            .padding = .{},
+            .margin = .{},
+        });
+        badge_box.deinit();
+        dvui.labelNoFmt(@src(), key_change.displayOf(group, &text_buf), .{ .align_x = 0.5, .align_y = 0.5 }, .{
+            .id_extra = 0xe240 + i,
+            .rect = badge,
+            .font = dvui.Font.theme(.mono).withSize(17).withWeight(.bold),
+            .color_text = .{ .color = tint },
+            .padding = .{},
+            .margin = .{},
+        });
+
+        const cp = key_change.representative(group, owner.reviewSlice());
+        const reason = if (owner.learning.lastKnownPosition(cp)) |old|
+            (if (currentPosition(owner, cp)) |now| try key_change.describe(arena, old.pos, now.pos) else "not on this layout")
+        else
+            "moved";
+        const toggle_w: f32 = 116;
+        const text_w = @max(0.0, list_w - 56 - toggle_w - 16);
+        boldLabel(reason, .{ .x = pad + 56, .y = y + 12, .w = text_w, .h = 20 }, 13.5, theme.text, 0xe280 + i);
+        presentation.label(try statLine(arena, owner, cp), .{ .x = pad + 56, .y = y + 34, .w = text_w, .h = 18 }, 12, theme.muted, null);
+
+        const tx = pad + list_w - toggle_w - 10;
+        if (pillButton(theme, "Keep", .{ .x = tx, .y = y + 18, .w = 54, .h = 28 }, !reset, 0xe300 + i)) {
+            picks.set(group, false);
+            picks.selected = group;
+        }
+        if (pillButton(theme, "Reset", .{ .x = tx + 58, .y = y + 18, .w = 58, .h = 28 }, reset, 0xe340 + i)) {
+            picks.set(group, true);
+            picks.selected = group;
+        }
+    }
+
+    // Right: before and now keyboards of the selected entry.
+    const right_x = pad + list_w + 18;
+    const right_w = w - right_x - pad;
+    const group = picks.selected.?;
+    const cp = key_change.representative(group, owner.reviewSlice());
+    const old = owner.learning.lastKnownPosition(cp);
+    const now = currentPosition(owner, cp);
+    var heading_buf: [4]u8 = undefined;
+    const heading = if (old != null and now != null)
+        try std.fmt.allocPrint(arena, "{s} · {s}", .{ key_change.displayOf(group, &heading_buf), try key_change.describe(arena, old.?.pos, now.?.pos) })
+    else
+        key_change.displayOf(group, &heading_buf);
+    boldLabel(heading, .{ .x = right_x, .y = body_top, .w = right_w, .h = 22 }, 15, theme.text, 0xe400);
+
+    const boards_top = body_top + 32;
+    const boards_h = body_h - 32;
+    const side_by_side = right_w >= 620;
+    const board_w = if (side_by_side) (right_w - 14) / 2 else right_w;
+    const board_h = if (side_by_side) boards_h - 26 else (boards_h - 26 * 2 - 12) / 2;
+
+    // Before: the keyboard it was last practised on, from its saved snapshot.
+    const before_info: ?BoardInfo = if (old) |o| if (o.seen) |seen| blk: {
+        const snapshot = owner.boards.find(seen.board) orelse break :blk null;
+        const lookup = ctx.board_lookup orelse break :blk null;
+        break :blk lookup(snapshot.idSlice());
+    } else null else null;
+    const before_y = boards_top;
+    const before_caption = if (before_info != null and old != null)
+        try std.fmt.allocPrint(arena, "Before · {s} · {s}", .{ before_info.?.name, try layerNote(arena, old.?.pos) })
+    else
+        "Before";
+    presentation.label(before_caption, .{ .x = right_x, .y = before_y, .w = board_w, .h = 20 }, 12.5, theme.warning, null);
+    const before_rect: dvui.Rect = .{ .x = right_x, .y = before_y + 24, .w = board_w, .h = board_h };
+    if (before_info) |info| {
+        const seen = old.?.seen.?;
+        var marks_buf: [3]key_change.Mark = undefined;
+        key_change.draw(theme, before_rect, .{
+            .geometry = info.geometry,
+            .labels = snapshotLabels(owner, seen.board, old.?.pos.layer),
+            .marks = key_change.marksFor(seen, .before, &marks_buf),
+            .combo = if (seen.combo_key_index) |k| .{ seen.key_index, k } else null,
+            .hold_layer = if (seen.layer_key_index != null) old.?.pos.layer else null,
+        }, 0xe500, "practice.layout_changes.before");
+    } else {
+        const empty = dvui.box(@src(), .{}, .{
+            .rect = before_rect,
+            .background = true,
+            .color_fill = .{ .color = theme.bg },
+            .color_border = .{ .color = theme.border },
+            .border = .all(1),
+            .corners = .all(10),
+            .padding = .{},
+            .margin = .{},
+        });
+        empty.deinit();
+        const note = if (old) |o|
+            try std.fmt.allocPrint(arena, "The keyboard it was practised on is not known here. It was on {s}.", .{try layerNote(arena, o.pos)})
+        else
+            "No earlier position is known.";
+        drawWrappedTwoLines(note, .{ .x = before_rect.x + 14, .y = before_rect.y + before_rect.h / 2 - 18, .w = before_rect.w - 28, .h = 36 }, 13, theme.muted, 18, 0xe510);
+    }
+
+    // Now: the current keyboard.
+    const now_x = if (side_by_side) right_x + board_w + 14 else right_x;
+    const now_y = if (side_by_side) boards_top else before_y + 24 + board_h + 12;
+    const now_caption = if (now) |n|
+        try std.fmt.allocPrint(arena, "Now · {s} · {s}", .{ board_name, try layerNote(arena, n.pos) })
+    else
+        "Now · not on this layout";
+    presentation.label(now_caption, .{ .x = now_x, .y = now_y, .w = board_w, .h = 20 }, 12.5, theme.accent, null);
+    const now_rect: dvui.Rect = .{ .x = now_x, .y = now_y + 24, .w = board_w, .h = board_h };
+    if (now) |n| if (n.seen) |seen| {
+        var marks_buf: [3]key_change.Mark = undefined;
+        key_change.draw(theme, now_rect, .{
+            .geometry = ctx.geometry,
+            .labels = snapshotLabels(owner, seen.board, n.pos.layer),
+            .marks = key_change.marksFor(seen, .now, &marks_buf),
+            .combo = if (seen.combo_key_index) |k| .{ seen.key_index, k } else null,
+            .hold_layer = if (seen.layer_key_index != null) n.pos.layer else null,
+        }, 0xe600, "practice.layout_changes.now");
+    };
+
+    // Footer: keep everything, or apply the choice.
+    ui.divider(theme, .{ .x = 0, .y = h - footer_h - 1, .w = w, .h = 1 }, 0xe093);
+    const fy = h - footer_h + 12;
+    presentation.label("Kept characters keep their statistics on both keyboards.", .{ .x = pad, .y = fy, .w = @max(0, w - pad * 2 - 420), .h = 34 }, 12.5, theme.muted, null);
+    const apply = try std.fmt.allocPrint(arena, "Apply · keep {d}, reset {d}", .{ entries.len - resets, resets });
+    const apply_w = @max(@as(f32, 200), ui.editorFont(apply, 15).textSize(apply).w + 36);
+    if (ui.iconButton(theme, null, apply, "practice.layout_changes.apply", .{ .x = w - pad - apply_w, .y = fy, .w = apply_w, .h = 34 }, true) and pending.* == null) {
+        pending.* = .{ .resolve_layout_changes = picks.request(owner.profile.profile_hash) };
+    }
+    if (ui.button(theme, "Keep all", "practice.layout_changes.keep_all", .{ .x = w - pad - apply_w - 12 - 120, .y = fy, .w = 120, .h = 34 }) and pending.* == null) {
+        pending.* = .{ .keep_moved_keys = owner.profile.profile_hash };
+    }
+}
+
+const ChipGroup = struct { title: []const u8, cps: []const u21, faint: bool = false };
+
+/// Reset characters: practised characters to start over, shown on the
+/// current keyboard. Letters stay unlocked.
+fn drawResetKeysSheet(
+    owner: *const control.Controller,
+    sheet: *Sheet,
+    theme: ui.Theme,
+    ctx: SheetContext,
+    pending: *?control.Intent,
+) !void {
+    const picks = ctx.picks;
+    const screen = dvui.windowRect();
+    const w: f32 = @min(@as(f32, 1000), screen.w - 40);
+    const h: f32 = @min(@as(f32, 600), screen.h - 40);
+    var fw = modalFrame(theme, w, h, "practice.sheet.reset_keys");
+    defer fw.deinit();
+    const arena = dvui.currentWindow().arena();
+    if (sheetHeader(theme, w, "Reset characters", "Selected characters start over: speed, accuracy and transitions. Unlocked letters stay unlocked.", "practice.reset_keys.close")) {
+        sheet.* = .none;
+        return;
+    }
+
+    // Entries: letters in unlock order, practised symbols this layout types,
+    // and practised characters it cannot type any more.
+    const lm = &owner.learning;
+    var letters: std.ArrayList(u21) = .empty;
+    for (lm.unlock_order[0..lm.unlock_len]) |ch| try letters.append(arena, ch);
+    var symbols: std.ArrayList(u21) = .empty;
+    var absent: std.ArrayList(u21) = .empty;
+    for (lm.stats[0..lm.stat_len]) |st| {
+        if (!lm.hasData(st.cp)) continue;
+        const group = key_change.groupOf(st.cp);
+        if (std.mem.indexOfScalar(u21, letters.items, group) != null) continue;
+        const typeable = owner.profile_bound and (owner.profile.routeFor(st.cp) != null or owner.profile.comboFor(st.cp) != null);
+        const list = if (typeable) &symbols else &absent;
+        if (std.mem.indexOfScalar(u21, list.items, group) == null) try list.append(arena, group);
+    }
+    std.mem.sort(u21, symbols.items, {}, std.sort.asc(u21));
+
+    const pad: f32 = 24;
+    const body_top: f32 = 102;
+    const footer_h: f32 = 62;
+    const grid_w = std.math.clamp(w * 0.5, 300.0, 500.0);
+    const chip_w: f32 = 50;
+    const chip_h: f32 = 46;
+    const per_row: usize = @max(1, @as(usize, @intFromFloat((grid_w + 6) / (chip_w + 6))));
+
+    var group_buf: [model.max_tracked_keys]u21 = undefined;
+    const moved = reviewGroups(owner, &group_buf);
+    var y = body_top;
+    const chip_groups = [_]ChipGroup{
+        .{ .title = "Letters", .cps = letters.items },
+        .{ .title = "Punctuation, digits & symbols", .cps = symbols.items },
+        .{ .title = "Not on this layout", .cps = absent.items, .faint = true },
+    };
+    var chip_id: usize = 0;
+    for (chip_groups) |cg| {
+        if (cg.cps.len == 0) continue;
+        presentation.label(cg.title, .{ .x = pad, .y = y, .w = grid_w, .h = 18 }, 12.5, theme.muted, null);
+        y += 24;
+        for (cg.cps, 0..) |group, i| {
+            const col: f32 = @floatFromInt(i % per_row);
+            const row: f32 = @floatFromInt(i / per_row);
+            const r: dvui.Rect = .{ .x = pad + col * (chip_w + 6), .y = y + row * (chip_h + 6), .w = chip_w, .h = chip_h };
+            const has_data = lm.hasData(group) or lm.hasData(key_change.upperOf(group));
+            const on = picks.has(group);
+            if (try resetChip(owner, theme, r, group, has_data, on, cg.faint, 0xe700 + chip_id) and has_data) {
+                picks.set(group, !on);
+                picks.confirm = false;
+            }
+            chip_id += 1;
+        }
+        y += @as(f32, @floatFromInt((cg.cps.len + per_row - 1) / per_row)) * (chip_h + 6) + 10;
+    }
+
+    // Quick choices.
+    const qy = @min(y + 2, h - footer_h - 44);
+    var qx = pad;
+    if (moved.len > 0) {
+        const lbl = try std.fmt.allocPrint(arena, "Select moved ({d})", .{moved.len});
+        const qw = ui.editorFont(lbl, 13).textSize(lbl).w + 28;
+        if (pillButton(theme, lbl, .{ .x = qx, .y = qy, .w = qw, .h = 30 }, false, 0xe800)) {
+            for (moved) |group| picks.set(group, true);
+            picks.confirm = false;
+        }
+        qx += qw + 8;
+    }
+    if (pillButton(theme, "Clear", .{ .x = qx, .y = qy, .w = 70, .h = 30 }, false, 0xe801)) {
+        picks.len = 0;
+        picks.confirm = false;
+    }
+
+    // Right: the current keyboard with the keys of the selected characters.
+    const right_x = pad + grid_w + 22;
+    const right_w = w - right_x - pad;
+    const board_name = if (ctx.board_name.len > 0) ctx.board_name else "this keyboard";
+    presentation.label(try std.fmt.allocPrint(arena, "On {s}", .{board_name}), .{ .x = right_x, .y = body_top, .w = right_w, .h = 18 }, 12.5, theme.muted, null);
+    var marks: std.ArrayList(key_change.Mark) = .empty;
+    var combo: ?[2]u16 = null;
+    var notes: std.ArrayList(u8) = .empty;
+    var board_hash: ?u64 = null;
+    for (picks.slice()) |group| {
+        const pos = currentPosition(owner, group) orelse currentPosition(owner, key_change.upperOf(group)) orelse continue;
+        const seen = pos.seen orelse continue;
+        board_hash = seen.board;
+        var buf: [3]key_change.Mark = undefined;
+        for (key_change.marksFor(seen, .selected, &buf)) |mark| try marks.append(arena, mark);
+        if (seen.combo_key_index) |k| combo = .{ seen.key_index, k };
+        if (pos.pos.layer != 0 or pos.pos.combo_slot != null) {
+            var tb: [4]u8 = undefined;
+            if (notes.items.len > 0) try notes.appendSlice(arena, " · ");
+            try notes.print(arena, "{s}: {s}", .{ key_change.displayOf(group, &tb), try layerNote(arena, pos.pos) });
+        }
+    }
+    const board_rect: dvui.Rect = .{ .x = right_x, .y = body_top + 24, .w = right_w, .h = @min(right_w * 0.42, h - body_top - footer_h - 70) };
+    key_change.draw(theme, board_rect, .{
+        .geometry = ctx.geometry,
+        .labels = if (board_hash orelse owner.board_hash) |hash| snapshotLabels(owner, hash, 0) else &.{},
+        .marks = marks.items,
+        .combo = combo,
+    }, 0xe900, "practice.reset_keys.board");
+    if (notes.items.len > 0)
+        drawWrappedTwoLines(notes.items, .{ .x = right_x, .y = board_rect.y + board_rect.h + 10, .w = right_w, .h = 36 }, 12.5, theme.muted, 18, 0xe910);
+
+    // Footer: two-step confirmation like the profile reset.
+    ui.divider(theme, .{ .x = 0, .y = h - footer_h - 1, .w = w, .h = 1 }, 0xe094);
+    const fy = h - footer_h + 14;
+    const count = picks.len;
+    if (!picks.confirm) {
+        presentation.label("Streak, daily goal and round history stay as they are.", .{ .x = pad, .y = fy, .w = @max(0, w - pad * 2 - 260), .h = 34 }, 12.5, theme.muted, null);
+        const lbl = if (count == 1) "Reset 1 character" else try std.fmt.allocPrint(arena, "Reset {d} characters", .{count});
+        if (count == 0) {
+            _ = ui.buttonEnabled(theme, "Select characters to reset", "practice.reset_keys.start", .{ .x = w - pad - 240, .y = fy, .w = 240, .h = 34 }, false);
+        } else if (ui.dangerButton(theme, null, lbl, "practice.reset_keys.start", .{ .x = w - pad - 240, .y = fy, .w = 240, .h = 34 })) {
+            picks.confirm = true;
+        }
+    } else {
+        var names: std.ArrayList(u8) = .empty;
+        for (picks.slice(), 0..) |group, i| {
+            var tb: [4]u8 = undefined;
+            if (i > 0) try names.appendSlice(arena, if (i + 1 == count) " and " else ", ");
+            try names.appendSlice(arena, key_change.displayOf(group, &tb));
+        }
+        const question = try std.fmt.allocPrint(arena, "Reset {s}? Their statistics start over. This cannot be undone.", .{names.items});
+        presentation.label(question, .{ .x = pad, .y = fy, .w = @max(0, w - pad * 2 - 310), .h = 34 }, 13, theme.danger, "practice.reset_keys.question");
+        if (ui.dangerButton(theme, null, "Confirm reset", "practice.reset_keys.confirm", .{ .x = w - pad - 160, .y = fy, .w = 160, .h = 34 }) and pending.* == null) {
+            pending.* = .{ .reset_keys = picks.request(owner.profile.profile_hash) };
+        }
+        if (ui.button(theme, "Cancel", "practice.reset_keys.cancel", .{ .x = w - pad - 160 - 10 - 120, .y = fy, .w = 120, .h = 34 })) {
+            picks.confirm = false;
+        }
+    }
+}
+
+fn resetChip(
+    owner: *const control.Controller,
+    theme: ui.Theme,
+    r: dvui.Rect,
+    group: u21,
+    has_data: bool,
+    on: bool,
+    faint: bool,
+    id: usize,
+) !bool {
+    const arena = dvui.currentWindow().arena();
+    var opts = ui.options(theme, r, 13);
+    opts.id_extra = id;
+    opts.background = true;
+    opts.border = .all(if (on) 1.5 else 1);
+    opts.corners = .all(7);
+    opts.padding = .{};
+    opts.color_fill = .{ .color = if (on) ui.mix(theme.panel, theme.danger, 0.20) else if (has_data) theme.panel else theme.bg };
+    opts.color_border = .{ .color = if (on) theme.danger else theme.border };
+    const clicked = dvui.button(@src(), "", .{}, opts);
+    var buf: [4]u8 = undefined;
+    const text_color = if (on) theme.text else if (!has_data or faint) ui.mix(theme.bg, theme.muted, 0.7) else theme.text;
+    dvui.labelNoFmt(@src(), key_change.displayOf(group, &buf), .{ .align_x = 0.5, .align_y = 0.5 }, .{
+        .id_extra = id,
+        .rect = .{ .x = r.x, .y = r.y + 3, .w = r.w, .h = r.h * 0.55 },
+        .font = dvui.Font.theme(.mono).withSize(16).withWeight(.bold),
+        .color_text = .{ .color = text_color },
+        .padding = .{},
+        .margin = .{},
+    });
+    const conf = @max(owner.learning.confidenceFor(group), owner.learning.confidenceFor(key_change.upperOf(group)));
+    const pct = if (has_data) try std.fmt.allocPrint(arena, "{d:.0}%", .{conf * 100.0}) else "—";
+    dvui.labelNoFmt(@src(), pct, .{ .align_x = 0.5, .align_y = 0.5 }, .{
+        .id_extra = id,
+        .rect = .{ .x = r.x, .y = r.y + r.h * 0.55, .w = r.w, .h = r.h * 0.38 },
+        .font = ui.editorFont(pct, 10.5),
+        .color_text = .{ .color = if (on) theme.danger else theme.muted },
+        .padding = .{},
+        .margin = .{},
+    });
+    return clicked;
+}
+
+fn linkButton(theme: ui.Theme, text: []const u8, rect: dvui.Rect, tag: []const u8) bool {
+    var opts = ui.options(theme, rect, 12.5);
+    opts.tag = tag;
+    opts.id_extra = std.hash.Wyhash.hash(0, tag);
+    opts.background = false;
+    opts.border = .{};
+    opts.padding = .{};
+    opts.color_text = .{ .color = theme.accent };
     return dvui.button(@src(), text, .{}, opts);
 }
 

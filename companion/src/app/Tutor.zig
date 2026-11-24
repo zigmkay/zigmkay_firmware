@@ -149,6 +149,9 @@ fn syncProfileAndPersistence(
         if (app.user_paths) |owned| persistTo(app, owned.paths.data) catch |err| app.view.report(err);
     }
     self.controller.discardPending();
+    // Choices made for the previous profile do not apply to this one.
+    self.view.picks = .{};
+    if (self.view.sheet == .layout_changes or self.view.sheet == .reset_keys) self.view.sheet = .none;
 
     // Load persisted state for this profile when running outside offline fixtures.
     // A read failure is not "no saved state": bind fresh for this session but
@@ -332,6 +335,12 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
     } };
 }
 
+/// A catalog keyboard by selector, for the before/now comparison of moved keys.
+fn boardLookup(board_id: []const u8) ?tutor.BoardInfo {
+    const entry = boards.findEntry(board_id) orelse return null;
+    return .{ .name = entry.display.name, .geometry = entry.geometry };
+}
+
 fn sameLayout(a: *const desktop.model.Model, b: *const desktop.model.Model) bool {
     const left = a.id() catch return false;
     const right = b.id() catch return false;
@@ -377,6 +386,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
         .frame = if (waiting_for_live) null else frame.keyboard,
         .event_times = app.events.times[0..app.events.time_count],
         .runs = if (self.loaded_runs) |r| r.runs else &.{},
+        .board_lookup = boardLookup,
     };
     const rect = app.window.data().rect;
     const bounds: dvui.Rect = .{ .x = 0, .y = 0, .w = @max(300, rect.w), .h = @max(300, rect.h) };
