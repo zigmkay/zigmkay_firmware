@@ -87,8 +87,99 @@ pub const SeenKey = struct {
 };
 
 pub fn boardHash(board_id: []const u8) u64 {
-    return std.hash.Wyhash.hash(0x7a69676d6b6179, board_id);
+    // Snapshots keep 64 bytes of the id; hash what survives a save.
+    return std.hash.Wyhash.hash(0x7a69676d6b6179, board_id[0..@min(board_id.len, 64)]);
 }
+
+pub const max_board_snapshots: usize = 8;
+pub const max_snapshot_layers: usize = 8;
+
+/// The single-character tap labels of one keyboard, kept so a key can be
+/// shown where it used to be after that keyboard is gone.
+pub const BoardSnapshot = struct {
+    id: [64]u8 = @splat(0),
+    id_len: u8 = 0,
+    hash: u64 = 0,
+    key_count: u16 = 0,
+    layers: [max_snapshot_layers]u8 = @splat(0),
+    layer_len: u8 = 0,
+    /// Codepoint per key and layer; 0 is a key without a single-character label.
+    labels: [max_snapshot_layers][layout_profile.max_keys]u21 = undefined,
+
+    pub fn idSlice(self: *const BoardSnapshot) []const u8 {
+        return self.id[0..self.id_len];
+    }
+
+    pub fn layerLabels(self: *const BoardSnapshot, layer: u8) ?[]const u21 {
+        for (self.layers[0..self.layer_len], 0..) |value, i| {
+            if (value == layer) return self.labels[i][0..self.key_count];
+        }
+        return null;
+    }
+
+    /// Adds or replaces the labels of a layer; returns whether they changed.
+    pub fn setLayer(self: *BoardSnapshot, layer: u8, labels: []const u21) bool {
+        const n = @min(labels.len, self.key_count);
+        const index = for (self.layers[0..self.layer_len], 0..) |value, i| {
+            if (value == layer) break i;
+        } else blk: {
+            if (self.layer_len >= max_snapshot_layers) return false;
+            self.layers[self.layer_len] = layer;
+            self.layer_len += 1;
+            @memset(&self.labels[self.layer_len - 1], 0);
+            break :blk self.layer_len - 1;
+        };
+        const row = self.labels[index][0..n];
+        if (std.mem.eql(u21, row, labels[0..n])) return false;
+        @memcpy(row, labels[0..n]);
+        return true;
+    }
+};
+
+/// The most recently used keyboards of a profile, oldest first.
+pub const BoardSnapshots = struct {
+    boards: [max_board_snapshots]BoardSnapshot = undefined,
+    len: usize = 0,
+
+    pub fn slice(self: *const BoardSnapshots) []const BoardSnapshot {
+        return self.boards[0..self.len];
+    }
+
+    pub fn find(self: *const BoardSnapshots, hash: u64) ?*const BoardSnapshot {
+        for (self.boards[0..self.len]) |*board| {
+            if (board.hash == hash) return board;
+        }
+        return null;
+    }
+
+    /// The snapshot of `id`, moved to the newest place; the oldest keyboard
+    /// makes room when the table is full. Layers are kept when the key count
+    /// stays.
+    pub fn use(self: *BoardSnapshots, id: []const u8, key_count: usize) *BoardSnapshot {
+        const hash = boardHash(id);
+        const keys: u16 = @intCast(@min(key_count, layout_profile.max_keys));
+        var entry: BoardSnapshot = for (self.boards[0..self.len], 0..) |board, i| {
+            if (board.hash == hash) {
+                std.mem.copyForwards(BoardSnapshot, self.boards[i .. self.len - 1], self.boards[i + 1 .. self.len]);
+                self.len -= 1;
+                break board;
+            }
+        } else .{};
+        if (entry.key_count != keys) entry.layer_len = 0;
+        const id_len = @min(id.len, entry.id.len);
+        @memcpy(entry.id[0..id_len], id[0..id_len]);
+        entry.id_len = @intCast(id_len);
+        entry.hash = hash;
+        entry.key_count = keys;
+        if (self.len >= max_board_snapshots) {
+            std.mem.copyForwards(BoardSnapshot, self.boards[0 .. self.len - 1], self.boards[1..self.len]);
+            self.len -= 1;
+        }
+        self.boards[self.len] = entry;
+        self.len += 1;
+        return &self.boards[self.len - 1];
+    }
+};
 
 /// A position at which a character's statistics count as valid.
 pub const KnownPosition = struct {
@@ -785,67 +876,7 @@ pub const LearningModel = struct {
         }
         self.bigram_len = write_idx;
     }
-
-    /// Layout-diff partial reset: preserves stats for characters whose physical route
-    /// did not change, and resets stats (plus affected bigrams) for characters that moved.
-    /// Returns the number of characters reset.
-    pub fn applyLayoutDiff(
-        self: *LearningModel,
-        prev_positions: []const layout_profile.KeyPosition,
-        cur_positions: []const layout_profile.KeyPosition,
-    ) usize {
-        var moved_cps: [max_tracked_keys]u21 = undefined;
-        var moved_len: usize = 0;
-
-        for (self.stats[0..self.stat_len]) |*st| {
-            const prev_pos = findPosition(prev_positions, st.cp);
-            const cur_pos = findPosition(cur_positions, st.cp);
-            // A character with no derived route in either layout (Stage 6 prose)
-            // has not moved; only an added, removed or changed route resets it.
-            const unchanged = if (prev_pos != null and cur_pos != null)
-                prev_pos.?.eql(cur_pos.?)
-            else
-                prev_pos == null and cur_pos == null;
-            if (!unchanged) {
-                st.reset();
-                if (moved_len < moved_cps.len) {
-                    moved_cps[moved_len] = st.cp;
-                    moved_len += 1;
-                }
-            }
-        }
-
-        // Remove bigrams referencing any moved character.
-        if (moved_len > 0) {
-            var write_idx: usize = 0;
-            for (self.bigrams[0..self.bigram_len]) |b| {
-                if (!containsCp(moved_cps[0..moved_len], b.prev) and
-                    !containsCp(moved_cps[0..moved_len], b.cur))
-                {
-                    self.bigrams[write_idx] = b;
-                    write_idx += 1;
-                }
-            }
-            self.bigram_len = write_idx;
-
-            if (self.focus_cp) |fcp| {
-                if (containsCp(moved_cps[0..moved_len], fcp)) {
-                    self.focus_history_len = 0;
-                }
-            }
-            self.refreshFocusKey();
-        }
-
-        return moved_len;
-    }
 };
-
-fn findPosition(positions: []const layout_profile.KeyPosition, cp: u21) ?layout_profile.KeyPosition {
-    for (positions) |pos| {
-        if (pos.cp == cp) return pos;
-    }
-    return null;
-}
 
 fn findCurrent(current: []const KnownPosition, cp: u21) ?KnownPosition {
     for (current) |entry| {
@@ -1000,7 +1031,7 @@ test "linear regression forecast enforces R^2 >= 0.5 and rejects flat or noisy d
     try t.expectEqual(@as(?u32, null), forecastRoundsToUnlock(&noisy));
 }
 
-test "bounded bigram top-3 ranking and layout-diff partial reset" {
+test "bounded bigram top-3 ranking" {
     const t = std.testing;
     var model = LearningModel.init("asdf", 4, .{ .target_wpm = 35.0 });
     for (0..4) |_| {
@@ -1020,30 +1051,6 @@ test "bounded bigram top-3 ranking and layout-diff partial reset" {
     try t.expectEqual(@as(u21, 'd'), slowest[1].cur);
     try t.expectEqual(@as(u21, 'd'), slowest[2].prev);
     try t.expectEqual(@as(u21, 'f'), slowest[2].cur);
-
-    // Populate stats for 'a' and 's', then move only 's' in layout diff.
-    model.getOrAddStat('a').?.* = .{ .cp = 'a', .ema_ms = 250.0, .ema_acc = 0.98, .samples = 25, .acc_initialized = true };
-    model.getOrAddStat('s').?.* = .{ .cp = 's', .ema_ms = 260.0, .ema_acc = 0.97, .samples = 25, .acc_initialized = true };
-
-    const prev_pos = [_]layout_profile.KeyPosition{
-        .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false },
-        .{ .cp = 's', .layer = 0, .slot = 11, .shift = false },
-    };
-    const cur_pos = [_]layout_profile.KeyPosition{
-        .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false },
-        .{ .cp = 's', .layer = 0, .slot = 12, .shift = false }, // moved!
-    };
-    const reset_count = model.applyLayoutDiff(&prev_pos, &cur_pos);
-    try t.expectEqual(@as(usize, 1), reset_count);
-    // 'a' preserved, 's' reset.
-    try t.expectEqual(@as(u32, 25), model.getStat('a').?.samples);
-    try t.expectEqual(@as(u32, 0), model.getStat('s').?.samples);
-    try t.expectApproxEqAbs(@as(f32, 0.0), model.getStat('s').?.ema_ms, 0.001);
-    // Bigrams involving 's' were cleared, 'd'->'f' and 'f'->'a' remain.
-    const after = model.slowestBigrams(3, &top);
-    try t.expectEqual(@as(usize, 2), after.len);
-    try t.expectEqual(@as(u21, 'f'), after[0].prev);
-    try t.expectEqual(@as(u21, 'd'), after[1].prev);
 }
 
 test "an edited layout replaces the unlock order and keeps the unlocked count" {

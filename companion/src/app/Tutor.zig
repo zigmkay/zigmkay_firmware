@@ -116,10 +116,16 @@ fn syncProfileAndPersistence(
     const self = &app.tutor;
     const derived = deriveLayoutProfile(app, board, labels, model.document(), host_layout) catch return;
 
+    const board_id = board.entry.selector[0..@min(board.entry.selector.len, self.bound_board_id.len)];
+    const board_input: desktop.practice_controller.Controller.BoardInput = .{
+        .id = board_id,
+        .labels = labels.practiceLabels(),
+    };
     const needs_rebind = !self.controller.profile_bound or
         self.bound_profile_hash == null or
         !std.mem.eql(u8, &self.bound_profile_hash.?, &derived.profile_hash) or
-        !std.mem.eql(u8, &self.controller.profile.positions_digest, &derived.positions_digest);
+        !std.mem.eql(u8, &self.controller.profile.positions_digest, &derived.positions_digest) or
+        !std.mem.eql(u8, self.bound_board_id[0..self.bound_board_id_len], board_id);
 
     if (!needs_rebind) return;
 
@@ -127,12 +133,10 @@ fn syncProfileAndPersistence(
         std.mem.eql(u8, &self.bound_profile_hash.?, &derived.profile_hash);
 
     if (same_profile) {
-        // Individual keys edited within the same profile: partial reset only moved keys.
-        const prev_positions = self.controller.profile.keyPositionSlice();
-        _ = self.controller.learning.applyLayoutDiff(prev_positions, derived.keyPositionSlice());
-        if (derived.unlock_len > 0) self.controller.learning.setUnlockOrder(derived.unlockSlice());
-        self.controller.profile = derived;
-        self.controller.needs_persist = true;
+        // Another keyboard or edited keys of the same layout type: statistics
+        // stay, and moved practised characters wait for the user's answer.
+        self.controller.adoptLayout(derived, board_input);
+        self.rememberBoard(board_id);
         return;
     }
 
@@ -173,13 +177,17 @@ fn syncProfileAndPersistence(
     self.persist_retry_us = 0;
 
     _ = self.controller.bindProfile(derived, if (loaded) |l| (if (l.existed) l.state else null) else null);
+    self.controller.adoptBoard(board_input);
     self.bound_profile_hash = derived.profile_hash;
-    const bid_len = @min(board.entry.selector.len, self.bound_board_id.len);
-    @memcpy(self.bound_board_id[0..bid_len], board.entry.selector[0..bid_len]);
-    self.bound_board_id_len = bid_len;
+    self.rememberBoard(board_id);
     const hl_len = @min(host_layout.len, self.bound_host_layout.len);
     @memcpy(self.bound_host_layout[0..hl_len], host_layout[0..hl_len]);
     self.bound_host_layout_len = hl_len;
+}
+
+fn rememberBoard(self: *Tutor, board_id: []const u8) void {
+    @memcpy(self.bound_board_id[0..board_id.len], board_id);
+    self.bound_board_id_len = board_id.len;
 }
 
 fn flushPersistence(app: *App, now_us: u64) void {

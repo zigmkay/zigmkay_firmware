@@ -5,7 +5,8 @@ const std = @import("std");
 const layout_profile = @import("practice_layout_profile.zig");
 const model = @import("practice_model.zig");
 
-pub const schema_version: u32 = 1;
+/// 2 replaced the layout-diff key positions with known positions and board snapshots.
+pub const schema_version: u32 = 2;
 pub const state_filename = "state.zon";
 pub const corrupt_backup_filename = "state.zon.corrupt";
 pub const runs_filename = "runs.jsonl";
@@ -43,12 +44,34 @@ pub const PersistedBigram = struct {
     samples: u32,
 };
 
-pub const PersistedKeyPosition = struct {
+pub const PersistedSeenKey = struct {
+    board: u64,
+    key_index: u16,
+    combo_key_index: ?u16 = null,
+    layer_key_index: ?u16 = null,
+};
+
+/// A position at which the statistics of `cp` count as valid; one
+/// character can have several, oldest first.
+pub const PersistedKnownPosition = struct {
     cp: u32,
     layer: u8,
     slot: u16,
     shift: bool,
     combo_slot: ?u16 = null,
+    seen: ?PersistedSeenKey = null,
+};
+
+pub const PersistedBoardLayer = struct {
+    layer: u8,
+    /// Single-character tap label per key; 0 is none.
+    labels: []const u32,
+};
+
+pub const PersistedBoard = struct {
+    board_id: []const u8,
+    key_count: u16,
+    layers: []const PersistedBoardLayer = &.{},
 };
 
 pub const ProfileState = struct {
@@ -74,7 +97,9 @@ pub const ProfileState = struct {
     focus_history: []const PersistedFocusSample = &.{},
     key_stats: []const PersistedKeyStat = &.{},
     bigrams: []const PersistedBigram = &.{},
-    key_positions: []const PersistedKeyPosition = &.{},
+    known_positions: []const PersistedKnownPosition = &.{},
+    /// Keyboards that known positions were last seen on, oldest first.
+    boards_seen: []const PersistedBoard = &.{},
 };
 
 pub const LoadedState = struct {
@@ -347,14 +372,13 @@ pub fn resetProfile(
     }
 }
 
-/// Populates a `LearningModel` from persisted `ProfileState` and applies a layout-diff
-/// partial reset whenever individual keys moved in the current `LayoutProfile`.
-/// Returns the number of characters reset by layout diff.
+/// Populates a `LearningModel` from persisted `ProfileState`. Nothing is reset
+/// when keys moved; `LearningModel.adoptPositions` takes over the layout.
 pub fn hydrateLearningModel(
     state: ProfileState,
     profile: *const layout_profile.LayoutProfile,
     learning: *model.LearningModel,
-) usize {
+) void {
     const initial_unlocked = if (state.unlocked_count > 0)
         @max(@as(usize, state.unlocked_count), profile.zone1_len)
     else
@@ -408,27 +432,48 @@ pub fn hydrateLearningModel(
         }
     }
 
-    var reset_count: usize = 0;
-    if (state.key_positions.len > 0) {
-        var prev_buf: [layout_profile.max_routes]layout_profile.KeyPosition = undefined;
-        const n = @min(state.key_positions.len, prev_buf.len);
-        for (0..n) |i| {
-            const p = state.key_positions[i];
-            prev_buf[i] = .{
-                .cp = @intCast(@min(p.cp, std.math.maxInt(u21))),
+    for (state.known_positions) |p| {
+        if (p.cp > std.math.maxInt(u21)) continue;
+        if (learning.known_len >= model.max_known_positions) break;
+        learning.known[learning.known_len] = .{
+            .pos = .{
+                .cp = @intCast(p.cp),
                 .layer = p.layer,
                 .slot = p.slot,
                 .shift = p.shift,
                 .combo_slot = p.combo_slot,
-            };
-        }
-        reset_count = learning.applyLayoutDiff(prev_buf[0..n], profile.keyPositionSlice());
+            },
+            .seen = if (p.seen) |s| .{
+                .board = s.board,
+                .key_index = s.key_index,
+                .combo_key_index = s.combo_key_index,
+                .layer_key_index = s.layer_key_index,
+            } else null,
+        };
+        learning.known_len += 1;
     }
 
     if (learning.focus_cp == null) {
         learning.focus_cp = learning.computeFocusKey();
     }
-    return reset_count;
+}
+
+/// Restores the keyboard snapshots of a profile, dropping malformed entries.
+pub fn hydrateBoards(state: ProfileState, boards: *model.BoardSnapshots) void {
+    boards.* = .{};
+    const first = state.boards_seen.len -| model.max_board_snapshots;
+    for (state.boards_seen[first..]) |saved| {
+        if (saved.board_id.len == 0 or saved.key_count == 0) continue;
+        const board = boards.use(saved.board_id, saved.key_count);
+        for (saved.layers) |layer| {
+            var row: [layout_profile.max_keys]u21 = @splat(0);
+            const n = @min(layer.labels.len, board.key_count);
+            for (layer.labels[0..n], row[0..n]) |cp, *dst| {
+                dst.* = if (cp <= std.math.maxInt(u21)) @intCast(cp) else 0;
+            }
+            _ = board.setLayer(layer.layer, row[0..board.key_count]);
+        }
+    }
 }
 
 /// Captures an arena-backed `ProfileState` snapshot from the live model + profile + settings.
@@ -437,6 +482,7 @@ pub fn buildProfileState(
     base_settings: ProfileState,
     learning: *const model.LearningModel,
     profile: *const layout_profile.LayoutProfile,
+    boards: *const model.BoardSnapshots,
     board_id: []const u8,
     host_layout: []const u8,
 ) !ProfileState {
@@ -472,16 +518,49 @@ pub fn buildProfileState(
         };
     }
 
-    const positions = profile.keyPositionSlice();
-    const pos_out = try arena.alloc(PersistedKeyPosition, positions.len);
-    for (positions, pos_out) |src, *dst| {
-        dst.* = .{
-            .cp = src.cp,
-            .layer = src.layer,
-            .slot = src.slot,
-            .shift = src.shift,
-            .combo_slot = src.combo_slot,
+    // Only practised characters need their positions; the rest follow the layout.
+    var known_len: usize = 0;
+    for (learning.knownSlice()) |entry| {
+        if (learning.hasData(entry.pos.cp)) known_len += 1;
+    }
+    const known_out = try arena.alloc(PersistedKnownPosition, known_len);
+    var known_i: usize = 0;
+    for (learning.knownSlice()) |entry| {
+        if (!learning.hasData(entry.pos.cp)) continue;
+        known_out[known_i] = .{
+            .cp = entry.pos.cp,
+            .layer = entry.pos.layer,
+            .slot = entry.pos.slot,
+            .shift = entry.pos.shift,
+            .combo_slot = entry.pos.combo_slot,
+            .seen = if (entry.seen) |s| .{
+                .board = s.board,
+                .key_index = s.key_index,
+                .combo_key_index = s.combo_key_index,
+                .layer_key_index = s.layer_key_index,
+            } else null,
         };
+        known_i += 1;
+    }
+
+    // Keep the keyboards that a saved position was last seen on.
+    var boards_out: std.ArrayList(PersistedBoard) = .empty;
+    for (boards.slice()) |*board| {
+        const referenced = for (known_out) |k| {
+            if (k.seen) |s| if (s.board == board.hash) break true;
+        } else false;
+        if (!referenced) continue;
+        const layers = try arena.alloc(PersistedBoardLayer, board.layer_len);
+        for (layers, 0..) |*dst, i| {
+            const labels = try arena.alloc(u32, board.key_count);
+            for (labels, board.labels[i][0..board.key_count]) |*out, cp| out.* = cp;
+            dst.* = .{ .layer = board.layers[i], .labels = labels };
+        }
+        try boards_out.append(arena, .{
+            .board_id = try arena.dupe(u8, board.idSlice()),
+            .key_count = board.key_count,
+            .layers = layers,
+        });
     }
 
     var state = base_settings;
@@ -498,7 +577,8 @@ pub fn buildProfileState(
     state.focus_history = focus_hist;
     state.key_stats = stats;
     state.bigrams = bgs;
-    state.key_positions = pos_out;
+    state.known_positions = known_out;
+    state.boards_seen = try boards_out.toOwnedSlice(arena);
     return state;
 }
 
@@ -530,10 +610,16 @@ test "state.zon roundtrip, atomic overwrite, corrupt recovery and reset" {
         .{ .ema_ms = 360.0, .confidence = 0.50 },
         .{ .ema_ms = 330.0, .confidence = 0.65 },
     };
-    const saved_pos = [_]PersistedKeyPosition{
+    const saved_known = [_]PersistedKnownPosition{
         .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false },
-        .{ .cp = 's', .layer = 0, .slot = 11, .shift = false },
+        .{ .cp = 'z', .layer = 0, .slot = 11, .shift = false, .seen = .{ .board = 7, .key_index = 3 } },
+        .{ .cp = 'z', .layer = 1, .slot = 12, .shift = false, .combo_slot = 13, .seen = .{ .board = 8, .key_index = 4, .combo_key_index = 5, .layer_key_index = 30 } },
     };
+    const saved_boards = [_]PersistedBoard{.{
+        .board_id = "keycaprio_34",
+        .key_count = 4,
+        .layers = &.{ .{ .layer = 0, .labels = &.{ 'q', 'w', 0, 'z' } }, .{ .layer = 1, .labels = &.{ '1', '2', '3', '4' } } },
+    }};
     const state: ProfileState = .{
         .language = .en,
         .board_id = "keycaprio_34",
@@ -553,7 +639,8 @@ test "state.zon roundtrip, atomic overwrite, corrupt recovery and reset" {
         .focus_cp = 's',
         .focus_history = &saved_hist,
         .key_stats = &saved_stats,
-        .key_positions = &saved_pos,
+        .known_positions = &saved_known,
+        .boards_seen = &saved_boards,
     };
     try saveState(t.allocator, t.io, tmp.dir, hash, state);
 
@@ -569,6 +656,16 @@ test "state.zon roundtrip, atomic overwrite, corrupt recovery and reset" {
     try t.expectEqual(@as(u32, 4), loaded.state.streak_days);
     try t.expectEqual(@as(usize, 2), loaded.state.key_stats.len);
     try t.expectEqual(@as(usize, 2), loaded.state.focus_history.len);
+    try t.expectEqual(@as(usize, 3), loaded.state.known_positions.len);
+    try t.expectEqual(@as(?u16, 13), loaded.state.known_positions[2].combo_slot);
+    try t.expectEqual(@as(?u16, 30), loaded.state.known_positions[2].seen.?.layer_key_index);
+    try t.expectEqual(@as(usize, 1), loaded.state.boards_seen.len);
+    try t.expectEqual(@as(u32, 'z'), loaded.state.boards_seen[0].layers[0].labels[3]);
+    var boards: model.BoardSnapshots = .{};
+    hydrateBoards(loaded.state, &boards);
+    const board = boards.find(model.boardHash("keycaprio_34")).?;
+    try t.expectEqualSlices(u21, &.{ '1', '2', '3', '4' }, board.layerLabels(1).?);
+    try t.expect(board.layerLabels(2) == null);
 
     // Atomic overwrite preserves new state cleanly
     var updated = state;
@@ -679,7 +776,7 @@ test "dailyView rolls daily seconds and lapses the streak without mutating state
     try t.expectEqual(@as(u32, 840), unknown.active_seconds);
 }
 
-test "daily goal, UTC streak rollover, and layout-diff partial reset integration" {
+test "daily goal, UTC streak rollover, and moved keys keeping their statistics" {
     const t = std.testing;
     var st: ProfileState = .{};
     const day0: u64 = 20_000 * 86_400 + 3600;
@@ -702,7 +799,7 @@ test "daily goal, UTC streak rollover, and layout-diff partial reset integration
     try t.expectEqual(@as(u32, 60), st.daily_active_seconds);
     try t.expectEqual(@as(u32, 1), st.streak_days);
 
-    // Layout-diff partial reset through hydrateLearningModel
+    // A moved key keeps its statistics through hydrateLearningModel.
     var profile: layout_profile.LayoutProfile = .{
         .unlock_len = 2,
         .zone1_len = 2,
@@ -719,15 +816,67 @@ test "daily goal, UTC streak rollover, and layout-diff partial reset integration
             .{ .cp = 'a', .ema_ms = 220.0, .ema_acc = 0.99, .samples = 24 },
             .{ .cp = 's', .ema_ms = 230.0, .ema_acc = 0.98, .samples = 24 },
         },
-        .key_positions = &.{
+        .known_positions = &.{
             .{ .cp = 'a', .layer = 0, .slot = 10, .shift = false },
             .{ .cp = 's', .layer = 0, .slot = 11, .shift = false },
         },
     };
 
     var learning: model.LearningModel = undefined;
-    const resets = hydrateLearningModel(persisted, &profile, &learning);
-    try t.expectEqual(@as(usize, 1), resets);
+    hydrateLearningModel(persisted, &profile, &learning);
     try t.expectEqual(@as(u32, 24), learning.getStat('a').?.samples);
-    try t.expectEqual(@as(u32, 0), learning.getStat('s').?.samples);
+    try t.expectEqual(@as(u32, 24), learning.getStat('s').?.samples);
+    var current: [2]model.KnownPosition = undefined;
+    for (profile.keyPositionSlice(), &current) |pos, *dst| dst.* = .{ .pos = pos };
+    _ = learning.adoptPositions(&current);
+    var moved: [4]u21 = undefined;
+    try t.expectEqualSlices(u21, &.{'s'}, learning.unconfirmedMoves(&current, &moved));
+    try t.expectEqual(@as(u32, 24), learning.getStat('s').?.samples);
+}
+
+test "a schema 1 state.zon is backed up and starts over" {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const hash: [32]u8 = @splat(0x31);
+    var rel_buf: [96]u8 = undefined;
+    var dir = try tmp.dir.createDirPathOpen(t.io, profileRelPath(hash, &rel_buf), .{});
+    defer dir.close(t.io);
+    try dir.writeFile(t.io, .{ .sub_path = state_filename, .data =
+        \\.{ .schema_version = 1, .total_rounds = 9, .key_positions = .{ .{ .cp = 97, .layer = 0, .slot = 1, .shift = false } } }
+        \\
+    });
+    var loaded = try loadState(t.allocator, t.io, tmp.dir, hash);
+    defer loaded.deinit();
+    try t.expect(loaded.recovered_from_corrupt);
+    try t.expectEqual(@as(u32, 0), loaded.state.total_rounds);
+    try dir.access(t.io, corrupt_backup_filename, .{});
+}
+
+test "saved state keeps practised positions and the keyboards they were seen on" {
+    const t = std.testing;
+    var arena = std.heap.ArenaAllocator.init(t.allocator);
+    defer arena.deinit();
+    var learning = model.LearningModel.init("az", 2, .{});
+    learning.getOrAddStat('z').?.* = .{ .cp = 'z', .ema_ms = 250, .ema_acc = 1, .samples = 22, .acc_initialized = true };
+    var boards: model.BoardSnapshots = .{};
+    for (0..model.max_board_snapshots + 2) |i| {
+        var id_buf: [16]u8 = undefined;
+        const id = std.fmt.bufPrint(&id_buf, "board-{d}", .{i}) catch unreachable;
+        _ = boards.use(id, 3).setLayer(0, &.{ 'a', 'z', 0 });
+    }
+    try t.expectEqual(model.max_board_snapshots, boards.len);
+    try t.expect(boards.find(model.boardHash("board-0")) == null);
+    const newest = model.boardHash("board-9");
+    _ = learning.adoptPositions(&.{
+        .{ .pos = .{ .cp = 'a', .layer = 0, .slot = 1, .shift = false }, .seen = .{ .board = newest, .key_index = 0 } },
+        .{ .pos = .{ .cp = 'z', .layer = 0, .slot = 2, .shift = false }, .seen = .{ .board = newest, .key_index = 1 } },
+    });
+    const profile: layout_profile.LayoutProfile = .{};
+    const state = try buildProfileState(arena.allocator(), .{}, &learning, &profile, &boards, "board-9", "en-US");
+    // The unpractised 'a' follows the layout and is not saved.
+    try t.expectEqual(@as(usize, 1), state.known_positions.len);
+    try t.expectEqual(@as(u32, 'z'), state.known_positions[0].cp);
+    try t.expectEqual(@as(usize, 1), state.boards_seen.len);
+    try t.expectEqualStrings("board-9", state.boards_seen[0].board_id);
 }

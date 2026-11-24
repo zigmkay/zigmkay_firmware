@@ -271,7 +271,7 @@ pub const LayoutProfile = struct {
     combos: [max_combos]CharRoute = undefined,
     combo_len: usize = 0,
 
-    /// Sorted per-character physical key-position map for layout-diff partial resets.
+    /// Sorted per-character physical key positions; see `LearningModel.adoptPositions`.
     key_positions: [max_routes]KeyPosition = undefined,
     key_position_len: usize = 0,
 

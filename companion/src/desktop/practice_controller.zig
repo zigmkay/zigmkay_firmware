@@ -196,6 +196,13 @@ pub const Controller = struct {
     pending_run: ?PendingRun = null,
     reset_requested: bool = false,
     utc_now_sec: u64 = 0,
+    /// Practised characters the bound layout moved; derived, never saved.
+    review: [model.max_tracked_keys]u21 = undefined,
+    review_len: usize = 0,
+    /// Keyboards the profile was shown on, for the before/now comparison.
+    boards: model.BoardSnapshots = .{},
+    /// `model.boardHash` of the current keyboard; null until `adoptBoard`.
+    board_hash: ?u64 = null,
 
     custom_text: [2048]u8 = @splat(0),
     custom_text_len: usize = 0,
@@ -209,15 +216,17 @@ pub const Controller = struct {
         return .{ .generation = self.generation, .snapshot = self.current, .intent = intent };
     }
 
-    /// Binds a derived `LayoutProfile` and optional persisted `ProfileState`.
-    /// Applies layout-diff partial reset when persisted key positions exist.
     /// Drops unsaved work of the bound profile before another profile is bound.
     pub fn discardPending(self: *Controller) void {
+        self.review_len = 0;
         self.pending_run = null;
         self.reset_requested = false;
         self.needs_persist = false;
     }
 
+    /// Binds a derived `LayoutProfile` and optional persisted `ProfileState`.
+    /// Nothing is reset when keys moved; returns how many practised
+    /// characters sit at a position their statistics were not made at.
     pub fn bindProfile(
         self: *Controller,
         profile: layout_profile.LayoutProfile,
@@ -255,9 +264,9 @@ pub const Controller = struct {
                 .flow_backspace => .flow_backspace,
             };
             self.config.daily_goal_minutes = std.math.clamp(st.daily_goal_minutes, 5, 120);
-            const reset = storage.hydrateLearningModel(st, &self.profile, &self.learning);
+            storage.hydrateLearningModel(st, &self.profile, &self.learning);
+            storage.hydrateBoards(st, &self.boards);
             self.learning.config.target_wpm = target_wpm;
-            return reset;
         } else {
             self.persisted = .{};
             const order = if (profile.unlock_len > 0) profile.unlockSlice() else layout_profile.english_letter_frequency;
@@ -266,8 +275,101 @@ pub const Controller = struct {
                 .language = .en,
                 .target_wpm = self.config.target_wpm,
             });
-            return 0;
+            self.boards = .{};
         }
+        // The keyboard is named by `adoptBoard`.
+        self.board_hash = null;
+        self.adoptCurrent();
+        return self.review_len;
+    }
+
+    /// The keyboard a profile is shown on, for the before/now comparison.
+    pub const BoardInput = struct {
+        id: []const u8,
+        labels: practice.Labels,
+    };
+
+    /// Practised characters that the bound layout moved and the user has not
+    /// answered for yet.
+    pub fn reviewSlice(self: *const Controller) []const u21 {
+        return self.review[0..self.review_len];
+    }
+
+    /// The bound layout's positions, with the keys of the current keyboard.
+    pub fn currentPositions(
+        self: *const Controller,
+        buf: *[layout_profile.max_routes]model.KnownPosition,
+    ) []model.KnownPosition {
+        const positions = self.profile.keyPositionSlice();
+        for (positions, buf[0..positions.len]) |pos, *dst| {
+            dst.* = .{
+                .pos = pos,
+                .seen = if (self.board_hash) |board| seenFor(&self.profile, pos.cp, board) else null,
+            };
+        }
+        return buf[0..positions.len];
+    }
+
+    fn seenFor(profile: *const layout_profile.LayoutProfile, cp: u21, board: u64) ?model.SeenKey {
+        const route = profile.routeFor(cp) orelse return null;
+        return .{
+            .board = board,
+            .key_index = @intCast(route.key_index),
+            .combo_key_index = if (route.combo_key_index) |k| @intCast(k) else null,
+            .layer_key_index = if (route.layer != 0)
+                (if (route.layer_activator) |k| @as(u16, @intCast(k)) else null)
+            else
+                null,
+        };
+    }
+
+    pub fn refreshReview(self: *Controller) void {
+        var buf: [layout_profile.max_routes]model.KnownPosition = undefined;
+        const current = self.currentPositions(&buf);
+        self.review_len = self.learning.unconfirmedMoves(current, &self.review).len;
+    }
+
+    fn adoptCurrent(self: *Controller) void {
+        var buf: [layout_profile.max_routes]model.KnownPosition = undefined;
+        const current = self.currentPositions(&buf);
+        if (self.learning.adoptPositions(current)) self.needs_persist = true;
+        self.refreshReview();
+    }
+
+    fn hasPractice(self: *const Controller) bool {
+        for (self.learning.stats[0..self.learning.stat_len]) |st| {
+            if (st.samples > 0 or st.acc_initialized) return true;
+        }
+        return false;
+    }
+
+    /// Records the keyboard the bound profile is shown on: its labels for the
+    /// layers the layout uses, and the keys each position sits on.
+    pub fn adoptBoard(self: *Controller, board: BoardInput) void {
+        const key_count = @min(board.labels.key_count, layout_profile.max_keys);
+        const snapshot = self.boards.use(board.id, key_count);
+        var layers: u16 = 1;
+        for (self.profile.routeSlice()) |route| {
+            if (route.layer < 16) layers |= @as(u16, 1) << @intCast(route.layer);
+        }
+        var snapshot_changed = false;
+        var row: [layout_profile.max_keys]u21 = undefined;
+        for (0..@min(board.labels.layer_count, 16)) |layer| {
+            if (layers & (@as(u16, 1) << @intCast(layer)) == 0) continue;
+            snapshotLayer(board.labels, layer, row[0..key_count]);
+            if (snapshot.setLayer(@intCast(layer), row[0..key_count])) snapshot_changed = true;
+        }
+        self.board_hash = snapshot.hash;
+        self.adoptCurrent();
+        if (snapshot_changed and self.hasPractice()) self.needs_persist = true;
+    }
+
+    /// Follows an edited layout of the bound profile. Statistics stay; moved
+    /// practised characters wait for the user's answer in `review`.
+    pub fn adoptLayout(self: *Controller, profile: layout_profile.LayoutProfile, board: ?BoardInput) void {
+        if (profile.unlock_len > 0) self.learning.setUnlockOrder(profile.unlockSlice());
+        self.profile = profile;
+        if (board) |b| self.adoptBoard(b) else self.adoptCurrent();
     }
 
     pub fn setCustomText(self: *Controller, text: []const u8) void {
@@ -399,6 +501,7 @@ pub const Controller = struct {
         self.persisted.total_rounds = 0;
         self.persisted.rounds_since_unlock = 0;
         self.persisted.unlocked_count = @intCast(initial);
+        self.adoptCurrent();
         self.last_round_wpm = null;
         self.rundown = null;
         self.pending_run = null;
@@ -641,6 +744,7 @@ pub const Controller = struct {
             self.persisted,
             &self.learning,
             &self.profile,
+            &self.boards,
             board_id,
             host_layout,
         );
@@ -666,6 +770,19 @@ pub const Controller = struct {
         };
     }
 };
+
+/// The single-character tap labels of one layer; 0 for any other key.
+pub fn snapshotLayer(labels: practice.Labels, layer: usize, out: []u21) void {
+    const active: u16 = 1 | (@as(u16, 1) << @intCast(@min(layer, 15)));
+    for (out, 0..) |*dst, key| {
+        dst.* = 0;
+        if (key >= labels.key_count) continue;
+        const text = labels.get(layer, key, 0, active).text orelse continue;
+        const len = std.unicode.utf8ByteSequenceLength(if (text.len > 0) text[0] else continue) catch continue;
+        if (len != text.len) continue;
+        dst.* = std.unicode.utf8Decode(text) catch 0;
+    }
+}
 
 fn sameOpening(session: *const practice.Session, text: []const u8) bool {
     if (session.reference_len < 12 or text.len < 12) return false;
