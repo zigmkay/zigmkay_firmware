@@ -103,7 +103,7 @@ pub fn drawSettingsPopover(
     const wpm_title = try std.fmt.allocPrint(arena, "Target speed: {d:.0} WPM", .{owner.config.target_wpm});
     presentation.label(wpm_title, .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
     cy += 23;
-    const wpm_presets = [_]f32{ 25, 35, 45, 60, 80 };
+    const wpm_presets = [_]f32{ 15, 20, 25, 35, 45 };
     const pw = (inner_w - 16) / 5.0;
     for (wpm_presets, 0..) |preset, i| {
         const active = @abs(owner.config.target_wpm - preset) < 0.5;

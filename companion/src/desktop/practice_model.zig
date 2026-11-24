@@ -12,8 +12,11 @@ pub const Language = enum(u8) {
 pub const min_clean_dt_us: u64 = 25_000; // 25 ms
 pub const max_clean_dt_us: u64 = 2_000_000; // 2000 ms
 pub const ema_ms_alpha: f32 = 0.25;
-pub const ema_acc_alpha: f32 = 0.20;
-pub const accuracy_gate: f32 = 0.95;
+/// First-try accuracy of a key is measured over its most recent presses, so
+/// early mistakes on a new keyboard stop counting once they are this far back.
+pub const accuracy_window: u8 = 30;
+/// At most two misses in the last 30 presses.
+pub const accuracy_gate: f32 = 0.93;
 pub const min_samples_for_mastery: u32 = 20;
 pub const min_rounds_between_unlocks: u32 = 2;
 pub const focus_history_capacity: usize = 10;
@@ -30,12 +33,31 @@ pub const max_known_positions: usize = layout_profile.max_routes + max_tracked_k
 pub const KeyStat = struct {
     cp: u21 = 0,
     ema_ms: f32 = 0.0,
+    /// First-try accuracy over `recent_hits`; older saves without a window
+    /// keep their smoothed value until the key is typed again.
     ema_acc: f32 = 0.0,
     samples: u32 = 0,
     acc_initialized: bool = false,
+    /// One bit per recent press, newest in bit 0; 1 is a first-try hit.
+    recent_hits: u32 = 0,
+    recent_len: u8 = 0,
 
     pub fn confidence(self: KeyStat, target_wpm: f32) f32 {
         return computeConfidence(self.ema_ms, self.ema_acc, self.samples, target_wpm);
+    }
+
+    /// Appends the `len` oldest-first outcomes in `hits` (newest in bit 0)
+    /// to the accuracy window and recomputes the accuracy from it.
+    pub fn recordOutcomes(self: *KeyStat, hits: u32, len: u8) void {
+        if (len == 0) return;
+        const mask: u32 = (@as(u32, 1) << accuracy_window) - 1;
+        const n: u5 = @intCast(@min(len, accuracy_window));
+        self.recent_hits = ((self.recent_hits << n) | (hits & ((@as(u32, 1) << n) - 1))) & mask;
+        self.recent_len = @min(accuracy_window, self.recent_len + n);
+        const window_mask: u32 = (@as(u32, 1) << @as(u5, @intCast(self.recent_len))) - 1;
+        const hit_count: f32 = @floatFromInt(@popCount(self.recent_hits & window_mask));
+        self.ema_acc = hit_count / @as(f32, @floatFromInt(self.recent_len));
+        self.acc_initialized = true;
     }
 
     pub fn wpm(self: KeyStat) f32 {
@@ -48,6 +70,8 @@ pub const KeyStat = struct {
         self.ema_acc = 0.0;
         self.samples = 0;
         self.acc_initialized = false;
+        self.recent_hits = 0;
+        self.recent_len = 0;
     }
 };
 
@@ -73,7 +97,7 @@ pub const KeySummary = struct {
 
 pub const ModelConfig = struct {
     language: Language = .en,
-    target_wpm: f32 = 35.0,
+    target_wpm: f32 = 20.0,
 };
 
 /// The keys of one keyboard that last produced a known position, for the
@@ -195,7 +219,7 @@ pub const RoundOutcome = struct {
 };
 
 /// Computes per-key confidence in [0.0, 1.0].
-/// Accuracy below 95% and sample counts below 20 cannot reach 1.0 mastery
+/// Accuracy below `accuracy_gate` and sample counts below 20 cannot reach 1.0 mastery
 /// even when raw speed exceeds target_wpm.
 pub fn computeConfidence(ema_ms: f32, ema_acc: f32, samples: u32, target_wpm: f32) f32 {
     if (samples == 0 or ema_ms <= 0.0 or target_wpm <= 0.0) return 0.0;
@@ -241,6 +265,8 @@ pub const RoundCollector = struct {
         dt_len: usize = 0,
         total_positions: u32 = 0,
         first_try_hits: u32 = 0,
+        /// Last `accuracy_window` outcomes of this round, newest in bit 0.
+        recent_hits: u32 = 0,
     };
 
     const BigramEvent = struct {
@@ -280,6 +306,7 @@ pub const RoundCollector = struct {
         if (bucket) |b| {
             b.total_positions += 1;
             if (!had_error) b.first_try_hits += 1;
+            b.recent_hits = (b.recent_hits << 1) | @intFromBool(!had_error);
         }
 
         const clean_dt = filterCleanDtUs(
@@ -525,14 +552,7 @@ pub const LearningModel = struct {
             if (prev_focus != null and b.cp == prev_focus.?) prev_focus_practiced = true;
 
             const st = self.getOrAddStat(b.cp) orelse continue;
-            const round_acc: f32 = @as(f32, @floatFromInt(b.first_try_hits)) /
-                @as(f32, @floatFromInt(b.total_positions));
-            if (!st.acc_initialized) {
-                st.ema_acc = round_acc;
-                st.acc_initialized = true;
-            } else {
-                st.ema_acc = st.ema_acc * (1.0 - ema_acc_alpha) + round_acc * ema_acc_alpha;
-            }
+            st.recordOutcomes(b.recent_hits, @intCast(@min(b.total_positions, accuracy_window)));
 
             if (b.dt_len > 0) {
                 const med_ms = medianF32(b.dt_ms[0..b.dt_len]);
@@ -936,14 +956,45 @@ test "motor latency outlier filtering rejects first char, <25ms, >2000ms, post-p
     try t.expectEqual(@as(u32, 1), fb.first_try_hits);
 }
 
+test "accuracy counts only the last 30 presses of a key" {
+    const t = std.testing;
+    var model = LearningModel.init("asdf", 4, .{});
+    // An early round with 3 misses out of 10 presses.
+    var c1 = RoundCollector{};
+    for (0..10) |i| c1.recordCommit('a', @as(u64, i) * 300_000, i < 3);
+    _ = model.completeRound(&c1);
+    try t.expectApproxEqAbs(@as(f32, 0.7), model.getStat('a').?.ema_acc, 0.001);
+    // Three clean rounds push the misses out of the window entirely.
+    for (0..3) |_| {
+        var c = RoundCollector{};
+        for (0..10) |i| c.recordCommit('a', @as(u64, i) * 300_000, false);
+        _ = model.completeRound(&c);
+    }
+    const st = model.getStat('a').?;
+    try t.expectEqual(@as(u8, accuracy_window), st.recent_len);
+    try t.expectApproxEqAbs(@as(f32, 1.0), st.ema_acc, 0.001);
+    // Two misses in the last 30 still pass the gate, a third does not.
+    var two = st;
+    two.recordOutcomes(0b00, 2);
+    try t.expect(two.ema_acc >= accuracy_gate);
+    two.recordOutcomes(0b0, 1);
+    try t.expect(two.ema_acc < accuracy_gate);
+    // A long round keeps only its newest 30 outcomes.
+    var long = KeyStat{ .cp = 'a' };
+    var c2 = RoundCollector{};
+    for (0..40) |i| c2.recordCommit('a', @as(u64, i) * 300_000, i < 10);
+    long.recordOutcomes(c2.buckets[0].recent_hits, accuracy_window);
+    try t.expectApproxEqAbs(@as(f32, 1.0), long.ema_acc, 0.001);
+}
+
 test "round median, EMA convergence, accuracy gate and sample ramp in confidence formula" {
     const t = std.testing;
     // Median of even count
     try t.expectApproxEqAbs(@as(f32, 250.0), medianF32(&.{ 400.0, 100.0, 300.0, 200.0 }), 0.01);
 
     // Target 40 WPM => target_ms = 300ms.
-    // Accuracy gate: 94% accuracy prevents mastery even at 2x speed (150ms) and 50 samples.
-    const low_acc = computeConfidence(150.0, 0.94, 50, 40.0);
+    // Accuracy gate: 92% accuracy prevents mastery even at 2x speed (150ms) and 50 samples.
+    const low_acc = computeConfidence(150.0, 0.92, 50, 40.0);
     try t.expect(low_acc < 1.0);
 
     // Sample-count ramp: 10 samples (< 20) prevents mastery even at 2x speed and 100% accuracy.

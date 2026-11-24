@@ -30,6 +30,8 @@ pub const PersistedKeyStat = struct {
     ema_acc: f32,
     samples: u32,
     acc_initialized: bool = true,
+    recent_hits: u32 = 0,
+    recent_len: u8 = 0,
 };
 
 pub const PersistedFocusSample = struct {
@@ -82,7 +84,7 @@ pub const ProfileState = struct {
     host_layout: []const u8 = "default",
 
     active_stage: u8 = 1,
-    target_wpm: f32 = 35.0,
+    target_wpm: f32 = 20.0,
     guidance_mode: GuidanceMode = .guided,
     error_mode: ErrorMode = .stop_on_error,
     daily_goal_minutes: u16 = 15,
@@ -404,6 +406,8 @@ pub fn hydrateLearningModel(
             .ema_acc = ks.ema_acc,
             .samples = ks.samples,
             .acc_initialized = ks.acc_initialized,
+            .recent_hits = ks.recent_hits & ((@as(u32, 1) << model.accuracy_window) - 1),
+            .recent_len = @min(ks.recent_len, model.accuracy_window),
         };
     }
     for (state.bigrams) |bg| {
@@ -496,6 +500,8 @@ pub fn buildProfileState(
             .ema_acc = s.ema_acc,
             .samples = s.samples,
             .acc_initialized = s.acc_initialized,
+            .recent_hits = s.recent_hits,
+            .recent_len = s.recent_len,
         };
     }
 

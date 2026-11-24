@@ -21,8 +21,10 @@ home-row modifiers, and 2-key combos.
 Above the text stage, the **key-confidence strip** displays your unlock order
 derived directly from your layout's home row and English letter frequency:
 
-- **Green keys** have reached your target speed (default **35 WPM**) with at
-  least **95% first-try accuracy** across enough clean motor samples.
+- **Green keys** have reached your target speed (default **20 WPM**; Settings
+  offers 15–45) with at least **28 of their last 30 presses right on the first
+  try** across enough clean motor samples. Older mistakes stop counting once
+  they are 30 presses back.
 - **Blue keys** are unlocked and climbing toward mastery.
 - **Amber key** is your current **focus key**; drills bias roughly half of all
   words toward words containing the focus key.
@@ -98,7 +100,7 @@ All progress is stored **locally on your machine**—no account, no cloud sync,
 and no external database:
 
 - `<app_data>/tutor/profiles/<profile_hash>/state.zon` — atomic snapshot of
-  your per-key EMA speed/accuracy, unlocked keys, daily streak, settings, the
+  your per-key EMA speed, the outcome of each key's last 30 presses, unlocked keys, daily streak, settings, the
   key positions your statistics were made at, and the single-character labels
   of up to eight keyboards you practised on (schema 2; an older file is kept
   as `state.zon.corrupt` and the profile starts over).
