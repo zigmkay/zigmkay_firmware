@@ -1468,7 +1468,6 @@ fn drawLayoutChangesSheet(
         return;
     }
     const picks = ctx.picks;
-    if (picks.selected == null or std.mem.indexOfScalar(u21, entries, picks.selected.?) == null) picks.selected = entries[0];
 
     const screen = dvui.windowRect();
     const w: f32 = @min(@as(f32, 1000), screen.w - 40);
@@ -1489,13 +1488,17 @@ fn drawLayoutChangesSheet(
     const footer_h: f32 = 58;
     const body_h = h - body_top - footer_h - 8;
     const list_w = std.math.clamp(w * 0.34, 250.0, 340.0);
+    const visible_rows: usize = @max(2, @as(usize, @intFromFloat((body_h + 8) / 72.0)));
+    const visible = entries[0..if (entries.len > visible_rows) visible_rows - 1 else entries.len];
+    if (picks.selected == null or std.mem.indexOfScalar(u21, visible, picks.selected.?) == null) picks.selected = entries[0];
 
-    // Left: one row per entry.
+    // Left: one row per entry; a long list ends with a note about the rest.
     const row_h: f32 = 64;
+    const max_rows: usize = @max(2, @as(usize, @intFromFloat((body_h + 8) / (row_h + 8))));
+    const shown = if (entries.len > max_rows) max_rows - 1 else entries.len;
     var resets: usize = 0;
-    for (entries, 0..) |group, i| {
+    for (entries[0..shown], 0..) |group, i| {
         const y = body_top + @as(f32, @floatFromInt(i)) * (row_h + 8);
-        if (y + row_h > body_top + body_h) break;
         const reset = picks.has(group);
         if (reset) resets += 1;
         const selected = picks.selected.? == group;
@@ -1554,6 +1557,11 @@ fn drawLayoutChangesSheet(
             picks.set(group, true);
             picks.selected = group;
         }
+    }
+
+    if (shown < entries.len) {
+        const more = try std.fmt.allocPrint(arena, "{d} more keep their statistics unless you reset them under Settings → Reset characters…", .{entries.len - shown});
+        drawWrappedTwoLines(more, .{ .x = pad + 4, .y = body_top + @as(f32, @floatFromInt(shown)) * (row_h + 8) + 8, .w = list_w - 8, .h = 40 }, 12.5, theme.muted, 18, 0xe3f0);
     }
 
     // Right: before and now keyboards of the selected entry.
