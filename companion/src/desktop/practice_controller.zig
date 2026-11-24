@@ -153,6 +153,25 @@ pub const PendingRun = struct {
     weak_bigram_len: usize = 0,
 };
 
+pub const max_key_reset: usize = model.max_tracked_keys;
+
+/// Characters to start over, for the profile they were chosen in.
+pub const KeyReset = struct {
+    profile_hash: Digest,
+    cps: [max_key_reset]u21 = undefined,
+    len: usize = 0,
+
+    pub fn slice(self: *const KeyReset) []const u21 {
+        return self.cps[0..self.len];
+    }
+
+    pub fn add(self: *KeyReset, cp: u21) void {
+        if (self.len >= max_key_reset or std.mem.indexOfScalar(u21, self.slice(), cp) != null) return;
+        self.cps[self.len] = cp;
+        self.len += 1;
+    }
+};
+
 pub const Intent = union(enum) {
     choose: Config,
     set_mode: Mode,
@@ -170,6 +189,11 @@ pub const Intent = union(enum) {
     set_stage5_filter: struct { filter: generator.Stage5Filter, layer: ?usize = null },
     set_stage6_source: struct { source: generator.Stage6Source, zig_lesson: usize = 0 },
     reset_progress,
+    /// Keeps the statistics of the moved characters of this profile.
+    keep_moved_keys: Digest,
+    reset_keys: KeyReset,
+    /// Resets the listed moved characters and keeps the others.
+    resolve_layout_changes: KeyReset,
 };
 
 pub const Action = struct { generation: u64, snapshot: Digest, intent: Intent };
@@ -465,6 +489,9 @@ pub const Controller = struct {
                 self.resetProgress();
                 break :blk try self.start();
             },
+            .keep_moved_keys => |hash| try self.keepMovedKeys(hash),
+            .reset_keys => |request| try self.resetKeys(request),
+            .resolve_layout_changes => |request| try self.resolveLayoutChanges(request),
         };
     }
 
@@ -481,6 +508,47 @@ pub const Controller = struct {
             return self.start();
         }
         return;
+    }
+
+    fn checkProfile(self: *const Controller, profile_hash: Digest) !void {
+        if (!self.profile_bound or !std.mem.eql(u8, &profile_hash, &self.profile.profile_hash))
+            return error.StalePracticeAction;
+    }
+
+    /// Keeps the statistics of every moved character at its new position.
+    pub fn keepMovedKeys(self: *Controller, profile_hash: Digest) !void {
+        try self.checkProfile(profile_hash);
+        var buf: [layout_profile.max_routes]model.KnownPosition = undefined;
+        self.learning.confirmPositions(self.reviewSlice(), self.currentPositions(&buf));
+        self.refreshReview();
+        self.needs_persist = true;
+    }
+
+    /// Starts the chosen characters over; a letter takes its other case along.
+    /// The round in progress is replaced so its samples do not land in the
+    /// fresh statistics.
+    pub fn resetKeys(self: *Controller, request: KeyReset) !void {
+        try self.checkProfile(request.profile_hash);
+        const expanded = expandLetterCase(request.slice());
+        var buf: [layout_profile.max_routes]model.KnownPosition = undefined;
+        self.learning.resetKeys(expanded.slice(), self.currentPositions(&buf));
+        self.refreshReview();
+        self.needs_persist = true;
+        if (expanded.len > 0) try self.start();
+    }
+
+    /// Answers the layout-change question: `request` starts over and every
+    /// other moved character keeps its statistics.
+    pub fn resolveLayoutChanges(self: *Controller, request: KeyReset) !void {
+        try self.checkProfile(request.profile_hash);
+        const expanded = expandLetterCase(request.slice());
+        var keep: KeyReset = .{ .profile_hash = request.profile_hash };
+        for (self.reviewSlice()) |cp| {
+            if (std.mem.indexOfScalar(u21, expanded.slice(), cp) == null) keep.add(cp);
+        }
+        var buf: [layout_profile.max_routes]model.KnownPosition = undefined;
+        self.learning.confirmPositions(keep.slice(), self.currentPositions(&buf));
+        try self.resetKeys(request);
     }
 
     pub fn resetProgress(self: *Controller) void {
@@ -784,6 +852,19 @@ pub fn snapshotLayer(labels: practice.Labels, layer: usize, out: []u21) void {
     }
 }
 
+/// `cps` with the other case of every ASCII letter.
+pub fn expandLetterCase(cps: []const u21) KeyReset {
+    var out: KeyReset = .{ .profile_hash = @splat(0) };
+    for (cps) |cp| {
+        out.add(cp);
+        if (cp < 128 and std.ascii.isAlphabetic(@intCast(cp))) {
+            const ch: u8 = @intCast(cp);
+            out.add(if (std.ascii.isLower(ch)) std.ascii.toUpper(ch) else std.ascii.toLower(ch));
+        }
+    }
+    return out;
+}
+
 fn sameOpening(session: *const practice.Session, text: []const u8) bool {
     if (session.reference_len < 12 or text.len < 12) return false;
     for (session.reference[0..12], text[0..12]) |cp, byte| if (cp != byte) return false;
@@ -930,4 +1011,142 @@ test "discardPending drops a confirmed reset and round record before a profile s
     try std.testing.expect(!owner.reset_requested);
     try std.testing.expect(!owner.needs_persist);
     try std.testing.expect(owner.pending_run == null);
+}
+
+fn movedProfile(z_slot: u16) layout_profile.LayoutProfile {
+    var profile: layout_profile.LayoutProfile = .{
+        .unlock_len = 3,
+        .zone1_len = 3,
+        .key_position_len = 4,
+        .profile_hash = @splat(0x55),
+    };
+    @memcpy(profile.unlock_order[0..3], "asz");
+    profile.key_positions[0] = .{ .cp = 'Z', .layer = 0, .slot = z_slot, .shift = true };
+    profile.key_positions[1] = .{ .cp = 'a', .layer = 0, .slot = 1, .shift = false };
+    profile.key_positions[2] = .{ .cp = 's', .layer = 0, .slot = z_slot + 1, .shift = false };
+    profile.key_positions[3] = .{ .cp = 'z', .layer = 0, .slot = z_slot, .shift = false };
+    return profile;
+}
+
+fn practiseAll(owner: *Controller) void {
+    for ("aszZ") |ch| owner.learning.getOrAddStat(ch).?.* = .{
+        .cp = ch,
+        .ema_ms = 240,
+        .ema_acc = 0.99,
+        .samples = 30,
+        .acc_initialized = true,
+    };
+}
+
+test "moved practised keys wait for an answer and keeping them is saved" {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    try t.expectEqual(@as(usize, 0), owner.bindProfile(movedProfile(10), null));
+    practiseAll(owner);
+    owner.adoptLayout(movedProfile(10), null);
+    try t.expectEqual(@as(usize, 0), owner.reviewSlice().len);
+
+    owner.adoptLayout(movedProfile(20), null);
+    try t.expectEqualSlices(u21, &.{ 'Z', 's', 'z' }, owner.reviewSlice());
+    try t.expectEqual(@as(u32, 30), owner.learning.getStat('z').?.samples);
+    // An answer for another profile is refused.
+    try t.expectError(error.StalePracticeAction, owner.dispatch(owner.action(.{ .keep_moved_keys = @splat(0x66) }), 0));
+    try owner.dispatch(owner.action(.{ .keep_moved_keys = owner.profile.profile_hash }), 0);
+    try t.expectEqual(@as(usize, 0), owner.reviewSlice().len);
+    try owner.persistPending(t.allocator, t.io, tmp.dir, "board", "en-US");
+
+    // After a restart both keyboards are known.
+    var loaded = try storage.loadState(t.allocator, t.io, tmp.dir, owner.profile.profile_hash);
+    defer loaded.deinit();
+    const resumed = try t.allocator.create(Controller);
+    defer t.allocator.destroy(resumed);
+    resumed.* = .init(@splat(1));
+    try t.expectEqual(@as(usize, 0), resumed.bindProfile(movedProfile(10), loaded.state));
+    resumed.adoptLayout(movedProfile(20), null);
+    try t.expectEqual(@as(usize, 0), resumed.reviewSlice().len);
+
+    // A pending question is derived state and never outlives its profile.
+    resumed.adoptLayout(movedProfile(30), null);
+    try t.expect(resumed.reviewSlice().len > 0);
+    resumed.discardPending();
+    try t.expectEqual(@as(usize, 0), resumed.reviewSlice().len);
+}
+
+test "resetting characters saves state, keeps the history and replaces the round" {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    _ = owner.bindProfile(movedProfile(10), null);
+    practiseAll(owner);
+    try storage.appendRun(t.allocator, t.io, tmp.dir, owner.profile.profile_hash, .{
+        .utc_timestamp = 1,
+        .stage = 1,
+        .wpm = 30,
+        .accuracy = 99,
+        .active_seconds = 20,
+    });
+    try owner.start();
+    try owner.session.load("zzzz");
+    try owner.insertOs(true, "z", 1_000_000, false);
+    try owner.insertOs(true, "z", 1_200_000, false);
+    const generation = owner.generation;
+
+    var request: KeyReset = .{ .profile_hash = owner.profile.profile_hash };
+    request.add('z');
+    try owner.dispatch(owner.action(.{ .reset_keys = request }), 1_300_000);
+    try t.expect(owner.generation > generation);
+    try t.expectEqual(practice.State.ready, owner.session.state);
+    // Both cases start over; the other letters keep their statistics.
+    try t.expect(!owner.learning.hasData('z'));
+    try t.expect(!owner.learning.hasData('Z'));
+    try t.expectEqual(@as(u32, 30), owner.learning.getStat('a').?.samples);
+    try t.expect(owner.needs_persist and !owner.reset_requested);
+    try owner.persistPending(t.allocator, t.io, tmp.dir, "board", "en-US");
+
+    var loaded = try storage.loadState(t.allocator, t.io, tmp.dir, owner.profile.profile_hash);
+    defer loaded.deinit();
+    for (loaded.state.key_stats) |ks| {
+        if (ks.cp == 'z') try t.expectEqual(@as(u32, 0), ks.samples);
+    }
+    var runs = try storage.loadRuns(t.allocator, t.io, tmp.dir, owner.profile.profile_hash);
+    defer runs.deinit();
+    try t.expectEqual(@as(usize, 1), runs.runs.len);
+
+    var stale = request;
+    stale.profile_hash = @splat(0x01);
+    try t.expectError(error.StalePracticeAction, owner.dispatch(owner.action(.{ .reset_keys = stale }), 2_000_000));
+}
+
+test "answering the layout question resets the chosen keys and keeps the rest" {
+    const t = std.testing;
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    _ = owner.bindProfile(movedProfile(10), null);
+    practiseAll(owner);
+    owner.adoptLayout(movedProfile(10), null);
+    owner.adoptLayout(movedProfile(20), null);
+    try t.expectEqual(@as(usize, 3), owner.reviewSlice().len);
+
+    var request: KeyReset = .{ .profile_hash = owner.profile.profile_hash };
+    request.add('Z');
+    try owner.dispatch(owner.action(.{ .resolve_layout_changes = request }), 0);
+    try t.expectEqual(@as(usize, 0), owner.reviewSlice().len);
+    try t.expect(!owner.learning.hasData('z'));
+    try t.expectEqual(@as(u32, 30), owner.learning.getStat('s').?.samples);
+    // Back on the first keyboard: 's' was kept for both, 'z' was practised only here now.
+    owner.adoptLayout(movedProfile(10), null);
+    try t.expectEqual(@as(usize, 0), owner.reviewSlice().len);
+
+    // Resetting the whole profile follows the bound layout again.
+    owner.resetProgress();
+    try t.expectEqual(@as(usize, 0), owner.reviewSlice().len);
+    try t.expect(owner.learning.knownSlice().len > 0);
 }
