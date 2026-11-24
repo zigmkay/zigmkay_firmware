@@ -100,7 +100,6 @@ fn open(app: *App, target: desktop.editor_dispatch.Open) App.Flow {
             const now_us: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
             app.tutor.controller.pause(now_us);
             app.tutor.controller.config.mode = .test_keys;
-            app.tutor.controller.rundown = null;
             app.tutor.view.sheet = .none;
             app.tutor.view.settings_open = false;
             app.practicing = true;

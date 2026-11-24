@@ -558,10 +558,10 @@ fn helpStrip(
     label(sub, .{ .x = 32, .y = 26, .w = text_w, .h = 20 }, 12.5, theme.muted, null);
 }
 
-/// Stuck help: shown between rounds once a letter has gone
-/// `control.stuck_after_rounds` rounds without progress.
+/// Stuck help: shown once a letter has gone `control.stuck_after_rounds`
+/// lessons without progress. It stays while typing and never stops it.
 pub fn stuckHelp(owner: *const control.Controller) ?control.StuckHelp {
-    if (owner.config.mode != .tutor or owner.session.state == .running) return null;
+    if (owner.config.mode != .tutor) return null;
     return owner.stuckHelp();
 }
 
@@ -575,22 +575,23 @@ pub fn stuckStrip(
     const arena = dvui.currentWindow().arena();
     const up = if (help.cp < 128) std.ascii.toUpper(@intCast(help.cp)) else '?';
     const kp = help.progress;
+    const dismiss_text = "Dismiss · Ctrl+Backspace";
     switch (help.reason) {
         .hits => {
             const title = try std.fmt.allocPrint(arena, "{c} keeps slipping. {d} of its last {d} presses were right; it needs {d}.", .{ up, kp.hits, kp.window, kp.hits_needed });
-            const practise = try std.fmt.allocPrint(arena, "Practise {c} slowly", .{up});
+            const practise = try std.fmt.allocPrint(arena, "Practise {c} slowly · Ctrl+P", .{up});
             helpStrip(theme, bounds, theme.accent, "practice.stuck.strip", title, "Slow down a little and aim for clean presses. Speed comes back on its own.", &.{
-                .{ .text = "Dismiss", .tag = "practice.stuck.dismiss", .intent = .{ .dismiss_stuck = help.cp } },
+                .{ .text = dismiss_text, .tag = "practice.stuck.dismiss", .intent = .{ .dismiss_stuck = help.cp } },
                 .{ .text = practise, .tag = "practice.stuck.practise", .primary = true, .intent = .{ .practise_key = .{ .cp = help.cp, .slow = true } } },
             }, pending);
         },
         .speed => {
-            const title = try std.fmt.allocPrint(arena, "{c} is accurate but not yet at {d:.0} WPM ({d:.0} WPM for {d} rounds).", .{ up, owner.config.target_wpm, kp.wpm, help.rounds });
-            const practise = try std.fmt.allocPrint(arena, "Practise {c}", .{up});
-            const dismiss: HelpButton = .{ .text = "Dismiss", .tag = "practice.stuck.dismiss", .intent = .{ .dismiss_stuck = help.cp } };
+            const title = try std.fmt.allocPrint(arena, "{c} is accurate but not yet at {d:.0} WPM ({d:.0} WPM for {d} lessons).", .{ up, owner.config.target_wpm, kp.wpm, help.rounds });
+            const practise = try std.fmt.allocPrint(arena, "Practise {c} · Ctrl+P", .{up});
+            const dismiss: HelpButton = .{ .text = dismiss_text, .tag = "practice.stuck.dismiss", .intent = .{ .dismiss_stuck = help.cp } };
             const practise_btn: HelpButton = .{ .text = practise, .tag = "practice.stuck.practise", .primary = help.lower_target == null, .intent = .{ .practise_key = .{ .cp = help.cp, .slow = false } } };
             if (help.lower_target) |lower| {
-                const lower_lbl = try std.fmt.allocPrint(arena, "Lower target to {d:.0} WPM", .{lower});
+                const lower_lbl = try std.fmt.allocPrint(arena, "Lower target to {d:.0} WPM · Ctrl+Down", .{lower});
                 helpStrip(theme, bounds, theme.accent, "practice.stuck.strip", title, "That's normal on a new keyboard. You can lower the target and raise it again later.", &.{
                     dismiss,
                     practise_btn,
@@ -638,21 +639,27 @@ pub fn typingCard(
     const metrics_h: f32 = 26;
     const state_tag: []const u8 = if (s.state == .paused)
         " · Paused"
-    else if (s.state == .complete)
-        " · Complete"
     else if (owner.config.weak_spot_active)
         " · Weak-spot drill"
     else if (owner.slow_round)
         " · Slow round: only clean presses count"
     else
         "";
-    const metrics_str = try std.fmt.allocPrint(arena, "{d:.0} WPM   ·   {d:.1}% accuracy   ·   {d:.1}s{s}", .{
+    // Until the first keystroke the row shows how the last lesson went.
+    const last = if (s.state == .ready) owner.last_lesson else null;
+    const metrics_str = if (last) |l| try std.fmt.allocPrint(arena, "Last lesson   ·   {d:.0} WPM{s}   ·   {d:.1}% accuracy   ·   {d:.1}s{s}", .{
+        l.wpm,
+        if (l.wpm_delta) |d| try std.fmt.allocPrint(arena, " ({s}{d:.1})", .{ if (d >= 0) "+" else "", d }) else "",
+        l.accuracy,
+        l.active_seconds,
+        if (state_tag.len > 0) state_tag else "   ·   starts on your first key",
+    }) else try std.fmt.allocPrint(arena, "{d:.0} WPM   ·   {d:.1}% accuracy   ·   {d:.1}s{s}", .{
         s.wpm(now_us),
         s.accuracy(),
         @as(f64, @floatFromInt(s.duration(now_us))) / 1_000_000.0,
         state_tag,
     });
-    label(metrics_str, .{ .x = pad_x, .y = metrics_y, .w = @max(0, inner_w - 260), .h = metrics_h }, 15.5, theme.text, "practice.metrics");
+    label(metrics_str, .{ .x = pad_x, .y = metrics_y, .w = @max(0, inner_w - 260), .h = metrics_h }, 15.5, if (last != null) theme.muted else theme.text, "practice.metrics");
 
     // Daily goal readout + progress bar on right
     const goal_mins: f32 = @floatFromInt(@max(@as(u16, 1), owner.config.daily_goal_minutes));
@@ -696,11 +703,7 @@ pub fn typingCard(
     const stage_h = @max(90.0, bounds.h - stage_y - footer_h - 6);
     const stage_rect: dvui.Rect = .{ .x = pad_x, .y = stage_y, .w = inner_w, .h = stage_h };
 
-    if (s.state == .complete) {
-        try drawInlineRundown(owner, theme, stage_rect, now_us, pending);
-    } else {
-        try drawThreeLineTextStage(owner, theme, stage_rect, focus, status_note, pending);
-    }
+    try drawThreeLineTextStage(owner, theme, stage_rect, focus, status_note, pending);
 
     // 3. Thin run-progress bar
     const prog_y = stage_y + stage_h + 7;
@@ -721,7 +724,7 @@ pub fn typingCard(
         const fill = dvui.box(@src(), .{}, .{
             .rect = .{ .x = pad_x, .y = prog_y, .w = inner_w * frac, .h = 4 },
             .background = true,
-            .color_fill = .{ .color = if (s.state == .complete) theme.success else theme.accent },
+            .color_fill = .{ .color = theme.accent },
             .corners = .all(2),
             .padding = .{},
             .margin = .{},
@@ -779,14 +782,12 @@ pub fn typingCard(
         "practice.next",
     );
 
-    const words_total = countWords(s.reference[0..s.reference_len]);
-    const words_done = countWords(s.reference[0..@min(focus, s.reference_len)]);
-    const shortcuts = if (s.state == .complete)
-        "Enter / Space Next round"
-    else if (s.state == .paused)
-        "Esc Resume  ·  Tab New"
+    const letters_total = countLetters(s.reference[0..s.reference_len]);
+    const letters_done = countLetters(s.reference[0..@min(focus, s.reference_len)]);
+    const shortcuts = if (s.state == .paused)
+        "Esc Resume  ·  Tab New text"
     else
-        try std.fmt.allocPrint(arena, "Esc Pause  ·  Tab New  ·  {d} / {d} words", .{ words_done, words_total });
+        try std.fmt.allocPrint(arena, "Esc Pause  ·  Tab New text  ·  {d} / {d} letters", .{ letters_done, letters_total });
 
     dvui.labelNoFmt(@src(), shortcuts, .{ .align_x = 1, .align_y = 0.5 }, .{
         .rect = .{ .x = pad_x + inner_w * 0.64, .y = foot_y, .w = @max(0, inner_w * 0.36), .h = foot_h },
@@ -949,211 +950,57 @@ fn drawThreeLineTextStage(
     }
 }
 
-/// "hits 24 → 28 / 30 ✓ green", "speed 17 → 19 WPM · needs 20", …: the
-/// measure that held the key back before the round, or holds it back now.
-fn changeText(arena: std.mem.Allocator, change: control.KeyChange, target_wpm: f32) ![]const u8 {
-    const old = key_progress.of(change.before, target_wpm);
-    const new = key_progress.of(change.after, target_wpm);
-    const measure = if (change.newly_green) old.blocker else new.blocker;
-    const body = switch (measure) {
-        .hits, .none => if (old.window == 0)
-            try std.fmt.allocPrint(arena, "hits {d} / {d}", .{ new.hits, new.window })
-        else
-            try std.fmt.allocPrint(arena, "hits {d} → {d} / {d}", .{ old.hits, new.hits, new.window }),
-        .speed => try std.fmt.allocPrint(arena, "speed {d:.0} → {d:.0} WPM", .{ old.wpm, new.wpm }),
-        .presses => try std.fmt.allocPrint(arena, "{d} of {d} presses", .{ new.presses, model_min_samples }),
-    };
-    if (change.newly_green) return std.fmt.allocPrint(arena, "{s}  ✓ green", .{body});
-    return switch (new.blocker) {
-        .hits => std.fmt.allocPrint(arena, "{s} · {d} short", .{ body, new.hits_needed -| new.hits }),
-        .speed => std.fmt.allocPrint(arena, "{s} · needs {d:.0}", .{ body, target_wpm }),
-        .presses, .none => body,
-    };
-}
-
-fn keyChangePill(theme: ui.Theme, rect: dvui.Rect, change: control.KeyChange, text: []const u8, i: usize) void {
-    const green = change.newly_green;
-    const pill = dvui.box(@src(), .{}, .{
-        .id_extra = 0x5900 + i,
-        .rect = rect,
-        .background = true,
-        .color_fill = .{ .color = if (green) ui.mix(theme.panel, theme.success, 0.18) else theme.control },
-        .color_border = .{ .color = if (green) ui.mix(theme.panel, theme.success, 0.6) else theme.border },
-        .border = .all(1),
-        .corners = .all(6),
-        .padding = .{},
-        .margin = .{},
-        .tag = "practice.rundown.key",
-    });
-    pill.deinit();
-    const cap: dvui.Rect = .{ .x = rect.x + 4, .y = rect.y + 4, .w = 18, .h = rect.h - 8 };
-    const cap_box = dvui.box(@src(), .{}, .{
-        .id_extra = 0x5a00 + i,
-        .rect = cap,
-        .background = true,
-        .color_fill = .{ .color = ui.mix(theme.panel, theme.text, 0.12) },
-        .corners = .all(4),
-        .padding = .{},
-        .margin = .{},
-    });
-    cap_box.deinit();
-    var cb: [4]u8 = undefined;
-    const cn = std.unicode.utf8Encode(change.cp, &cb) catch 0;
-    if (cn == 1) cb[0] = std.ascii.toUpper(cb[0]);
-    dvui.labelNoFmt(@src(), cb[0..cn], .{ .align_x = 0.5, .align_y = 0.5 }, .{
-        .id_extra = 0x5b00 + i,
-        .rect = cap,
-        .font = dvui.Font.theme(.mono).withSize(12.5).withWeight(.bold),
-        .color_text = .{ .color = theme.text },
-        .padding = .{},
-        .margin = .{},
-    });
-    dvui.labelNoFmt(@src(), text, .{ .align_x = 0, .align_y = 0.5 }, .{
-        .id_extra = 0x5c00 + i,
-        .rect = .{ .x = rect.x + 28, .y = rect.y, .w = rect.w - 32, .h = rect.h },
-        .font = ui.editorFont(text, 12.5),
-        .color_text = .{ .color = if (green) theme.success else theme.muted },
-        .padding = .{},
-        .margin = .{},
-    });
-}
-
-fn drawInlineRundown(
-    owner: *const control.Controller,
-    theme: ui.Theme,
-    bounds: dvui.Rect,
-    now_us: u64,
-    pending: *?control.Intent,
-) !void {
-    const box = dvui.box(@src(), .{}, .{
-        .rect = bounds,
-        .background = true,
-        .color_fill = .{ .color = theme.bg },
-        .color_border = .{ .color = ui.mix(theme.border, theme.success, 0.45) },
-        .border = .all(1),
-        .corners = .all(8),
-        .padding = .{},
-        .margin = .{},
-        .tag = "practice.rundown",
-    });
-    defer box.deinit();
-
+/// Notices of the last lesson in the top right corner of `area`. They fade
+/// out on their own after `control.notice_us` and never take input.
+pub fn lessonNotices(owner: *const control.Controller, theme: ui.Theme, area: dvui.Rect, now_us: u64) !void {
+    const events = owner.visibleEvents(now_us);
+    if (events.len == 0) return;
     const arena = dvui.currentWindow().arena();
-    const s = &owner.session;
-    const rd = owner.rundown;
-
-    const wpm_val: f32 = if (rd) |r| r.wpm else @floatCast(s.wpm(now_us));
-    const acc_val: f32 = if (rd) |r| r.accuracy else @floatCast(s.accuracy());
-    const delta_str: []const u8 = if (rd) |r| blk: {
-        if (r.wpm_delta) |d| {
-            break :blk try std.fmt.allocPrint(arena, " ({s}{d:.1} WPM)", .{ if (d >= 0) "+" else "", d });
-        }
-        break :blk "";
-    } else "";
-
-    // Left summary: Round complete headline + metrics + unlock highlight
-    const headline = try std.fmt.allocPrint(arena, "{d:.0} WPM{s}  ·  {d:.1}% accuracy", .{ wpm_val, delta_str, acc_val });
-    label(headline, .{ .x = 18, .y = 12, .w = @max(0, bounds.w - 310), .h = 30 }, 21, theme.success, "practice.result");
-
-    const right_reserve: f32 = if (bounds.w >= 540) 320.0 else 160.0;
-    const avail_w = @max(0.0, bounds.w - right_reserve - 18.0);
-    const two_rows = bounds.h >= 136.0;
-    if (rd) |r| {
-        var px: f32 = 18;
-        const row_y: f32 = 48;
-        if (r.newly_unlocked) |u| {
-            const unlock_msg = try std.fmt.allocPrint(arena, "Newly unlocked: {c}", .{std.ascii.toUpper(u)});
-            const pill_w: f32 = @min(avail_w, ui.editorFont(unlock_msg, 13.5).textSize(unlock_msg).w + 24);
-            const pill = dvui.box(@src(), .{}, .{
-                .rect = .{ .x = px, .y = row_y, .w = pill_w, .h = 26 },
-                .background = true,
-                .color_fill = .{ .color = ui.mix(theme.panel, theme.success, 0.22) },
-                .color_border = .{ .color = theme.success },
-                .border = .all(1),
-                .corners = .all(6),
-                .padding = .{},
-                .margin = .{},
-            });
-            pill.deinit();
-            caption(unlock_msg, .{ .x = px, .y = row_y, .w = pill_w, .h = 26 }, 13.5, theme.success, "practice.unlock");
-            px += pill_w + 8;
-        }
-
-        // What moved per key this round, in the strip's terms.
-        for (r.changeSlice(), 0..) |change, ci| {
-            const text = try changeText(arena, change, owner.config.target_wpm);
-            const w = ui.editorFont(text, 12.5).textSize(text).w + 40;
-            if (px + w > 18 + avail_w) break;
-            keyChangePill(theme, .{ .x = px, .y = row_y, .w = w, .h = 26 }, change, text, ci);
-            px += w + 8;
-        }
-        if (px == 18) {
-            label(if (r.slow_round) "Slow round complete — only clean presses counted" else "Round complete — keep your steady rhythm", .{ .x = 18, .y = row_y + 2, .w = avail_w, .h = 22 }, 14, theme.muted, null);
-        }
-
-        if (two_rows) {
-            const lm = &owner.learning;
-            var tx: f32 = 18;
-            if (lm.unlocked_count < lm.unlock_len) {
-                const next = std.ascii.toUpper(lm.unlock_order[lm.unlocked_count]);
-                var names: std.ArrayList(u8) = .empty;
-                var open: usize = 0;
-                for (lm.unlock_order[0..lm.unlocked_count]) |ch| {
-                    const st = lm.getStat(ch) orelse desktop.practice_model.KeyStat{ .cp = ch };
-                    if (owner.isGreen(st)) continue;
-                    open += 1;
-                    if (open > 3) continue;
-                    if (open > 1) try names.appendSlice(arena, ", ");
-                    try names.append(arena, std.ascii.toUpper(ch));
-                }
-                const tag = if (open == 0)
-                    try std.fmt.allocPrint(arena, "All letters green · {c} unlocks soon", .{next})
-                else if (open <= 3)
-                    try std.fmt.allocPrint(arena, "Next: {c} unlocks when {s} {s} green", .{ next, names.items, if (open == 1) "is" else "are" })
-                else
-                    try std.fmt.allocPrint(arena, "Next: {c} unlocks when {s} and {d} more are green", .{ next, names.items, open - 3 });
-                const tw = @min(avail_w, ui.editorFont(tag, 12.5).textSize(tag).w + 18);
-                const tag_box = dvui.box(@src(), .{}, .{
-                    .rect = .{ .x = tx, .y = 82, .w = tw, .h = 22 },
-                    .background = true,
-                    .color_fill = .{ .color = ui.mix(theme.panel, theme.success, 0.12) },
-                    .color_border = .{ .color = ui.mix(theme.panel, theme.success, 0.5) },
-                    .border = .all(1),
-                    .corners = .all(5),
-                    .padding = .{},
-                    .margin = .{},
-                });
-                tag_box.deinit();
-                caption(tag, .{ .x = tx, .y = 82, .w = tw, .h = 22 }, 12.5, theme.success, "practice.rundown.next");
-                tx += tw + 12;
-            }
-            var missed: std.ArrayList(u8) = .empty;
-            for (r.changeSlice()) |change| {
-                if (change.misses == 0) continue;
-                try missed.appendSlice(arena, if (missed.items.len == 0) "Missed this round: " else ", ");
-                var cb: [4]u8 = undefined;
-                const cn = std.unicode.utf8Encode(change.cp, &cb) catch 0;
-                if (cn == 1) cb[0] = std.ascii.toUpper(cb[0]);
-                try missed.print(arena, "{s} ×{d}", .{ cb[0..cn], change.misses });
-            }
-            if (r.slow_round) try missed.appendSlice(arena, if (missed.items.len == 0) "Slow round: speed not counted" else " · slow round, speed not counted");
-            if (missed.items.len > 0 and tx < 18 + avail_w) {
-                label(missed.items, .{ .x = tx, .y = 82, .w = 18 + avail_w - tx, .h = 22 }, 12.5, theme.muted, null);
-            }
-        }
+    const age = now_us -| owner.events_at_us;
+    const fade_us: u64 = 600_000;
+    const left = control.notice_us -| age;
+    const alpha: f32 = if (left < fade_us) @as(f32, @floatFromInt(left)) / @as(f32, @floatFromInt(fade_us)) else 1.0;
+    var y = area.y + 14;
+    var last_id: ?dvui.Id = null;
+    for (events, 0..) |event, i| {
+        const text = switch (event) {
+            .new_letter => |ch| try std.fmt.allocPrint(arena, "New letter: {c}", .{std.ascii.toUpper(ch)}),
+            .green => |cp| if (cp < 128)
+                try std.fmt.allocPrint(arena, "{c} is green now", .{std.ascii.toUpper(@intCast(cp))})
+            else
+                "A key is green now",
+            .daily_goal => "Daily goal reached",
+            .stage => |stage| try std.fmt.allocPrint(arena, "On to {s}", .{stage.title()}),
+        };
+        const w = ui.editorFont(text, 14.5).textSize(text).w + 52;
+        const rect: dvui.Rect = .{ .x = area.x + area.w - 16 - w, .y = y, .w = w, .h = 38 };
+        const color = theme.success;
+        const box = dvui.box(@src(), .{}, .{
+            .id_extra = 0x7a00 + i,
+            .rect = rect,
+            .background = true,
+            .color_fill = .{ .color = ui.mix(theme.panel, color, 0.16).opacity(alpha) },
+            .color_border = .{ .color = ui.mix(theme.panel, color, 0.6).opacity(alpha) },
+            .border = .all(1),
+            .corners = .all(9),
+            .padding = .{},
+            .margin = .{},
+            .tag = "practice.notice",
+        });
+        last_id = box.data().id;
+        box.deinit();
+        const mark = switch (event) {
+            .new_letter, .stage => "+",
+            .green, .daily_goal => "✓",
+        };
+        caption(mark, .{ .x = rect.x + 8, .y = rect.y, .w = 22, .h = rect.h }, 16, color.opacity(alpha), null);
+        label(text, .{ .x = rect.x + 34, .y = rect.y, .w = w - 40, .h = rect.h }, 14.5, theme.text.opacity(alpha), null);
+        y += rect.h + 8;
     }
-
-    label("Press Enter or Space for next round", .{ .x = 18, .y = @max(@as(f32, if (two_rows) 110 else 78), bounds.h - 28), .w = @max(0, bounds.w - 320), .h = 22 }, 14, theme.muted, null);
-
-    // Right actions: Weak-spot drill + primary Next round CTA
-    const btn_y = @max(14.0, (bounds.h - 36.0) * 0.5);
-    if (ui.iconButton(theme, null, "Next round", "practice.next_round", .{ .x = bounds.w - 146, .y = btn_y, .w = 130, .h = 36 }, true) and pending.* == null) {
-        pending.* = .next_round;
-    }
-    if (bounds.w >= 540) {
-        if (ui.button(theme, "Weak-spot drill", "practice.weak_spot", .{ .x = bounds.w - 306, .y = btn_y, .w = 150, .h = 36 }) and pending.* == null) {
-            pending.* = .start_weak_spot;
-        }
+    // Draw again when the notices start to fade and while they fade.
+    if (last_id) |id| {
+        const wait = if (left > fade_us) left - fade_us else @min(left, 50_000);
+        dvui.timer(id, @intCast(@max(@as(u64, 1), wait)));
     }
 }
 
@@ -1536,16 +1383,9 @@ fn formatNextKeyHint(
     };
 }
 
-fn countWords(cps: []const u21) usize {
-    var count: usize = 0;
-    var in_word = false;
-    for (cps) |cp| {
-        if (view.whitespace(cp)) {
-            in_word = false;
-        } else if (!in_word) {
-            in_word = true;
-            count += 1;
-        }
-    }
-    return count;
+/// Characters other than spaces and line breaks.
+fn countLetters(cps: []const u21) usize {
+    var n: usize = 0;
+    for (cps) |cp| n += @intFromBool(cp != ' ' and cp != '\n' and cp != '\t');
+    return n;
 }

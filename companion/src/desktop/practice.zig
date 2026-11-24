@@ -13,6 +13,9 @@ pub const ErrorMode = enum { stop_on_error, flow_backspace };
 pub const EventTime = struct { number: u16, now_us: u64 };
 pub const route_modifiers = [_]u8{ 0, 2, 4, 6, 64, 66 };
 pub const hesitation_threshold_us: u64 = 1_000_000; // 1.0 s
+/// A gap this long between keystrokes pauses the clock without a prompt; the
+/// next keystroke simply continues the text.
+pub const idle_pause_us: u64 = 10_000_000; // 10 s
 
 pub const lessons = [_][]const u8{
     \\const std = @import("std");
@@ -153,6 +156,7 @@ pub const Session = struct {
             self.scored = false;
             self.collector.notePauseOrBlur();
         }
+        self.skipIdleGap(now);
         var it = view.iterator();
         while (it.nextCodepoint()) |raw| {
             // A CR LF pair is one newline, also across separate inserts.
@@ -166,6 +170,8 @@ pub const Session = struct {
             if (self.error_mode == .stop_on_error) {
                 if (self.len >= self.reference_len) break;
                 const expected = self.reference[self.len];
+                // A Space typed out of habit after the previous text is not a miss.
+                if (self.len == 0 and cp == ' ' and expected != ' ') continue;
                 if (self.state == .ready) {
                     // First matching keystroke starts the clock automatically.
                     if (cp != expected) {
@@ -281,8 +287,22 @@ pub const Session = struct {
         self.collector.notePauseOrBlur();
     }
 
+    /// Leaves a long gap since the last keystroke out of the active time and
+    /// out of the latency samples: a silent pause.
+    fn skipIdleGap(self: *Session, now: u64) void {
+        if (self.state != .running) return;
+        const last = self.last_event_us orelse return;
+        if (now -| last < idle_pause_us) return;
+        self.active_us += last -| self.segment;
+        self.segment = now;
+        self.collector.notePauseOrBlur();
+    }
+
     pub fn duration(self: *const Session, now: u64) u64 {
-        return self.active_us + if (self.state == .running) now -| self.segment else 0;
+        if (self.state != .running) return self.active_us;
+        // While idle the clock stands at the last keystroke.
+        const end = if (self.last_event_us) |last| (if (now -| last >= idle_pause_us) @max(last, self.segment) else now) else now;
+        return self.active_us + (end -| self.segment);
     }
 
     pub fn hesitationUs(self: *const Session, now: u64) u64 {

@@ -1,7 +1,7 @@
 //! Adaptive typing tutor controller over `practice.Session`, `LayoutProfile`,
 //! `LearningModel`, 6-stage generator, and lightweight persistence.
-//! Supports strict `Tutor | Test keys` mode separation, zero-friction rounds,
-//! and inline rundowns.
+//! Supports strict `Tutor | Test keys` mode separation and an endless flow:
+//! a finished lesson is counted and the next one is ready in the same frame.
 const std = @import("std");
 const practice = @import("practice.zig");
 const layout_profile = @import("practice_layout_profile.zig");
@@ -38,7 +38,8 @@ pub const Config = struct {
     }
 };
 
-pub const Rundown = struct {
+/// What a finished lesson changed; shown beside the next lesson, never as a stop.
+pub const LessonSummary = struct {
     wpm: f32 = 0.0,
     prev_wpm: ?f32 = null,
     wpm_delta: ?f32 = null,
@@ -59,13 +60,43 @@ pub const Rundown = struct {
     change_len: usize = 0,
     /// The round was typed as a slow round; its speed did not count.
     slow_round: bool = false,
+    /// Every key typed in the lesson, for the keyboard heatmap.
+    keys: [max_lesson_keys]LessonKey = undefined,
+    key_len: usize = 0,
 
-    pub fn changeSlice(self: *const Rundown) []const KeyChange {
+    pub fn changeSlice(self: *const LessonSummary) []const KeyChange {
         return self.changes[0..self.change_len];
+    }
+
+    pub fn keySlice(self: *const LessonSummary) []const LessonKey {
+        return self.keys[0..self.key_len];
     }
 };
 
 pub const max_round_changes: usize = 8;
+pub const max_lesson_keys: usize = 40;
+
+/// One key of a finished lesson: how often it was pressed, missed, and how
+/// long it took (median of its clean presses, 0 without one).
+pub const LessonKey = struct {
+    cp: u21,
+    presses: u32,
+    misses: u32,
+    ms: f32,
+};
+
+/// Something a finished lesson achieved, shown as a short notice that does
+/// not stop typing.
+pub const LessonEvent = union(enum) {
+    new_letter: u8,
+    green: u21,
+    daily_goal,
+    stage: Stage,
+};
+
+pub const max_lesson_events: usize = 4;
+/// How long a lesson notice stays visible.
+pub const notice_us: u64 = 3_000_000;
 
 /// One key of a finished round, before and after the round was counted.
 pub const KeyChange = struct {
@@ -230,7 +261,6 @@ pub const Intent = union(enum) {
     set_stage: Stage,
     start,
     new_exercise,
-    next_round,
     start_weak_spot,
     pause,
     resume_run,
@@ -269,7 +299,12 @@ pub const Controller = struct {
     profile_bound: bool = false,
     learning: model.LearningModel = model.LearningModel.init(layout_profile.english_letter_frequency, 8, .{}),
     persisted: storage.ProfileState = .{},
-    rundown: ?Rundown = null,
+    /// The last finished lesson of this session.
+    last_lesson: ?LessonSummary = null,
+    /// Notices of the last finished lesson and when they appeared.
+    events: [max_lesson_events]LessonEvent = undefined,
+    event_len: usize = 0,
+    events_at_us: u64 = 0,
     last_round_wpm: ?f32 = null,
     round_recorded: bool = false,
     needs_persist: bool = false,
@@ -498,7 +533,6 @@ pub const Controller = struct {
                 }
                 break :blk try self.start();
             },
-            .next_round => try self.start(),
             .start_weak_spot => blk: {
                 var next = self.config;
                 next.mode = .tutor;
@@ -569,7 +603,6 @@ pub const Controller = struct {
         if (mode == .test_keys) {
             self.pause(now);
             self.config.mode = .test_keys;
-            self.rundown = null;
             return;
         }
         self.config.mode = .tutor;
@@ -750,7 +783,8 @@ pub const Controller = struct {
         self.adoptCurrent();
         self.last_round_wpm = null;
         self.clearStalls();
-        self.rundown = null;
+        self.last_lesson = null;
+        self.event_len = 0;
         self.pending_run = null;
         self.reset_requested = true;
         self.needs_persist = true;
@@ -798,7 +832,6 @@ pub const Controller = struct {
         self.slow_round = self.slow_round_next;
         self.slow_round_next = false;
         self.failure = null;
-        self.rundown = null;
         self.round_recorded = false;
         return;
     }
@@ -853,7 +886,7 @@ pub const Controller = struct {
             (self.session.state == .ready or self.session.state == .running);
     }
 
-    /// Handles Enter/Space in rundown or normal OS text input in Tutor mode.
+    /// Handles OS text input in Tutor mode.
     pub fn insertOs(self: *Controller, focused: bool, bytes: []const u8, now: u64, paste: bool) !void {
         if (self.config.mode == .test_keys) {
             if (focused and bytes.len > 0) {
@@ -867,22 +900,41 @@ pub const Controller = struct {
         return self.finish(now);
     }
 
-    /// Handles keyboard shortcuts in Tutor mode: Enter/Space in rundown starts next round.
-    /// Returns whether a new round started.
-    pub fn handleRundownContinue(self: *Controller) !bool {
-        if (self.config.mode != .tutor or self.rundown == null) return false;
-        try self.start();
-        return true;
-    }
-
-    pub fn finish(self: *Controller, now: u64) void {
+    /// Counts a completed lesson and loads the next one right away; there is
+    /// no result screen to confirm.
+    pub fn finish(self: *Controller, now: u64) !void {
         if (self.config.mode == .test_keys) return;
         if (!self.active or self.session.state != .complete) return;
 
+        self.event_len = 0;
         if (!self.round_recorded and self.session.scored) {
             self.recordCompletedRound(now);
         }
-        return;
+        // The first letters lead into the rest of the alphabet without a stop.
+        if (self.captured_config.stage == .home_row and self.config.stage == .home_row and !self.config.weak_spot_active) {
+            if (self.last_lesson) |lesson| if (lesson.newly_unlocked != null and self.round_recorded) {
+                self.config.stage = .all_letters;
+                self.persisted.active_stage = Stage.all_letters.number();
+                self.addEvent(.{ .stage = .all_letters });
+            };
+        }
+        if (self.event_len > 0) self.events_at_us = now;
+        if (self.config.stage == .free_text and self.config.stage6_source == .zig_code) {
+            self.config.zig_lesson_index = (self.config.zig_lesson_index + 1) % practice.lessons.len;
+        }
+        try self.start();
+    }
+
+    fn addEvent(self: *Controller, event: LessonEvent) void {
+        if (self.event_len >= max_lesson_events) return;
+        self.events[self.event_len] = event;
+        self.event_len += 1;
+    }
+
+    /// Notices of the last lesson that are still visible at `now`.
+    pub fn visibleEvents(self: *const Controller, now: u64) []const LessonEvent {
+        if (now -| self.events_at_us >= notice_us) return &.{};
+        return self.events[0..self.event_len];
     }
 
     fn recordCompletedRound(self: *Controller, now: u64) void {
@@ -907,7 +959,11 @@ pub const Controller = struct {
         const changes = self.roundChanges(before[0..collector.bucket_len]);
         self.trackStalls();
         if (self.utc_now_sec > 0) {
+            const goal_s = @as(u32, self.config.daily_goal_minutes) * 60;
+            const before_s = storage.dailyView(self.persisted, self.utc_now_sec).active_seconds;
             storage.recordDailyPractice(&self.persisted, self.utc_now_sec, @intFromFloat(@max(1.0, @round(active_sec))));
+            const after_s = storage.dailyView(self.persisted, self.utc_now_sec).active_seconds;
+            if (before_s < goal_s and after_s >= goal_s) self.addEvent(.daily_goal);
         }
 
         var weak_keys: [3]model.KeySummary = undefined;
@@ -919,7 +975,7 @@ pub const Controller = struct {
         const delta = if (prev_wpm) |p| round_wpm - p else null;
         self.last_round_wpm = round_wpm;
 
-        var rd: Rundown = .{
+        var rd: LessonSummary = .{
             .wpm = round_wpm,
             .prev_wpm = prev_wpm,
             .wpm_delta = delta,
@@ -939,7 +995,21 @@ pub const Controller = struct {
         rd.changes = changes.items;
         rd.change_len = changes.len;
         rd.slow_round = self.slow_round;
-        self.rundown = rd;
+        for (collector.buckets[0..collector.bucket_len]) |b| {
+            if (b.cp == ' ' or rd.key_len >= max_lesson_keys) continue;
+            rd.keys[rd.key_len] = .{
+                .cp = b.cp,
+                .presses = b.total_positions,
+                .misses = b.total_positions - b.first_try_hits,
+                .ms = if (b.dt_len > 0) model.medianF32(b.dt_ms[0..b.dt_len]) else 0,
+            };
+            rd.key_len += 1;
+        }
+        self.last_lesson = rd;
+        if (outcome.newly_unlocked) |ch| self.addEvent(.{ .new_letter = ch });
+        for (changes.items[0..changes.len]) |change| {
+            if (change.newly_green) self.addEvent(.{ .green = change.cp });
+        }
 
         var pr: PendingRun = .{
             .utc_timestamp = self.utc_now_sec,
@@ -1073,7 +1143,7 @@ fn sameOpening(session: *const practice.Session, text: []const u8) bool {
 // Controller tests
 // ---------------------------------------------------------------------------
 
-test "round completion updates model, unlocks key, persists state.zon + runs.jsonl, and advances on Enter/Space" {
+test "a finished lesson updates the model, unlocks a key, persists and loads the next lesson at once" {
     const t = std.testing;
     var tmp = t.tmpDir(.{});
     defer tmp.cleanup();
@@ -1101,18 +1171,20 @@ test "round completion updates model, unlocks key, persists state.zon + runs.jso
             const buf = [_]u8{ch};
             _ = try owner.insertOs(true, &buf, now, false);
         }
-        try t.expectEqual(practice.State.complete, owner.session.state);
-        try t.expect(owner.rundown != null);
+        // No result screen: the next lesson is already waiting.
+        try t.expectEqual(practice.State.ready, owner.session.state);
+        try t.expect(owner.last_lesson != null);
         if (round_idx == 1) {
-            try t.expectEqual(@as(?u8, 'd'), owner.rundown.?.newly_unlocked);
+            try t.expectEqual(@as(?u8, 'd'), owner.last_lesson.?.newly_unlocked);
+            // The first letters lead on to the rest of the alphabet by themselves.
+            const events = owner.visibleEvents(now);
+            try t.expectEqual(LessonEvent{ .new_letter = 'd' }, events[events.len - 2]);
+            try t.expectEqual(LessonEvent{ .stage = .all_letters }, events[events.len - 1]);
+            try t.expectEqual(Stage.all_letters, owner.config.stage);
+            try t.expectEqual(@as(usize, 0), owner.visibleEvents(now + notice_us).len);
         }
         try owner.persistPending(t.allocator, t.io, tmp.dir, "test_board", "en-US");
         try t.expect(!owner.needs_persist);
-
-        // Press Enter/Space in rundown -> immediately starts next round
-        try t.expect(try owner.handleRundownContinue());
-        try t.expect(owner.rundown == null);
-        try t.expectEqual(practice.State.ready, owner.session.state);
     }
 
     var loaded_state = try storage.loadState(t.allocator, t.io, tmp.dir, profile.profile_hash);
@@ -1349,7 +1421,7 @@ test "answering the layout question resets the chosen keys and keeps the rest" {
     try t.expect(owner.learning.knownSlice().len > 0);
 }
 
-test "rundown names keys that turned green and stuck help appears after four flat rounds" {
+test "a lesson names keys that turned green and stuck help appears after four flat lessons" {
     const t = std.testing;
     var owner = Controller.init(@splat(1));
     var profile: layout_profile.LayoutProfile = .{
@@ -1377,7 +1449,7 @@ test "rundown names keys that turned green and stuck help appears after four fla
     for (0..5) |round_idx| {
         try owner.start();
         try Play.round(&owner, drill, &now);
-        const rd = owner.rundown.?;
+        const rd = owner.last_lesson.?;
         if (round_idx == 0) {
             try t.expectEqual(@as(u21, 'a'), rd.changeSlice()[0].cp);
             try t.expect(rd.changeSlice()[0].newly_green);
@@ -1401,7 +1473,7 @@ test "rundown names keys that turned green and stuck help appears after four fla
     try owner.dispatch(owner.action(.{ .practise_key = .{ .cp = 's', .slow = true } }), now);
     try t.expect(owner.slow_round);
     try Play.round(&owner, drill, &now);
-    try t.expect(owner.rundown.?.slow_round);
+    try t.expect(owner.last_lesson.?.slow_round);
     const after = owner.learning.getStat('s').?;
     try t.expectEqual(before.ema_ms, after.ema_ms);
     try t.expectEqual(before.samples, after.samples);

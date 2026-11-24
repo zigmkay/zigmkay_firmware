@@ -151,9 +151,6 @@ fn insertText(owner: *control.Controller, text: []const u8, at: u64, paste: bool
     try owner.insertOs(true, text, at, paste);
 }
 
-/// Continue keys arriving this soon after the last keystroke of a round are ignored.
-const rundown_settle_us: u64 = 300_000;
-
 fn consumeInput(
     owner: *control.Controller,
     view: *View,
@@ -223,33 +220,6 @@ fn consumeInput(
         return;
     }
 
-    // Inline Rundown keyboard-only continuation: Enter or Space starts the next
-    // round. A habitual trailing Space right after the last letter is swallowed
-    // so the rundown stays visible.
-    if (owner.session.state == .complete) {
-        const completed_at = owner.session.last_event_us orelse 0;
-        const settled = input.now_us -| completed_at >= rundown_settle_us;
-        for (dvui.events()) |*event| {
-            if (event.handled) continue;
-            switch (event.evt) {
-                .key => |key| {
-                    if (key.action != .up and (key.code == .enter or key.code == .space)) {
-                        if (settled and pending.* == null) pending.* = .next_round;
-                        event.handle(@src(), data);
-                    }
-                },
-                .text => |text| {
-                    if (text.action == .value and std.mem.eql(u8, text.action.value.txt, " ")) {
-                        if (settled and pending.* == null) pending.* = .next_round;
-                        event.handle(@src(), data);
-                    }
-                },
-                else => {},
-            }
-        }
-        return;
-    }
-
     // Paused state: Esc or Enter resumes cleanly.
     if (owner.session.state == .paused) {
         for (dvui.events()) |*event| {
@@ -309,7 +279,12 @@ fn handleKey(
     pending: *?control.Intent,
 ) !void {
     if (key.matchBind("paste")) return insertText(owner, dvui.clipboardText(), at, true);
-    if (key.mod.control() or key.mod.command()) return;
+    if (key.mod.control() or key.mod.command()) {
+        if (stuckShortcut(owner, key.code)) |intent| {
+            if (pending.* == null) pending.* = intent;
+        }
+        return;
+    }
     const is_zig = owner.config.stage == .free_text and owner.config.stage6_source == .zig_code;
     switch (key.code) {
         .backspace => owner.session.backspace(),
@@ -324,6 +299,19 @@ fn handleKey(
         .escape => owner.pause(at),
         else => {},
     }
+}
+
+/// The stuck help's buttons as Ctrl (or Cmd) shortcuts, so typing never has to
+/// leave the keyboard: Down lowers the target, P practises the letter and
+/// Backspace dismisses the help.
+fn stuckShortcut(owner: *const control.Controller, code: dvui.enums.Key) ?control.Intent {
+    const help = presentation.stuckHelp(owner) orelse return null;
+    return switch (code) {
+        .down => if (help.lower_target) |lower| .{ .set_target_wpm = lower } else null,
+        .p => .{ .practise_key = .{ .cp = help.cp, .slow = help.reason == .hits } },
+        .backspace => .{ .dismiss_stuck = help.cp },
+        else => null,
+    };
 }
 
 pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dvui.Rect, input: Input) !DrawResult {
@@ -675,6 +663,9 @@ fn drawTutorWorkspace(
         const kb_y = rem_y + card_h + gap;
         const kb_h = @max(110.0, bounds.y + bounds.h - kb_y);
         try drawKeyboardArea(owner, view, theme, .{ .x = bounds.x, .y = kb_y, .w = bounds.w, .h = kb_h }, focus, resolved_hint, input);
+        try presentation.lessonNotices(owner, theme, .{ .x = bounds.x, .y = kb_y, .w = bounds.w, .h = kb_h }, input.now_us);
+    } else {
+        try presentation.lessonNotices(owner, theme, .{ .x = bounds.x, .y = rem_y, .w = bounds.w, .h = card_h }, input.now_us);
     }
 }
 
@@ -806,7 +797,11 @@ fn drawKeyboardArea(
         .live => if (frame.stale) "Live keyboard · stale" else "Live keyboard",
         .guide => "Layout guide",
     };
-    const src_caption = try std.fmt.allocPrint(arena, "{s} · {s}", .{ source_title, frame.profile });
+    const heat = try lessonHeat(arena, owner, labels.key_count, layer);
+    const src_caption = if (heat.len > 0)
+        "Last lesson: green clean · amber slow · red missed · clears on your first key"
+    else
+        try std.fmt.allocPrint(arena, "{s} · {s}", .{ source_title, frame.profile });
     const dim_locked = !is_test_keys and (owner.config.stage == .home_row or owner.config.stage == .all_letters);
 
     try keyboard_view.draw(theme, bounds, .{
@@ -832,9 +827,31 @@ fn drawKeyboardArea(
         else
             null,
         .error_flash_key = flash_key,
+        .heat = heat,
         .source_caption = src_caption,
         .layer_name = frame.layer_name,
     });
+}
+
+/// How each key of the last lesson went, shown until the next lesson's first
+/// keystroke: missed at least once, slower than the target, or clean.
+fn lessonHeat(arena: std.mem.Allocator, owner: *const control.Controller, key_count: usize, layer: usize) ![]const keyboard_view.HeatKey {
+    if (owner.config.mode != .tutor or owner.session.state != .ready or !owner.profile_bound) return &.{};
+    const lesson = owner.last_lesson orelse return &.{};
+    const target_ms = 12_000.0 / owner.config.target_wpm;
+    var out: std.ArrayList(keyboard_view.HeatKey) = .empty;
+    for (lesson.keySlice()) |key| {
+        const route = owner.profile.routeFor(key.cp) orelse continue;
+        if (route.layer != layer or route.key_index >= key_count) continue;
+        const heat: keyboard_view.Heat = if (key.misses > 0)
+            .missed
+        else if (key.ms > target_ms)
+            .slow
+        else
+            .clean;
+        try out.append(arena, .{ .key_index = route.key_index, .heat = heat });
+    }
+    return out.items;
 }
 
 /// Pauses a run when the window loses focus.
@@ -855,7 +872,7 @@ fn statusNote(owner: *const control.Controller, input: Input) []const u8 {
 pub fn apply(owner: *control.Controller, view: *View, rendered: control.Action, input: Input) !void {
     try owner.dispatch(rendered, input.now_us);
     switch (rendered.intent) {
-        .start, .new_exercise, .next_round, .set_stage, .start_weak_spot, .reset_progress, .reset_keys, .resolve_layout_changes, .practise_key => {
+        .start, .new_exercise, .set_stage, .start_weak_spot, .reset_progress, .reset_keys, .resolve_layout_changes, .practise_key => {
             view.scroll.at = null;
             view.drawn_len = 0;
             view.sheet = .none;

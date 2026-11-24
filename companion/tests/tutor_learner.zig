@@ -150,8 +150,10 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
                 };
             }
 
+            // A finished lesson loads the next one at once.
+            const generation = owner.generation;
             var presses: usize = 0;
-            while (session.state != .complete) : (presses += 1) {
+            while (owner.generation == generation) : (presses += 1) {
                 if (presses > reference.len * 8) return error.RoundCannotBeFinished;
                 const wanted = reference[desktop.practice_view.focus(session)];
                 const slip = random.random().uintLessThan(u32, 1000) < typist.errors_per_mille;
@@ -162,7 +164,8 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
                 _ = try owner.insertOs(true, bytes[0..len], now, false);
             }
             rounds += 1;
-            try t.expect(owner.rundown != null);
+            try t.expect(owner.last_lesson != null);
+            try t.expectEqual(desktop.practice.State.ready, session.state);
             try t.expect(owner.learning.unlocked_count >= unlocked_before);
             if (full_unlock_round == null and owner.learning.unlocked_count == owner.learning.unlock_len)
                 full_unlock_round = rounds;
@@ -171,7 +174,6 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
             try t.expect(!owner.needs_persist);
             owner.utc_now_sec += 3 * 3600;
             now += 2_000_000;
-            _ = try owner.handleRundownContinue();
         }
     }
 
@@ -239,8 +241,10 @@ fn playRounds(owner: *control.Controller, stage: control.Stage, count: usize, no
     for (0..count) |_| {
         try owner.start();
         const session = &owner.session;
+        // A finished lesson loads the next one at once.
+        const generation = owner.generation;
         var presses: usize = 0;
-        while (session.state != .complete) : (presses += 1) {
+        while (owner.generation == generation) : (presses += 1) {
             if (presses > session.reference_len * 2) return error.RoundCannotBeFinished;
             const wanted = session.reference[desktop.practice_view.focus(session)];
             var bytes: [4]u8 = undefined;

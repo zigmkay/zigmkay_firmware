@@ -37,7 +37,7 @@ pub fn beforeFrame(app: *App) !void {
 /// 0: Active Stage 2 · All letters (with populated confidences & focus key)
 /// 1: Stage 3 · Shift & capitals (opposite-hand Shift hold + tap bridge)
 /// 2: Stage 5 · Layers & combos (layer auto-preview / 2-key combo arc)
-/// 3: Inline round rundown (with newly unlocked key banner)
+/// 3: Next lesson right after a finished one (last lesson, notices, heatmap)
 /// 4: Stages sheet (6-stage learning path)
 /// 5: Progress sheet (KPI cards, WPM trend chart, weakest keys)
 /// 6: Test keys mode (clean keyboard + telemetry bar)
@@ -112,15 +112,20 @@ fn showTutor(app: *App) !void {
             try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
             try practice.start();
             try typeSessionPrefix(&practice.session, practice.session.reference_len, now, false);
-            _ = practice.finish(now);
-            // Highlight an unlock celebration banner in the rundown showcase.
-            if (practice.rundown) |*rd| {
-                rd.wpm = 41.2;
-                rd.prev_wpm = 38.4;
-                rd.wpm_delta = 2.8;
-                rd.accuracy = 97.6;
-                rd.newly_unlocked = 'p';
+            try practice.finish(now);
+            // Show the notices of an unlock next to the new lesson.
+            if (practice.last_lesson) |*lesson| {
+                lesson.wpm = 41.2;
+                lesson.prev_wpm = 38.4;
+                lesson.wpm_delta = 2.8;
+                lesson.accuracy = 97.6;
+                lesson.newly_unlocked = 'p';
             }
+            practice.event_len = 0;
+            practice.events[0] = .{ .new_letter = 'p' };
+            practice.events[1] = .{ .green = 'c' };
+            practice.event_len = 2;
+            practice.events_at_us = now;
         },
         4 => {
             try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);

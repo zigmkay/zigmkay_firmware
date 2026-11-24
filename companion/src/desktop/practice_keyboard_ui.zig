@@ -34,8 +34,17 @@ pub const Params = struct {
     hold_source_layer: usize = 0,
     combo_output_cp: ?u21 = null,
     error_flash_key: ?usize = null,
+    /// How each key went in the last lesson, until the next one starts.
+    heat: []const HeatKey = &.{},
     source_caption: []const u8 = "",
     layer_name: []const u8 = "",
+};
+
+pub const Heat = enum { clean, slow, missed };
+
+pub const HeatKey = struct {
+    key_index: usize,
+    heat: Heat,
 };
 
 /// Theme-derived semantic colors (100% ui.Theme & ui.layer_palette; no hardcoded hex).
@@ -178,6 +187,9 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, params: Params) !void {
         } else false;
         const is_anchor_ring = (anchor_key != null and anchor_key.? == idx);
         const is_error_flash = (is_tutor and params.error_flash_key != null and params.error_flash_key.? == idx);
+        const heat: ?Heat = if (is_tutor) for (params.heat) |h| {
+            if (h.key_index == idx) break h.heat;
+        } else null else null;
         const is_active_key = item.target or item.hold or is_combo or item.pressed or is_anchor_ring;
         const locked = is_tutor and params.dim_locked and !is_active_key and isKeyLocked(params.labels, idx, params.unlocked_mask, space_key);
         const finger: lp.Finger = if (params.profile) |p| p.fingerFor(idx) else .unknown;
@@ -196,6 +208,7 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, params: Params) !void {
             .is_anchor_ring = is_anchor_ring,
             .is_index_home = is_index_home,
             .is_error_flash = is_error_flash,
+            .heat = heat,
         });
     }
 
@@ -246,6 +259,7 @@ const KeyState = struct {
     is_anchor_ring: bool,
     is_index_home: bool,
     is_error_flash: bool,
+    heat: ?Heat = null,
 };
 
 /// During Stage 1 (Home row) and Stage 2 (All letters), only unlocked `a..z`
@@ -314,6 +328,17 @@ fn drawKeycap(
         ui.mix(theme.panel, theme.muted, 0.45)
     else
         theme.muted;
+
+    if (ks.heat) |heat| {
+        const hc = switch (heat) {
+            .clean => pal.ok,
+            .slow => pal.tap,
+            .missed => pal.err,
+        };
+        fill = ui.mix(theme.keycap, hc, 0.24);
+        border = ui.mix(theme.keycap, hc, 0.8);
+        thickness = 2.0;
+    }
 
     if (ks.is_anchor_ring and !is_tap and !is_hold and !ks.is_combo) {
         const fc = if (ks.finger != .unknown) fingerColor(theme, ks.finger) else theme.accent;
