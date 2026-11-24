@@ -560,7 +560,7 @@ fn drawProgressSheet(
     const delta_str = if (stats.delta_wpm) |d|
         try std.fmt.allocPrint(arena, "{s}{d:.1} WPM trend", .{ if (d >= 0) "+" else "", d })
     else
-        "Complete rounds to track trend";
+        "Finish lessons to track the trend";
     drawKpiCard(theme, .{ .x = pad, .y = body_top, .w = kpi_w, .h = kpi_h }, "Recent average", avg_wpm_str, delta_str, if (stats.delta_wpm != null and stats.delta_wpm.? >= 0) theme.success else theme.muted, 0xc001);
 
     const acc_str = if (stats.count > 0)
@@ -756,7 +756,7 @@ fn drawWpmTrendPanel(
     });
 
     if (runs.len < 2) {
-        presentation.caption("Complete at least 2 rounds to plot your WPM curve", .{ .x = 16, .y = 44, .w = rect.w - 32, .h = rect.h - 60 }, 13.5, theme.muted, null);
+        presentation.caption("Finish at least 2 lessons to plot your WPM curve", .{ .x = 16, .y = 44, .w = rect.w - 32, .h = rect.h - 60 }, 13.5, theme.muted, null);
         return;
     }
 

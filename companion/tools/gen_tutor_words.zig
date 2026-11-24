@@ -41,7 +41,7 @@ const inputs = [_]Input{ frequency_input, scowl_input, blocklist_input };
 /// SCOWL lists up to size 50, the size of a typical spell checker; larger
 /// sizes add rare words and, from size 80, parts with other license terms.
 const scowl_lists = [_][]const u8{
-    "english-words.10", "english-words.20", "english-words.35", "english-words.40", "english-words.50",
+    "english-words.10",  "english-words.20",  "english-words.35",  "english-words.40",  "english-words.50",
     "american-words.10", "american-words.20", "american-words.35", "american-words.40", "american-words.50",
 };
 

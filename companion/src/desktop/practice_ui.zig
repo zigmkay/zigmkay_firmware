@@ -589,7 +589,7 @@ fn drawTutorWorkspace(
     try presentation.confidenceStrip(owner, theme, .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = conf_h });
 
     // The layout-change question sits between the strip and the card, so it
-    // shows with any guidance, and only between rounds.
+    // shows with any guidance, and only before a lesson starts.
     var top_h = conf_h;
     if (presentation.showsLayoutChangeStrip(owner)) {
         const strip_h = presentation.layout_change_strip_h;

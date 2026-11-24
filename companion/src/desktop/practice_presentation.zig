@@ -503,7 +503,7 @@ pub const help_strip_h: f32 = 52;
 
 pub const HelpButton = struct { text: []const u8, tag: []const u8, primary: bool = false, intent: control.Intent };
 
-/// A calm two-line notice between rounds with up to three buttons on the
+/// A calm two-line notice above the text with up to three buttons on the
 /// right; the rightmost is the suggested one.
 fn helpStrip(
     theme: ui.Theme,
