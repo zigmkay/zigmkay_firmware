@@ -165,7 +165,7 @@ pub fn main(init: std.process.Init) !void {
     }
     const resources = try std.fs.path.join(a, &.{ args[4], layout });
     var assembly: Assembler = .{ .a = a, .io = init.io, .output = resources, .packages = args[3], .seen = .init(a), .legal_seen = .init(a) };
-    for ([_][]const u8{ "LICENSE", "NOTICE" }) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, name }), try std.fs.path.join(a, &.{ "licenses/application", name }));
+    for ([_][]const u8{ "LICENSE", "NOTICE", "licenses/GPL-3.0.txt", "licenses/SCOWL-Copyright.txt" }) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, name }), try std.fs.path.join(a, &.{ "licenses/application", std.fs.path.basename(name) }));
     for (pins.license_hashes) |hash| try assembly.legalPackage(hash);
     try assembly.copy(compiler, "toolchain/zig" ++ if (@import("builtin").os.tag == .windows) ".exe" else "");
     try assembly.copy(try std.fs.path.join(a, &.{ distribution, "lib" }), "toolchain/lib");

@@ -131,6 +131,10 @@ pub const RunRecord = struct {
     unlocked_char: ?u32 = null,
     top_weak_keys: []const u32 = &.{},
     top_weak_bigrams: []const [2]u32 = &.{},
+    /// The letter pair a weak-spot lesson was built around.
+    weak_spot: ?[2]u32 = null,
+    /// Keys that turned green in the lesson.
+    newly_green: []const u32 = &.{},
 };
 
 pub const LoadedRuns = struct {

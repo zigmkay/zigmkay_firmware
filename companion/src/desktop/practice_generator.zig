@@ -1,17 +1,26 @@
-//! Clean-room, comptime-trained English trigram pseudoword and 6-stage adaptive
-//! drill generator for the Zigmkay typing tutor. Deterministic from SplitMix64 seeds.
+//! 6-stage adaptive drill generator for the Zigmkay typing tutor. Lessons are
+//! real English words from `practice_words.zig`; a clean-room trigram model
+//! trained on the same list fills in pseudowords only when too few real words
+//! fit the unlocked letters. Deterministic from SplitMix64 seeds.
 const std = @import("std");
 const practice = @import("practice.zig");
 const layout_profile = @import("practice_layout_profile.zig");
 const model = @import("practice_model.zig");
+const word_list = @import("practice_words.zig");
 
 /// Legacy sentence counts retained for compatibility until M2b removes the old controller mode.
 pub const sentence_counts = [_]usize{ 1, 3, 5, 10 };
 pub const max_sentences = templates;
 const templates = 12;
 
-pub const default_round_words: usize = 25;
+pub const default_round_words: usize = 20;
 pub const default_weak_spot_words: usize = 20;
+/// Letters (without spaces) of a lesson of words, about 20 words.
+pub const default_lesson_letters: usize = 100;
+/// A lesson draws its words from at most this many of the most frequent
+/// words that fit, and mixes in pseudowords while fewer than `min_word_pool` fit.
+pub const max_word_pool: usize = 1000;
+pub const min_word_pool: usize = 15;
 const boundary: usize = 26;
 const alphabet_size: usize = 27;
 
@@ -40,7 +49,7 @@ pub const Stage = enum(u8) {
 
     pub fn title(self: Stage) []const u8 {
         return switch (self) {
-            .home_row => "Stage 1 · Home row",
+            .home_row => "Stage 1 · First letters",
             .all_letters => "Stage 2 · All letters",
             .shift => "Stage 3 · Shift & capitals",
             .punctuation_numbers => "Stage 4 · Punctuation & numbers",
@@ -51,7 +60,7 @@ pub const Stage = enum(u8) {
 
     pub fn shortName(self: Stage) []const u8 {
         return switch (self) {
-            .home_row => "Home row",
+            .home_row => "First letters",
             .all_letters => "All letters",
             .shift => "Shift & capitals",
             .punctuation_numbers => "Punctuation & numbers",
@@ -79,7 +88,13 @@ pub const DrillRequest = struct {
     stage: Stage = .home_row,
     seed: u64 = 1,
     word_count: usize = default_round_words,
+    /// Letters of a lesson of words (Stages 1 and 2).
+    letter_budget: usize = default_lesson_letters,
     unlocked_mask: u32 = 0,
+    /// Stage 1 letters; 0 takes them from `learning` or the profile.
+    first_mask: u32 = 0,
+    /// A weak-spot lesson: every word contains this letter pair when enough do.
+    bigram: ?[2]u8 = null,
     focus_cp: ?u21 = null,
     profile: ?*const layout_profile.LayoutProfile = null,
     learning: ?*const model.LearningModel = null,
@@ -91,37 +106,32 @@ pub const DrillRequest = struct {
     custom_text: []const u8 = "",
 };
 
-pub const vocabulary = blk: {
-    @setEvalBranchQuota(2_000_000);
-    const data = @embedFile("practice_vocabulary.txt");
-    var count: usize = 0;
-    var it = std.mem.tokenizeAny(u8, data, " \n\r\t");
-    while (it.next() != null) count += 1;
-    var words: [count][]const u8 = undefined;
-    it.reset();
-    for (&words) |*word| word.* = it.next().?;
-    break :blk words;
-};
-
 pub const TrigramTable = struct {
     trigram: [alphabet_size][alphabet_size][alphabet_size]u16,
     bigram: [alphabet_size][alphabet_size]u16,
     unigram: [alphabet_size]u16,
 };
 
-/// Clean-room English trigram transition model trained at comptime from `practice_vocabulary.txt`.
-pub const english_trigrams: TrigramTable = blk: {
-    @setEvalBranchQuota(10_000_000);
-    var table: TrigramTable = .{
+/// Words of the list the trigram model learns from.
+const trigram_words: usize = 10_000;
+var trigram_table: TrigramTable = undefined;
+var trigrams_ready = false;
+
+/// Clean-room English trigram transition model, trained on first use from
+/// the most frequent words of the word list.
+pub fn englishTrigrams() *const TrigramTable {
+    if (trigrams_ready) return &trigram_table;
+    const table = &trigram_table;
+    table.* = .{
         .trigram = @splat(@splat(@splat(0))),
         .bigram = @splat(@splat(0)),
         .unigram = @splat(0),
     };
-    for (vocabulary) |word| {
+    const list = word_list.english();
+    for (0..@min(list.len, trigram_words)) |i| {
         var p2: usize = boundary;
         var p1: usize = boundary;
-        for (word) |byte| {
-            if (byte < 'a' or byte > 'z') continue;
+        for (list.word(i)) |byte| {
             const ch: usize = byte - 'a';
             table.trigram[p2][p1][ch] +|= 1;
             table.bigram[p1][ch] +|= 1;
@@ -132,8 +142,9 @@ pub const english_trigrams: TrigramTable = blk: {
         table.trigram[p2][p1][boundary] +|= 1;
         table.bigram[p1][boundary] +|= 1;
     }
-    break :blk table;
-};
+    trigrams_ready = true;
+    return table;
+}
 
 /// Compact first-party profanity blocklist so pseudowords never emit offensive terms.
 const blocked_words = [_][]const u8{
@@ -193,12 +204,19 @@ pub fn maskFromSlice(letters: []const u8) u32 {
 }
 
 fn effectiveMask(req: DrillRequest) u32 {
-    // Stage 1 stays on the home row even after off-row letters unlock;
+    // Stage 1 stays on the first letters even after later letters unlock;
     // the progressive unlock mask belongs to Stage 2.
-    if (req.stage == .home_row) if (req.profile) |p| {
-        const m = maskFromSlice(p.zone1Letters());
-        if (m != 0) return m;
-    };
+    if (req.stage == .home_row) {
+        if (req.first_mask != 0) return req.first_mask & 0x03ff_ffff;
+        if (req.learning) |lm| {
+            const m = maskFromSlice(lm.firstLetters());
+            if (m != 0) return m;
+        }
+        if (req.profile) |p| {
+            const m = maskFromSlice(p.zone1Letters());
+            if (m != 0) return m;
+        }
+    }
     if (req.unlocked_mask != 0) return req.unlocked_mask & 0x03ff_ffff;
     if (req.learning) |lm| {
         const m = lm.unlockedMask();
@@ -224,8 +242,7 @@ fn focusLower(req: DrillRequest, mask: u32) ?u8 {
 pub fn generateDrill(buffer: []u8, req: DrillRequest) ![]const u8 {
     _ = req.language; // .en active; reserved for future locales
     const text = try switch (req.stage) {
-        .home_row => generateHomeRowOrTrigram(buffer, req),
-        .all_letters => generateTrigramRound(buffer, req),
+        .home_row, .all_letters => generateWordRound(buffer, req),
         .shift => generateShiftRound(buffer, req),
         .punctuation_numbers => generatePunctuationNumbersRound(buffer, req),
         .layers_combos => generateLayersCombosRound(buffer, req),
@@ -279,12 +296,88 @@ pub fn generateWeakSpotDrill(
     return generateWeakSpotInternal(buffer, seed, learning, profile, if (word_count == 0) default_weak_spot_words else word_count);
 }
 
-fn generateHomeRowOrTrigram(buffer: []u8, req: DrillRequest) ![]const u8 {
+/// A lesson of real words for Stages 1 and 2: every word uses only unlocked
+/// letters and contains the focus letter (or the weak-spot pair). Words come
+/// from the `max_word_pool` most frequent that fit, the more frequent ones
+/// more often, never the same word twice in a row; while fewer than
+/// `min_word_pool` fit, trigram pseudowords make up the difference.
+fn generateWordRound(buffer: []u8, req: DrillRequest) ![]const u8 {
     const mask = effectiveMask(req);
-    if (vowelCountInMask(mask) < 2) {
-        return generateLowVowelAnchorDrill(buffer, req, mask);
+    if (mask == 0) return error.InvalidExerciseLevel;
+    if (vowelCountInMask(mask) < 2) return generateLowVowelAnchorDrill(buffer, req, mask);
+    const focus = focusLower(req, mask);
+    var rng: Random = .{ .state = req.seed ^ 0x6c8e_9cf5 };
+    const list = word_list.english();
+
+    var pool: [max_word_pool]u16 = undefined;
+    var pool_len: usize = 0;
+    if (req.bigram) |pair| if (fitsMask(pair[0], mask) and fitsMask(pair[1], mask)) {
+        pool_len = collectWords(list, mask, null, &pair, &pool);
+        // Too few words with the pair: an ordinary focus lesson instead.
+        if (pool_len < min_word_pool) pool_len = 0;
+    };
+    if (pool_len == 0) pool_len = collectWords(list, mask, focus, null, &pool);
+
+    // Weight 1/sqrt(rank): common words come often, rarer ones still appear.
+    var cumulative: [max_word_pool]f32 = undefined;
+    var total: f32 = 0;
+    for (cumulative[0..pool_len], 0..) |*c, i| {
+        total += 1.0 / @sqrt(@as(f32, @floatFromInt(i + 3)));
+        c.* = total;
     }
-    return generateTrigramRound(buffer, req);
+
+    var writer: std.Io.Writer = .fixed(buffer);
+    var letters: usize = 0;
+    var count: usize = 0;
+    var previous: ?usize = null;
+    const budget = @max(@as(usize, 1), req.letter_budget);
+    while (letters < budget and count < 64) : (count += 1) {
+        if (count > 0) try writer.writeByte(' ');
+        const pseudo = pool_len == 0 or (pool_len < min_word_pool and rng.index(min_word_pool) >= pool_len);
+        if (pseudo) {
+            var word_buf: [8]u8 = undefined;
+            const word = samplePseudoword(&rng, mask, focus, focus != null, &word_buf);
+            try writer.writeAll(word);
+            letters += word.len;
+            previous = null;
+            continue;
+        }
+        var pick: usize = 0;
+        for (0..3) |_| {
+            const r = @as(f32, @floatFromInt(rng.next() >> 40)) / @as(f32, 1 << 24) * total;
+            pick = std.sort.lowerBound(f32, cumulative[0..pool_len], r, struct {
+                fn order(target: f32, item: f32) std.math.Order {
+                    return std.math.order(target, item);
+                }
+            }.order);
+            pick = @min(pick, pool_len - 1);
+            if (previous == null or pick != previous.? or pool_len == 1) break;
+        }
+        previous = pick;
+        const word = list.word(pool[pick]);
+        try writer.writeAll(word);
+        letters += word.len;
+    }
+    return writer.buffered();
+}
+
+fn fitsMask(ch: u8, mask: u32) bool {
+    return ch >= 'a' and ch <= 'z' and mask & (@as(u32, 1) << @intCast(ch - 'a')) != 0;
+}
+
+/// The most frequent words of `list` that use only `mask` letters and
+/// contain `focus` (when given) and `pair` (when given), in rank order.
+fn collectWords(list: *const word_list.List, mask: u32, focus: ?u8, pair: ?*const [2]u8, out: *[max_word_pool]u16) usize {
+    const focus_bit: u32 = if (focus) |f| @as(u32, 1) << @intCast(f - 'a') else 0;
+    var len: usize = 0;
+    for (list.items[0..list.len], 0..) |w, i| {
+        if (len == out.len) break;
+        if (w.mask & ~mask != 0 or w.mask & focus_bit != focus_bit) continue;
+        if (pair) |p| if (std.mem.indexOf(u8, list.word(i), p) == null) continue;
+        out[len] = @intCast(i);
+        len += 1;
+    }
+    return len;
 }
 
 fn generateLowVowelAnchorDrill(buffer: []u8, req: DrillRequest, mask: u32) ![]const u8 {
@@ -292,7 +385,7 @@ fn generateLowVowelAnchorDrill(buffer: []u8, req: DrillRequest, mask: u32) ![]co
     const focus = focusLower(req, mask);
     const word_count = @max(@as(usize, 1), req.word_count);
 
-    // Gather real words from vocabulary (and home-row classics) strictly within `mask`.
+    // Gather real words from the word list (and home-row classics) strictly within `mask`.
     var real_words: [96][]const u8 = undefined;
     var real_len: usize = 0;
 
@@ -307,9 +400,11 @@ fn generateLowVowelAnchorDrill(buffer: []u8, req: DrillRequest, mask: u32) ![]co
             real_len += 1;
         }
     }
-    for (vocabulary) |w| {
+    const list = word_list.english();
+    for (0..list.len) |i| {
         if (real_len >= real_words.len) break;
-        if (w.len >= 3 and w.len <= 7 and wordFitsMask(w, mask) and !isBlockedWord(w)) {
+        const w = list.word(i);
+        if (w.len >= 3 and w.len <= 7 and list.items[i].mask & ~mask == 0 and !isBlockedWord(w)) {
             var dup = false;
             for (real_words[0..real_len]) |e| if (std.mem.eql(u8, e, w)) {
                 dup = true;
@@ -551,6 +646,7 @@ fn pickNextSymbol(
     prefix: []const u8,
 ) usize {
     const focus_idx: ?usize = if (focus) |fc| @as(usize, fc - 'a') else null;
+    const table = englishTrigrams();
 
     // Try trigram -> bigram -> unigram -> uniform backoff.
     inline for (0..4) |tier| {
@@ -564,9 +660,9 @@ fn pickNextSymbol(
                 continue;
             }
             var w: u32 = switch (tier) {
-                0 => english_trigrams.trigram[p2][p1][ch],
-                1 => english_trigrams.bigram[p1][ch],
-                2 => english_trigrams.unigram[ch],
+                0 => table.trigram[p2][p1][ch],
+                1 => table.bigram[p1][ch],
+                2 => table.unigram[ch],
                 else => 1,
             };
             if (w > 0 and focus_idx != null and ch == focus_idx.?) {
@@ -578,8 +674,8 @@ fn pickNextSymbol(
 
         if (allow_end and tier < 2) {
             const end_w: u32 = switch (tier) {
-                0 => english_trigrams.trigram[p2][p1][boundary],
-                1 => english_trigrams.bigram[p1][boundary],
+                0 => table.trigram[p2][p1][boundary],
+                1 => table.bigram[p1][boundary],
                 else => 0,
             };
             // Keep end boundary reasonable so words average 4-6 letters.
@@ -690,12 +786,15 @@ fn generateShiftRound(buffer: []u8, req: DrillRequest) ![]const u8 {
 
         const lead_lower: u8 = if (start_pool.len > 0) start_pool[rng.index(start_pool.len)] else 'a';
 
-        // Pick a vocabulary word starting with `lead_lower` that fits `mask`, or synthesize one.
+        // Pick a frequent word starting with `lead_lower` that fits `mask`, or synthesize one.
         var chosen: ?[]const u8 = null;
-        const vocab_start = rng.index(vocabulary.len);
-        for (0..@min(vocabulary.len, 400)) |step| {
-            const w = vocabulary[(vocab_start + step) % vocabulary.len];
-            if (w.len >= 3 and w.len <= 8 and w[0] == lead_lower and wordFitsMask(w, mask)) {
+        const list = word_list.english();
+        const span = @min(list.len, common_words);
+        const vocab_start = if (span > 0) rng.index(span) else 0;
+        for (0..span) |step| {
+            const index = (vocab_start + step) % span;
+            const w = list.word(index);
+            if (w.len >= 3 and w.len <= 8 and w[0] == lead_lower and list.items[index].mask & ~mask == 0) {
                 chosen = w;
                 break;
             }
@@ -1036,11 +1135,18 @@ fn generateWeakSpotInternal(
     return writer.buffered();
 }
 
+/// Words the other stages draw from: the most frequent of the list.
+const common_words: usize = 3000;
+
 fn findWordContaining(rng: *Random, needle: []const u8, mask: u32) ?[]const u8 {
-    const start = rng.index(vocabulary.len);
-    for (0..vocabulary.len) |offset| {
-        const w = vocabulary[(start + offset) % vocabulary.len];
-        if (w.len >= 3 and w.len <= 8 and wordFitsMask(w, mask) and std.mem.indexOf(u8, w, needle) != null) {
+    const list = word_list.english();
+    const span = @min(list.len, 8 * common_words);
+    if (span == 0) return null;
+    const start = rng.index(span);
+    for (0..span) |offset| {
+        const index = (start + offset) % span;
+        const w = list.word(index);
+        if (w.len >= 3 and w.len <= 8 and list.items[index].mask & ~mask == 0 and std.mem.indexOf(u8, w, needle) != null) {
             return w;
         }
     }
@@ -1048,9 +1154,11 @@ fn findWordContaining(rng: *Random, needle: []const u8, mask: u32) ?[]const u8 {
 }
 
 fn pickReachableVocabWord(rng: *Random, profile: ?*const layout_profile.LayoutProfile) []const u8 {
-    const start = rng.index(vocabulary.len);
-    for (0..@min(vocabulary.len, 128)) |step| {
-        const w = vocabulary[(start + step) % vocabulary.len];
+    const list = word_list.english();
+    const span = @min(list.len, common_words);
+    const start = rng.index(span);
+    for (0..@min(span, 128)) |step| {
+        const w = list.word((start + step) % span);
         if (w.len < 3 or w.len > 7) continue;
         if (profile) |p| {
             var ok = true;
@@ -1062,7 +1170,7 @@ fn pickReachableVocabWord(rng: *Random, profile: ?*const layout_profile.LayoutPr
         }
         return w;
     }
-    return vocabulary[start];
+    return list.word(start);
 }
 
 // ---------------------------------------------------------------------------
@@ -1087,13 +1195,15 @@ const Generator = struct {
     used_templates: [templates]bool = @splat(false),
 
     fn pickWord(self: *Generator) []const u8 {
-        var candidate = self.random.index(vocabulary.len);
+        const list = word_list.english();
+        const span = @min(list.len, common_words);
+        var candidate = self.random.index(span);
         while (std.mem.indexOfScalar(usize, self.used_words[0..self.used_word_count], candidate) != null) {
-            candidate = (candidate + 1) % vocabulary.len;
+            candidate = (candidate + 1) % span;
         }
         self.used_words[self.used_word_count] = candidate;
         self.used_word_count += 1;
-        return vocabulary[candidate];
+        return list.word(candidate);
     }
 
     fn template(self: *Generator) usize {
@@ -1126,16 +1236,41 @@ fn writeSentence(writer: *std.Io.Writer, state: *Generator, a: []const u8, b: []
 // Deterministic unit & property tests
 // ---------------------------------------------------------------------------
 
-test "vocabulary has ~3000 unique clean lowercase English words and zero profanity" {
+test "the word list has no word the pseudoword filter blocks" {
+    const list = word_list.english();
+    for (0..list.len) |i| try std.testing.expect(!isBlockedWord(list.word(i)));
+}
+
+test "lessons of real words contain the focus letter in every word and stop near 100 letters" {
     const t = std.testing;
-    try t.expect(vocabulary.len >= 2800);
-    var unique: std.StringHashMap(void) = .init(t.allocator);
-    defer unique.deinit();
-    for (vocabulary) |word| {
-        try t.expect(!isBlockedWord(word));
-        for (word) |byte| try t.expect(std.ascii.isLower(byte));
-        try t.expect(!(try unique.getOrPut(word)).found_existing);
+    const first = maskFromSlice("esartl");
+    var buf1: [1024]u8 = undefined;
+    var buf2: [1024]u8 = undefined;
+    const req: DrillRequest = .{ .stage = .home_row, .seed = 7, .first_mask = first, .focus_cp = 'l' };
+    const text = try generateDrill(&buf1, req);
+    try t.expectEqualStrings(text, try generateDrill(&buf2, req));
+    const list = word_list.english();
+    var letters: usize = 0;
+    var previous: []const u8 = "";
+    var it = std.mem.splitScalar(u8, text, ' ');
+    while (it.next()) |w| {
+        letters += w.len;
+        try t.expect(wordFitsMask(w, first));
+        try t.expect(std.mem.indexOfScalar(u8, w, 'l') != null);
+        // Real words only: plenty fit these letters.
+        const real = for (0..list.len) |i| {
+            if (std.mem.eql(u8, list.word(i), w)) break true;
+        } else false;
+        try t.expect(real);
+        try t.expect(!std.mem.eql(u8, w, previous));
+        previous = w;
     }
+    try t.expect(letters >= default_lesson_letters and letters < default_lesson_letters + 15);
+
+    // A weak-spot lesson puts the pair in every word.
+    const weak = try generateDrill(&buf1, .{ .stage = .all_letters, .seed = 3, .unlocked_mask = maskFromSlice("esartldingo"), .focus_cp = 'g', .bigram = "in".* });
+    var pairs = std.mem.splitScalar(u8, weak, ' ');
+    while (pairs.next()) |w| try t.expect(std.mem.indexOf(u8, w, "in") != null);
 }
 
 test "trigram pseudowords enforce reproducibility, 100% unlocked subset, focus share, no triples, and profanity filter" {
@@ -1151,8 +1286,8 @@ test "trigram pseudowords enforce reproducibility, 100% unlocked subset, focus s
         .unlocked_mask = colemak_mask,
         .focus_cp = 'r',
     };
-    const text1 = try generateDrill(&buf1, req);
-    const text2 = try generateDrill(&buf2, req);
+    const text1 = try generateTrigramRound(&buf1, req);
+    const text2 = try generateTrigramRound(&buf2, req);
     try t.expectEqualStrings(text1, text2);
 
     var words: usize = 0;

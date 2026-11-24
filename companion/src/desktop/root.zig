@@ -45,6 +45,7 @@ pub const event_history = @import("event_history.zig");
 pub const encoder_state = @import("encoder_state.zig");
 pub const encoder_editor = @import("encoder_editor.zig");
 
+pub const practice_words = @import("practice_words.zig");
 pub const practice_generator = @import("practice_generator.zig");
 pub const owned_worker = @import("owned_worker.zig");
 pub const onboarding = @import("onboarding.zig");

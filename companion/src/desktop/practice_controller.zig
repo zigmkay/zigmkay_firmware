@@ -60,6 +60,8 @@ pub const LessonSummary = struct {
     change_len: usize = 0,
     /// The round was typed as a slow round; its speed did not count.
     slow_round: bool = false,
+    /// The letter pair a weak-spot lesson was built around.
+    weak_spot: ?[2]u8 = null,
     /// Every key typed in the lesson, for the keyboard heatmap.
     keys: [max_lesson_keys]LessonKey = undefined,
     key_len: usize = 0,
@@ -234,7 +236,14 @@ pub const PendingRun = struct {
     weak_key_len: usize = 0,
     weak_bigrams: [3][2]u32 = @splat(.{ 0, 0 }),
     weak_bigram_len: usize = 0,
+    weak_spot: ?[2]u32 = null,
+    newly_green: [max_round_changes]u32 = @splat(0),
+    newly_green_len: usize = 0,
 };
+
+/// Every this many lessons of Stages 1 and 2 one is built around the
+/// slowest letter pair, without a stop or a button.
+pub const weak_spot_every: u8 = 5;
 
 pub const max_key_reset: usize = model.max_tracked_keys;
 
@@ -327,6 +336,10 @@ pub const Controller = struct {
     /// The next round, and the current one, are slow rounds.
     slow_round_next: bool = false,
     slow_round: bool = false,
+    /// Lessons finished since the last weak-spot lesson.
+    lessons_since_weak_spot: u8 = 0,
+    /// The letter pair the current lesson is built around, if any.
+    lesson_bigram: ?[2]u8 = null,
 
     custom_text: [2048]u8 = @splat(0),
     custom_text_len: usize = 0,
@@ -828,6 +841,7 @@ pub const Controller = struct {
         if (self.config.mode == .test_keys) return;
         var buffer: [8192]u8 = undefined;
         self.seed +%= 0x9e3779b97f4a7c15;
+        self.lesson_bigram = self.weakSpotPair();
         var text = try self.reference(&buffer);
         if (self.config.stage != .free_text and self.session.reference_len > 0) {
             var retries: usize = 0;
@@ -848,6 +862,25 @@ pub const Controller = struct {
         return;
     }
 
+    /// The slowest letter pair of the unlocked letters when the next lesson is
+    /// due to be a weak-spot lesson.
+    fn weakSpotPair(self: *const Controller) ?[2]u8 {
+        const stage = self.config.stage;
+        if (stage != .home_row and stage != .all_letters) return null;
+        if (self.config.weak_spot_active or self.slow_round_next) return null;
+        if (self.lessons_since_weak_spot + 1 < weak_spot_every) return null;
+        var slowest: [8]model.BigramStat = undefined;
+        for (self.learning.slowestBigrams(3, &slowest)) |bg| {
+            if (bg.prev > 'z' or bg.cur > 'z' or bg.prev < 'a' or bg.cur < 'a') continue;
+            const pair = [2]u8{ @intCast(bg.prev), @intCast(bg.cur) };
+            if (!self.learning.isUnlocked(pair[0]) or !self.learning.isUnlocked(pair[1])) continue;
+            if (stage == .home_row and (std.mem.indexOfScalar(u8, self.learning.firstLetters(), pair[0]) == null or
+                std.mem.indexOfScalar(u8, self.learning.firstLetters(), pair[1]) == null)) continue;
+            return pair;
+        }
+        return null;
+    }
+
     fn reference(self: *const Controller, buffer: []u8) ![]const u8 {
         const profile_ptr: ?*const layout_profile.LayoutProfile = if (self.profile_bound) &self.profile else null;
         return generator.generateDrill(buffer, .{
@@ -855,6 +888,7 @@ pub const Controller = struct {
             .stage = self.config.stage,
             .seed = self.seed,
             .word_count = if (self.config.weak_spot_active) generator.default_weak_spot_words else generator.default_round_words,
+            .bigram = self.lesson_bigram,
             .unlocked_mask = self.learning.unlockedMask(),
             .focus_cp = self.learning.focus_cp,
             .profile = profile_ptr,
@@ -1007,6 +1041,12 @@ pub const Controller = struct {
         rd.changes = changes.items;
         rd.change_len = changes.len;
         rd.slow_round = self.slow_round;
+        rd.weak_spot = self.lesson_bigram;
+        if (self.lesson_bigram != null) {
+            self.lessons_since_weak_spot = 0;
+        } else {
+            self.lessons_since_weak_spot +|= 1;
+        }
         for (collector.buckets[0..collector.bucket_len]) |b| {
             if (b.cp == ' ' or rd.key_len >= max_lesson_keys) continue;
             rd.keys[rd.key_len] = .{
@@ -1036,6 +1076,12 @@ pub const Controller = struct {
         };
         for (wk_slice, 0..) |wk, i| pr.weak_keys[i] = wk.cp;
         for (wb_slice, 0..) |wb, i| pr.weak_bigrams[i] = .{ wb.prev, wb.cur };
+        if (self.lesson_bigram) |pair| pr.weak_spot = .{ pair[0], pair[1] };
+        for (changes.items[0..changes.len]) |change| {
+            if (!change.newly_green) continue;
+            pr.newly_green[pr.newly_green_len] = change.cp;
+            pr.newly_green_len += 1;
+        }
         self.pending_run = pr;
         self.needs_persist = true;
     }
@@ -1072,6 +1118,8 @@ pub const Controller = struct {
                 .unlocked_char = pr.unlocked_char,
                 .top_weak_keys = pr.weak_keys[0..pr.weak_key_len],
                 .top_weak_bigrams = pr.weak_bigrams[0..pr.weak_bigram_len],
+                .weak_spot = pr.weak_spot,
+                .newly_green = pr.newly_green[0..pr.newly_green_len],
             })
         else {};
         if (appended) |_| self.pending_run = null else |_| {}
@@ -1499,4 +1547,44 @@ test "a lesson names keys that turned green and stuck help appears after four fl
 
     try t.expectEqual(@as(?f32, 25), lowerPreset(35));
     try t.expectEqual(@as(?f32, null), lowerPreset(15));
+}
+
+test "every fifth lesson of the first letters is built around the slowest pair" {
+    const t = std.testing;
+    var owner = Controller.init(@splat(1));
+    var profile: layout_profile.LayoutProfile = .{
+        .unlock_len = 8,
+        .zone1_len = 6,
+        .profile_hash = @splat(0x46),
+    };
+    @memcpy(profile.unlock_order[0..8], "esartldi");
+    _ = owner.bindProfile(profile, null);
+    var now: u64 = 1_000_000;
+    for (0..weak_spot_every - 1) |_| {
+        try owner.start();
+        try t.expect(owner.lesson_bigram == null);
+        const generation = owner.generation;
+        while (owner.generation == generation) {
+            const s = &owner.session;
+            const cp = s.reference[s.len];
+            // "t" after "s" is slow; everything else is quick.
+            now += if (cp == 't' and s.len > 0 and s.reference[s.len - 1] == 's') 700_000 else 180_000;
+            var bytes: [4]u8 = undefined;
+            const n = try std.unicode.utf8Encode(cp, &bytes);
+            try owner.insertOs(true, bytes[0..n], now, false);
+        }
+    }
+    // The lesson the last one loaded is the weak-spot lesson.
+    const pair = owner.lesson_bigram orelse return error.NoWeakSpotLesson;
+    const text = owner.session.reference[0..owner.session.reference_len];
+    var start: usize = 0;
+    for (text, 0..) |cp, i| {
+        if (cp != ' ' and i + 1 < text.len) continue;
+        const end = if (cp == ' ') i else i + 1;
+        var found = false;
+        for (start..end -| 1) |k| found = found or (text[k] == pair[0] and text[k + 1] == pair[1]);
+        try t.expect(found);
+        start = i + 1;
+    }
+    try t.expectEqualSlices(u8, "st", &pair);
 }

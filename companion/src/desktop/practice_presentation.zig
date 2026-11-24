@@ -643,6 +643,8 @@ pub fn typingCard(
         " · Weak-spot drill"
     else if (owner.slow_round)
         " · Slow round: only clean presses count"
+    else if (owner.lesson_bigram) |pair|
+        try std.fmt.allocPrint(arena, " · Weak spot: {s}", .{&pair})
     else
         "";
     // Until the first keystroke the row shows how the last lesson went.
@@ -1026,7 +1028,7 @@ pub fn lessonNotices(owner: *const control.Controller, theme: ui.Theme, area: dv
             .corners = .all(9),
             .padding = .{},
             .margin = .{},
-            .tag = "practice.notice",
+            .tag = if (i == 0) "practice.notice" else null,
         });
         last_id = box.data().id;
         box.deinit();

@@ -21,6 +21,7 @@ check_firmware_defaults: *Step,
 build_project: *Step,
 hardware_tools: *Step,
 analyze_keymap: *Step,
+gen_tutor_words: *Step,
 
 pub fn init(b: *std.Build) Steps {
     const steps: Steps = .{
@@ -40,6 +41,7 @@ pub fn init(b: *std.Build) Steps {
         .build_project = b.step("build-project", "Build a verified export into UF2 (-Dfirmware -Dproject-export -Dproject-board)"),
         .hardware_tools = b.step("hardware-tools", "Prepare the USB candidate UF2 and native HID client without running them (-Dfirmware -Ddesktop)"),
         .analyze_keymap = b.step("analyze-keymap", "Compile a captured keymap with the typed evaluator (-Dimport-root)"),
+        .gen_tutor_words = b.step("gen-tutor-words", "Regenerate the Tutor word list from pinned downloads: -- <download dir>; never part of the build"),
     };
     b.default_step = steps.check;
     return steps;

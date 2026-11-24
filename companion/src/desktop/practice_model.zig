@@ -418,6 +418,8 @@ pub const LearningModel = struct {
     unlock_order: [26]u8 = @splat(0),
     unlock_len: usize = 0,
     unlocked_count: usize = 0,
+    /// The letters unlocked from the start: what Stage 1 practises.
+    first_len: usize = 0,
     rounds_since_unlock: u32 = 0,
     total_rounds: u32 = 0,
 
@@ -443,6 +445,7 @@ pub const LearningModel = struct {
         };
         @memcpy(model.unlock_order[0..model.unlock_len], unlock_order[0..model.unlock_len]);
         model.unlocked_count = @min(initial_unlocked, model.unlock_len);
+        model.first_len = model.unlocked_count;
         model.refreshFocusKey();
         return model;
     }
@@ -455,6 +458,11 @@ pub const LearningModel = struct {
         @memcpy(self.unlock_order[0..self.unlock_len], unlock_order[0..self.unlock_len]);
         self.unlocked_count = @min(self.unlocked_count, self.unlock_len);
         self.refreshFocusKey();
+    }
+
+    /// The letters Stage 1 practises.
+    pub fn firstLetters(self: *const LearningModel) []const u8 {
+        return self.unlock_order[0..@min(self.first_len, self.unlock_len)];
     }
 
     pub fn activeLetters(self: *const LearningModel) []const u8 {

@@ -264,4 +264,7 @@ inclusion. See [AI_USAGE.md](AI_USAGE.md).
 ZigMkay is free software, licensed under the GNU General Public License,
 version 2 or (at your option) any later version (`GPL-2.0-or-later`). See
 [LICENSE](LICENSE) for the version 2 text. Imported companion dependencies keep
-their own notices; see [companion/NOTICE](companion/NOTICE).
+their own notices; see [companion/NOTICE](companion/NOTICE). The companion
+application embeds a CC BY-SA 4.0 word list for the Tutor and is therefore
+distributed under GPL version 3 or later; see
+[companion/README.md](companion/README.md#license).

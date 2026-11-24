@@ -178,3 +178,10 @@ Software Foundation, either version 2 of the License, or (at your option) any
 later version (`GPL-2.0-or-later`). See [LICENSE](LICENSE) for the version 2
 text. The firmware it compiles is licensed under the same terms. Imported
 dependencies keep their own license notices; see [NOTICE](NOTICE).
+
+The Tutor's word list, [src/desktop/tutor_words_en.txt](src/desktop/tutor_words_en.txt),
+is licensed CC BY-SA 4.0, which is compatible with GPL version 3 only. The
+application, which embeds the list, is therefore distributed under GPL version 3
+or (at your option) any later version (`GPL-3.0-or-later`); see
+[licenses/GPL-3.0.txt](licenses/GPL-3.0.txt). The sources keep their
+`GPL-2.0-or-later` grant, and the firmware does not contain the list.
