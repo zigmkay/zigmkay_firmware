@@ -9,6 +9,7 @@ const project = @import("project");
 const keyboard_onboarding = @import("onboarding-ui");
 const editor = @import("editor-frame-ui");
 const App = @import("App.zig");
+const Tutor = @import("Tutor.zig");
 const source_refresh_fixture = @import("source_refresh_fixture.zig");
 
 const c = Backend.c;
@@ -32,7 +33,7 @@ pub fn beforeFrame(app: *App) !void {
     if (app.mode.isTutorGallery()) try showTutor(app);
 }
 
-/// The tutor gallery renders 15 scenes for 4 frames each (2 Dark + 2 Light):
+/// The tutor gallery renders 19 scenes for 4 frames each (2 Dark + 2 Light):
 /// 0: Active Stage 2 · All letters (with populated confidences & focus key)
 /// 1: Stage 3 · Shift & capitals (opposite-hand Shift hold + tap bridge)
 /// 2: Stage 5 · Layers & combos (layer auto-preview / 2-key combo arc)
@@ -48,6 +49,10 @@ pub fn beforeFrame(app: *App) !void {
 /// 12: Stage 6 · Free text
 /// 13: Paused round with the Resume banner
 /// 14: Narrow viewport responsive audit (960x640, Stage 2 active)
+/// 15: Question about practised characters a keyboard switch moved
+/// 16: Layout changes sheet comparing a layer character on both keyboards
+/// 17: Layout changes sheet with a combo letter marked for reset
+/// 18: Reset characters sheet asking for confirmation
 fn showTutor(app: *App) !void {
     app.view.toolbar.light = app.count % 4 >= 2;
     const is_scene_start = (app.count == 1) or (app.count >= 4 and app.count % 4 == 0);
@@ -129,6 +134,38 @@ fn showTutor(app: *App) !void {
             practice.persisted.daily_active_seconds = 420;
             app.tutor.view.sheet = .progress;
         },
+        15, 16, 17, 18 => {
+            if (scene == 15) try seedMovedKeys(app);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
+            const view = &app.tutor.view;
+            var groups: [desktop.practice_model.max_tracked_keys]u21 = undefined;
+            var len: usize = 0;
+            for (practice.reviewSlice()) |cp| {
+                const group = if (cp >= 'A' and cp <= 'Z') cp + 32 else cp;
+                if (std.mem.indexOfScalar(u21, groups[0..len], group) == null) {
+                    groups[len] = group;
+                    len += 1;
+                }
+            }
+            if (len == 0) return error.FixtureHasNoMovedKeys;
+            switch (scene) {
+                16, 17 => {
+                    view.sheet = .layout_changes;
+                    view.picks = .{};
+                    view.picks.selected = groups[if (scene == 17) len - 1 else 0];
+                    if (scene == 17) view.picks.set(groups[len - 1], true);
+                },
+                18 => {
+                    view.sheet = .reset_keys;
+                    view.picks = .{};
+                    for (groups[0..len]) |group| view.picks.set(group, true);
+                    view.picks.set(practice.learning.focus_cp orelse 'e', true);
+                    view.picks.confirm = true;
+                },
+                else => {},
+            }
+        },
         6, 9 => {
             if (scene == 9) app.fixture.layout_notice = .editor_changed;
             try practice.choose(.{ .mode = .test_keys }, now);
@@ -195,6 +232,33 @@ fn seedTutorGalleryState(app: *App) !void {
         };
     }
     app.tutor.loaded_runs = .{ .arena = arena, .runs = runs, .skipped_lines = 0 };
+}
+
+/// Lets the gallery's practised characters come from the Clackychan, where Z
+/// is a combo and symbols sit on layers, so the Keycaprio shown now asks
+/// about the ones that moved.
+fn seedMovedKeys(app: *App) !void {
+    const practice = &app.tutor.controller;
+    const current = practice.profile;
+    const current_id = app.tutor.bound_board_id[0..app.tutor.bound_board_id_len];
+    var board = try boards.OwnedBoard.init(app.gpa, "clackychan_colemak");
+    defer board.deinit();
+    var defaults = try boards.createDefault(app.gpa, board);
+    defer defaults.deinit();
+    var other = try desktop.model.Model.init(app.gpa, board.board, defaults.snapshot);
+    defer other.deinit();
+    var labels = try desktop.label_cache.buildProjectCache(app.gpa, &app.translator, other.document());
+    defer labels.deinit();
+    const before = try Tutor.deriveLayoutProfile(app, &board, &labels, other.document(), "offline");
+
+    // Practised symbols beside the letters the gallery seeds.
+    for ("zZ/;?") |ch| {
+        const st = practice.learning.getOrAddStat(ch) orelse continue;
+        st.* = .{ .cp = ch, .samples = 32, .ema_ms = 330.0, .ema_acc = 0.97, .acc_initialized = true };
+    }
+    practice.learning.known_len = 0;
+    practice.adoptLayout(before, .{ .id = "clackychan_colemak", .labels = labels.practiceLabels() });
+    practice.adoptLayout(current, .{ .id = current_id, .labels = app.captions.labels.practiceLabels() });
 }
 
 fn typeSessionPrefix(session: *desktop.practice.Session, count: usize, now: u64, with_mistake: bool) !void {
@@ -511,6 +575,7 @@ pub fn resizeStatusWindow(app: *App) void {
     if (app.mode.isTutorGallery()) {
         if (app.count == 1) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
         if (app.count == 57) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
+        if (app.count == 61) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
     }
     if (!app.mode.isStatus() or (app.count != 1 and app.count != 21 and app.count != 25)) return;
     const narrow = app.count == 21;
@@ -645,6 +710,9 @@ fn captureTutor(app: *App) !void {
     if (app.tutor.view.sheet == .stages and dvui.tagGet("practice.sheet.stages") == null) return error.TutorSheetNotDrawn;
     if (app.tutor.view.sheet == .progress and (dvui.tagGet("practice.sheet.progress") == null or dvui.tagGet("practice.chart.wpm") == null))
         return error.TutorSheetNotDrawn;
+    if (app.tutor.view.sheet == .layout_changes and (dvui.tagGet("practice.sheet.layout_changes") == null or dvui.tagGet("practice.layout_changes.now") == null))
+        return error.TutorSheetNotDrawn;
+    if (app.tutor.view.sheet == .reset_keys and dvui.tagGet("practice.sheet.reset_keys") == null) return error.TutorSheetNotDrawn;
     app.window.endRendering(.{ .manage_backend = false });
     const scene = (app.count - 1) / 4;
     const theme = if (app.view.toolbar.light) "light" else "dark";
