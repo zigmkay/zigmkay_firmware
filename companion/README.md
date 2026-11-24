@@ -59,9 +59,11 @@ keyboard icon in the tray.
   binds the saved editor project to the live companion, zooms the editor and
   quits Zigmkay.
 - **Typing tutor & Test keys.** Choose **Open tutor** in the editor for an
-  adaptive 6-stage typing tutor (home row, all letters with focus-key unlocks,
-  opposite-hand Shift, punctuation/numbers, layers & 2-key combos, and free
-  text / Zig code) with local per-profile progress, or switch to **Test keys**
+  adaptive 6-stage typing tutor (real English words from the most word-forming
+  letters on, all letters with focus-key unlocks, opposite-hand Shift,
+  punctuation/numbers, layers & 2-key combos, and free text / Zig code) that
+  flows from lesson to lesson and forgives typos, with local per-profile
+  progress, or switch to **Test keys**
   to verify switches, layers, holds, and combos unscored; see the
   [typing practice guide](docs/typing-practice.md).
 

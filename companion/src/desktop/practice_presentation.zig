@@ -157,14 +157,11 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
         .margin = .{},
     });
 
-    // Single-row chip strip grouped: Home row | Unlocked | Locked
+    // Single-row chip strip grouped: First letters | Unlocked | Locked
     const order = lm.unlock_order[0..lm.unlock_len];
     if (order.len == 0) return;
 
-    const home_len = if (owner.profile_bound and owner.profile.zone1_len > 0)
-        @min(owner.profile.zone1_len, order.len)
-    else
-        @min(@as(usize, 8), order.len);
+    const home_len = @min(lm.firstLetters().len, order.len);
     const unlocked_len = @min(lm.unlocked_count, order.len);
 
     const has_sep1 = home_len > 0 and home_len < order.len;
@@ -194,8 +191,7 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
 
         const is_unlocked = i < unlocked_len;
         const is_focus = focus_cp != null and focus_cp.? == ch;
-        const conf = lm.confidenceFor(ch);
-        const is_mastered = is_unlocked and conf >= 1.0;
+        const is_mastered = is_unlocked and lm.isGreen(ch);
 
         const fill: dvui.Color = if (is_focus)
             ui.mix(theme.panel, theme.warning, 0.24)

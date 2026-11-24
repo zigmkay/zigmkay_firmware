@@ -41,9 +41,17 @@ pub const KeyStat = struct {
     /// One bit per recent press, newest in bit 0; 1 is a first-try hit.
     recent_hits: u32 = 0,
     recent_len: u8 = 0,
+    /// The key once reached full confidence. It stays green and unlocked
+    /// from then on, whatever its later presses look like.
+    mastered: bool = false,
 
     pub fn confidence(self: KeyStat, target_wpm: f32) f32 {
         return computeConfidence(self.ema_ms, self.ema_acc, self.samples, target_wpm);
+    }
+
+    /// Green: mastered once, or fully confident now.
+    pub fn green(self: KeyStat, target_wpm: f32) bool {
+        return self.mastered or self.confidence(target_wpm) >= 1.0;
     }
 
     /// Appends the `len` oldest-first outcomes in `hits` (newest in bit 0)
@@ -72,6 +80,7 @@ pub const KeyStat = struct {
         self.acc_initialized = false;
         self.recent_hits = 0;
         self.recent_len = 0;
+        self.mastered = false;
     }
 };
 
@@ -460,6 +469,41 @@ pub const LearningModel = struct {
         self.refreshFocusKey();
     }
 
+    /// Follows a new letter order, keeping every letter that is unlocked or
+    /// was mastered unlocked: they move to the front in the new order, and
+    /// the first `first` letters of `order` are unlocked too.
+    pub fn adoptOrder(self: *LearningModel, order: []const u8, first: usize) void {
+        var keep: u32 = self.unlockedMask();
+        for (self.stats[0..self.stat_len]) |st| {
+            if (st.mastered and st.cp >= 'a' and st.cp <= 'z') keep |= letterBit(@intCast(st.cp));
+        }
+        self.adoptOrderKeeping(order, first, keep);
+    }
+
+    /// `adoptOrder` with the letters to keep unlocked given as a mask.
+    pub fn adoptOrderKeeping(self: *LearningModel, order: []const u8, first: usize, keep_mask: u32) void {
+        const len = @min(order.len, 26);
+        const first_len = @min(first, len);
+        var keep = keep_mask;
+        for (order[0..first_len]) |ch| keep |= letterBit(ch);
+        var out: [26]u8 = undefined;
+        var n: usize = 0;
+        for (order[0..len]) |ch| if (keep & letterBit(ch) != 0) {
+            out[n] = ch;
+            n += 1;
+        };
+        const unlocked = n;
+        for (order[0..len]) |ch| if (keep & letterBit(ch) == 0) {
+            out[n] = ch;
+            n += 1;
+        };
+        @memcpy(self.unlock_order[0..n], out[0..n]);
+        self.unlock_len = n;
+        self.unlocked_count = unlocked;
+        self.first_len = first_len;
+        self.refreshFocusKey();
+    }
+
     /// The letters Stage 1 practises.
     pub fn firstLetters(self: *const LearningModel) []const u8 {
         return self.unlock_order[0..@min(self.first_len, self.unlock_len)];
@@ -507,21 +551,31 @@ pub const LearningModel = struct {
         return st.confidence(self.config.target_wpm);
     }
 
-    /// Selects the active unlocked letter with lowest confidence, breaking ties
-    /// by fewest samples, then unlock order.
+    /// Whether a letter is green: mastered once or fully confident now.
+    pub fn isGreen(self: *const LearningModel, cp: u21) bool {
+        const st = self.getStat(cp) orelse return false;
+        return st.green(self.config.target_wpm);
+    }
+
+    /// Selects the active unlocked letter with lowest confidence that is not
+    /// green yet, breaking ties by fewest samples, then unlock order. Once
+    /// all are green, the least confident of them.
     pub fn computeFocusKey(self: *const LearningModel) ?u21 {
         const active = self.activeLetters();
         if (active.len == 0) return null;
         var best_cp: u21 = active[0];
+        var best_green = true;
         var best_conf: f32 = 2.0;
         var best_samples: u32 = std.math.maxInt(u32);
         for (active) |ch| {
             const st = self.getStat(ch) orelse KeyStat{ .cp = ch };
             const conf = st.confidence(self.config.target_wpm);
-            const better = (conf < best_conf - 1e-6) or
-                (@abs(conf - best_conf) <= 1e-6 and st.samples < best_samples);
+            const is_green = st.green(self.config.target_wpm);
+            const better = (best_green and !is_green) or (is_green == best_green and ((conf < best_conf - 1e-6) or
+                (@abs(conf - best_conf) <= 1e-6 and st.samples < best_samples)));
             if (better) {
                 best_cp = ch;
+                best_green = is_green;
                 best_conf = conf;
                 best_samples = st.samples;
             }
@@ -571,6 +625,7 @@ pub const LearningModel = struct {
                 }
                 st.samples += @intCast(b.dt_len);
             }
+            if (st.confidence(self.config.target_wpm) >= 1.0) st.mastered = true;
         }
 
         // 2. Update bounded bigram bottleneck tracker.
@@ -589,12 +644,24 @@ pub const LearningModel = struct {
             }
         }
 
+        // 3b. A locked letter mastered in another stage's text is earned:
+        // it joins the unlocked letters right away.
+        var i = self.unlocked_count;
+        while (i < self.unlock_len) : (i += 1) {
+            const ch = self.unlock_order[i];
+            const st = self.getStat(ch) orelse continue;
+            if (!st.mastered) continue;
+            std.mem.copyBackwards(u8, self.unlock_order[self.unlocked_count + 1 .. i + 1], self.unlock_order[self.unlocked_count..i]);
+            self.unlock_order[self.unlocked_count] = ch;
+            self.unlocked_count += 1;
+        }
+
         // 4. Evaluate unlock rule: all active unlocked letters >= 1.0 confidence AND >= 2 rounds cooldown.
         var newly_unlocked: ?u8 = null;
         if (self.unlocked_count < self.unlock_len and self.rounds_since_unlock >= min_rounds_between_unlocks) {
             var all_mastered = self.unlocked_count > 0;
             for (self.activeLetters()) |ch| {
-                if (self.confidenceFor(ch) < 1.0) {
+                if (!self.isGreen(ch)) {
                     all_mastered = false;
                     break;
                 }
@@ -693,6 +760,8 @@ pub const LearningModel = struct {
         var count: usize = 0;
         for (self.stats[0..self.stat_len]) |st| {
             if (st.samples == 0 and !st.acc_initialized) continue;
+            // Space is typed between all words; it is not a key to practise.
+            if (st.cp == ' ') continue;
             const summary: KeySummary = .{
                 .cp = st.cp,
                 .confidence = st.confidence(self.config.target_wpm),
@@ -905,6 +974,11 @@ pub const LearningModel = struct {
         self.bigram_len = write_idx;
     }
 };
+
+fn letterBit(ch: u8) u32 {
+    if (ch < 'a' or ch > 'z') return 0;
+    return @as(u32, 1) << @intCast(ch - 'a');
+}
 
 fn findCurrent(current: []const KnownPosition, cp: u21) ?KnownPosition {
     for (current) |entry| {
@@ -1252,4 +1326,29 @@ test "the newest seen keys of a known position follow the keyboard" {
     // A layout without board details keeps what was seen.
     try t.expect(!model.adoptPositions(&.{testPos('z', 1, null)}));
     try t.expectEqual(boardHash("b"), model.lastKnownPosition('z').?.seen.?.board);
+}
+
+test "a mastered letter stays green and unlocked and leaves the focus to the others" {
+    const t = std.testing;
+    var lm = LearningModel.init("esa", 3, .{ .target_wpm = 20 });
+    // 'e' becomes fully confident once.
+    const e = lm.getOrAddStat('e').?;
+    e.* = .{ .cp = 'e', .ema_ms = 300, .samples = 30 };
+    e.recordOutcomes(0x3fff_ffff, 30);
+    var collector: RoundCollector = .{};
+    collector.recordCommit('e', 1_000_000, false);
+    _ = lm.completeRound(&collector);
+    try t.expect(lm.getStat('e').?.mastered);
+    // Later misses and slow presses do not take it back.
+    lm.getOrAddStat('e').?.recordOutcomes(0, 10);
+    lm.getOrAddStat('e').?.ema_ms = 900;
+    try t.expect(lm.isGreen('e'));
+    try t.expect(lm.computeFocusKey().? != 'e');
+
+    // A new order keeps the unlocked and mastered letters unlocked.
+    lm.adoptOrder("rtlesa", 2);
+    try t.expectEqualStrings("rtesa", lm.activeLetters());
+    try t.expectEqualStrings("rt", lm.firstLetters());
+    lm.getOrAddStat('e').?.reset();
+    try t.expect(!lm.isGreen('e'));
 }

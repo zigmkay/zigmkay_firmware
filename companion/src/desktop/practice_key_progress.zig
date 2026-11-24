@@ -56,7 +56,7 @@ pub fn of(st: model.KeyStat, target_wpm: f32) KeyProgress {
         0;
     const wpm = st.wpm();
     const speed_fraction: f32 = if (target_wpm > 0) @min(1.0, wpm / target_wpm) else 0;
-    const mastered = st.confidence(target_wpm) >= 1.0;
+    const mastered = st.green(target_wpm);
     var p: KeyProgress = .{
         .wpm = wpm,
         .target_wpm = target_wpm,

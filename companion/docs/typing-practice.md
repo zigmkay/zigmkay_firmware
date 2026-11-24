@@ -10,58 +10,78 @@ switching to **Tutor**.
 
 ## Adaptive Typing Tutor
 
-Opening **Tutor** starts a ready round immediately—no setup modal required.
-Every drill adapts automatically to your active board geometry, keymap layers,
-home-row modifiers, and 2-key combos.
+Opening **Tutor** starts a ready lesson immediately—no setup modal required.
+Lessons follow each other without a stop: when you type the last letter of a
+lesson, it is counted and the next one is already there. Lessons in Stages 1
+and 2 are about 100 letters of real English words; every drill adapts to your
+active board geometry, keymap layers, home-row modifiers, and 2-key combos.
 
 ![Active Stage 2 practice with key-confidence strip and Tap/Hold keyboard guidance](screenshots/typing-practice/active-practice.png)
 
 ### Key-confidence strip & focus-key unlocks
 
-Above the text stage, the **key-confidence strip** displays your unlock order
-derived directly from your layout's home row and English letter frequency:
+Above the text stage, the **key-confidence strip** displays your unlock order.
+By default letters come in the order that forms the most English words early,
+limited to the letters your layout can type: **E S A R T L** first, then
+D I N G O P C U M H and the rest. **Home row first** in the Stages sheet starts
+with the home row of your layout instead; switching keeps every letter you
+have unlocked.
 
 - **Green keys** have reached your target speed (default **20 WPM**; Settings
   offers 15–45) with at least **28 of their last 30 presses right on the first
   try** across enough clean motor samples. Older mistakes stop counting once
-  they are 30 presses back.
+  they are 30 presses back. A key that was green once **stays green and
+  unlocked**, whatever its later presses look like.
 - **Blue keys** are unlocked and climbing toward mastery.
-- **Amber key** is your current **focus key**; drills bias roughly half of all
-  words toward words containing the focus key.
-- **Dimmed keys** are locked until your current focus key reaches 100%
-  confidence (at most one new key unlocks per round, with a 2-round minimum
-  cooldown so progress stays calm and steady).
+- **Amber key** is your current **focus key**: the least confident key that is
+  not green yet. Every word of a lesson contains it while at least 15 real
+  words fit the unlocked letters.
+- **Dimmed keys** are locked until all unlocked keys are green (at most one new
+  key unlocks per lesson, with a 2-lesson minimum cooldown so progress stays
+  calm and steady). A letter you master in a later stage's text is unlocked
+  right away.
 
 Two hairline bars under each practised chip show what the key still needs:
 speed toward the target on the left, first-try hits in its last 30 presses on
 the right, with a tick at the 28 it needs. Hover a chip for the numbers; the
 header names them for the focus key.
 
-When a letter has gone **four rounds without progress**, a calm note appears
-between rounds. If misses hold it back, it suggests slowing down and offers a
-**slow round** around that letter whose speed does not count. If only speed
-holds it back, it offers to lower the target by one preset step. **Dismiss**
-hides the note for that letter until it moves again.
+When a letter has gone **four lessons without progress**, a calm note appears
+under the strip and stays while you type. If misses hold it back, it suggests
+slowing down and offers a **slow lesson** around that letter whose speed does
+not count. If only speed holds it back, it offers to lower the target by one
+preset step. Each button has a shortcut so your hands stay on the keyboard:
+**Ctrl+Down** lowers the target, **Ctrl+P** practises the letter and
+**Ctrl+Backspace** dismisses the note until the letter moves again (Cmd works
+as well on macOS).
 
-### Calm typing stage & Stop-on-error flow
+### Calm typing stage & forgiving input
 
 The text card shows a clean three-line monospace window with live **WPM**,
 **accuracy**, elapsed time, and your **daily goal** bar:
 
-- **Stop on error (default in Stages 1–5):** Mistyping highlights the cursor in
-  red and waits for the correct key so muscle memory locks in the right motion
-  without Backspace detours.
-- **Keyboard-only loop:** Press **Esc** to pause/resume, **Tab** for a fresh
-  round (in Zig code drills, Tab inserts four spaces), and **Enter** or
-  **Space** after a round completes to start the next round immediately.
-- Leaving the window automatically pauses the active round.
+- **Forgiving (default):** a wrong key leaves the cursor where it is and marks
+  the position quietly: a thin red line under the cursor and the wrong key
+  beside it. Type the right key, or simply keep typing: once your next three
+  keys match the text after a skipped or wrong letter, the Tutor moves past it.
+  However many keys it took, a position counts as one mistake, and accuracy
+  counts positions. **Backspace** only takes back wrong keys, never accepted
+  text, and an extra Space at the start or between words is ignored.
+- **Stop on error** (Settings → Typos) waits for the right key and counts
+  every wrong key.
+- **Keyboard-only loop:** Press **Esc** to pause/resume and **Tab** for fresh
+  text (in Zig code drills, Tab inserts four spaces). There is nothing to
+  confirm between lessons.
+- Leaving the window pauses the lesson; ten seconds without a key pause the
+  clock silently and the next key carries on.
 
-After each round the rundown names the keys that turned green and, for letters
-that are not green yet, what changed this round (for example
-"hits 25 → 26 / 30 · 2 short" or "speed 17 → 19 WPM · needs 20"), what the
-next letter waits for, and which keys you missed.
-
-![Inline round rundown with WPM delta, newly unlocked key badge, and Weak-spot drill CTA](screenshots/typing-practice/rundown.png)
+Until the first key of a lesson, the metrics row shows the last lesson (speed
+with its change, accuracy, time) and the keyboard shows how each key went in
+it: green clean, amber slower than the target, red missed. New letters, keys
+that turned green, the daily goal and the move from Stage 1 to Stage 2 appear
+as short notices that fade after three seconds. Every fifth lesson of Stages 1
+and 2 is built around your slowest letter pair, marked **Weak spot** in the
+metrics row.
 
 ### 6-Stage Learning Path
 
@@ -69,7 +89,9 @@ Click the **Stage** pill in the top bar to open the **Stages** sheet. All six
 stages are derived from your active layout and can be selected freely at any
 time:
 
-1. **Stage 1 · Home row** — Your layout's home-row keys plus thumb Space.
+1. **Stage 1 · First letters** — The first letters of the letter order (E S A
+   R T L, or your home row with **Home row first**) as real words; once they
+   are green, the Tutor moves on to Stage 2 by itself.
 2. **Stage 2 · All letters** — Adaptive 26-letter progression with key
    confidence and focus-key unlocks.
 3. **Stage 3 · Shift & capitals** — Balanced 50/50 left- and right-hand
@@ -82,6 +104,10 @@ time:
 6. **Stage 6 · Free text & code** — English prose, Zig code lessons, pasteable
    custom text, and 1-click **Weak-spot drills** targeting your slowest keys
    and transitions.
+
+Below the stages, **Letter order** switches between **Word-forming first** and
+**Home row first**; the sheet says when your layout's home row holds most of
+the first letters anyway, as on Colemak.
 
 ![6-Stage Learning Path sheet derived from the active layout](screenshots/typing-practice/stages.png)
 
@@ -107,8 +133,11 @@ anatomy, exact split PCB geometry, and rotated thumb keys:
 
 Click **Progress** in the top bar to inspect your recent average WPM, accuracy,
 unlocked-key count, a native vector **WPM trend & unlock chart** (with target
-WPM line, raw dots, smoothed EMA curve, and `+X` unlock markers), and your
-**Weakest keys & transitions** with a 1-click **Weak-spot drill** launcher.
+WPM line, raw dots, smoothed EMA curve, and `+X` unlock markers), your
+**Weakest keys & transitions** with a 1-click **Weak-spot drill** launcher, and
+**Recent lessons**: speed and its change, accuracy, and what each lesson
+brought (a new letter, keys that turned green, a weak-spot pair, the weakest
+keys after it).
 
 ![Progress sheet with KPI cards, WPM trend chart, unlock markers, and Weak-spot drill](screenshots/typing-practice/progress.png)
 
@@ -118,9 +147,10 @@ and no external database:
 - `<app_data>/tutor/profiles/<profile_hash>/state.zon` — atomic snapshot of
   your per-key EMA speed, the outcome of each key's last 30 presses, unlocked keys, daily streak, settings, the
   key positions your statistics were made at, and the single-character labels
-  of up to eight keyboards you practised on (schema 2; an older file is kept
-  as `state.zon.corrupt` and the profile starts over).
-- `<app_data>/tutor/profiles/<profile_hash>/runs.jsonl` — append-only round
+  of up to eight keyboards you practised on (schema 3; a schema 2 file loads
+  and keeps its unlocked letters in the new order, an older one is kept as
+  `state.zon.corrupt` and the profile starts over).
+- `<app_data>/tutor/profiles/<profile_hash>/runs.jsonl` — append-only lesson
   history loaded on demand when you open the Progress sheet.
 
 A profile is a layout type, not a keyboard: it is scoped to the home-row
@@ -133,7 +163,7 @@ by hand, finger and row.
 Statistics are never reset on their own. When another keyboard or an edited
 layout puts a character you have practised somewhere else, for example a
 letter that becomes a combo or a symbol that moves to another layer, the
-Tutor asks once, between rounds and never while you type:
+Tutor asks once, before a lesson starts and never while you type:
 
 - **Keep statistics** (or **Keep all**) keeps them. The new position joins the
   ones the statistics count for, so switching back and forth between these
@@ -146,7 +176,7 @@ Tutor asks once, between rounds and never while you type:
 
 A letter and its capital count as one entry. Each character remembers up to
 four positions; a fifth replaces the oldest, which can bring the question back
-once. A question you leave unanswered is asked again after the next round.
+once. A question you leave unanswered is asked again after the next lesson.
 
 ### Reset characters
 
@@ -160,7 +190,8 @@ practised characters this layout cannot type under **Not on this layout**, and
 asks for confirmation.
 
 Use the top-right **Settings** popover to adjust target speed (WPM), daily
-goal, guidance level, or to reset all progress for the active profile.
+goal, guidance level, how typos are handled, or to reset all progress for the
+active profile.
 
 ## Test Layout Mode
 
@@ -177,9 +208,25 @@ and unpersisted.
 Practice and Test layout always score the text your operating system delivers
 from the connected keyboard, and overlay real physical telemetry when your
 verified Zigmkay keyboard is connected (including a brief red flash on physical
-mis-keys). A layout that is not flashed yet cannot be practised: the Tutor shows
+mis-keys with **Stop on error**). A layout that is not flashed yet cannot be practised: the Tutor shows
 a notice above the keyboard when no keyboard is verified for the layout or when
 the editor holds changes the keyboard does not run yet. Flash the layout first.
+
+## Word list
+
+Lessons use `src/desktop/tutor_words_en.txt`: about 29,000 English words, most
+frequent first, with the letter order in its header. It is generated, never
+edited by hand. To regenerate it, download the three files the generator
+names into one directory and run, from `companion/`:
+
+```sh
+zig build gen-tutor-words -- /absolute/path/to/downloads
+```
+
+The generator checks each download against its pinned SHA-256. Words to leave
+out go into `tools/tutor_words_deny.txt` (a `*` line removes every word that
+contains it). The list is licensed CC BY-SA 4.0; see
+[NOTICE](../NOTICE) and the [license note](../README.md#license).
 
 ## Tests & Fixtures
 
@@ -199,7 +246,7 @@ zig build test-desktop -Ddesktop
 ```
 
 Play simulated learners (a fluent and a beginner typist) through all six stages
-on every bundled default keymap. It checks that every round can be finished,
+on every bundled default keymap. It checks that every lesson can be finished,
 that progress never moves backwards and that saved progress reloads unchanged.
 `zig build test` compiles it but does not run it:
 
@@ -230,15 +277,16 @@ LK07 running the same layout):
    the shown layer; held modifiers appear in the telemetry bar.
 5. Test layout: a two-key combo shows "Combo keys held" and the character lands
    in the scratchpad.
-6. Tutor Stage 2: finish a round; the rundown appears, **Enter** starts the
-   next round, and a wrong key flashes red on the keyboard.
+6. Tutor Stage 2: finish a lesson; the next one appears at once with the last
+   lesson in the metrics row and on the keyboard. Skip a letter and keep
+   typing: after three more letters the Tutor moves on and counts one mistake.
 7. Tutor Stage 3 and 5: the hint shows the Shift, layer or combo keys that the
    layout really uses for the highlighted character.
 8. Quit and restart the application: unlocked letters, streak and round count
    are unchanged.
 9. Connect the second board with the same layout: the same progress is shown
    and no key statistics are reset. If a practised character sits elsewhere
-   there, the question appears once, only after the running round; choose
+   there, the question appears once, only before a lesson starts; choose
    **Keep all**, then switch boards twice more: nothing is asked again.
 10. **Settings → Reset profile progress** resets only the active profile; a
     different layout type keeps its progress.

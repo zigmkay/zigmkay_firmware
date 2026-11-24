@@ -448,14 +448,36 @@ fn drawStagesSheet(
             sheet.* = .none;
         }
     } else {
-        presentation.label(
-            "Click any stage to switch immediately · Stage 5 & 6 options appear when selected",
-            .{ .x = pad, .y = foot_top + 11, .w = w - pad * 2, .h = 22 },
-            12.5,
-            theme.muted,
-            null,
-        );
+        // Which letters Stages 1 and 2 bring in first.
+        const opt_y = foot_top + 10;
+        presentation.label("Letter order:", .{ .x = pad, .y = opt_y + 1, .w = 96, .h = 26 }, 13, theme.muted, null);
+        const ox = pad + 100;
+        const words_w: f32 = 150;
+        const home_w: f32 = 124;
+        if (pillButton(theme, "Word-forming first", .{ .x = ox, .y = opt_y, .w = words_w, .h = 28 }, owner.config.letter_order == .word_forming, 0xb701) and pending.* == null) {
+            pending.* = .{ .set_letter_order = .word_forming };
+        }
+        if (pillButton(theme, "Home row first", .{ .x = ox + words_w + 6, .y = opt_y, .w = home_w, .h = 28 }, owner.config.letter_order == .home_row, 0xb702) and pending.* == null) {
+            pending.* = .{ .set_letter_order = .home_row };
+        }
+        const share = homeRowShare(owner);
+        const hint = if (share.first > 0 and share.home * 3 >= share.first * 2)
+            try std.fmt.allocPrint(arena, "Both suit this layout: {d} of the first {d} letters sit on its home row", .{ share.home, share.first })
+        else
+            "Word-forming first gives real words from the first lesson; letters stay unlocked when you switch";
+        presentation.label(hint, .{ .x = ox + words_w + home_w + 18, .y = opt_y + 1, .w = @max(0, w - pad - (ox + words_w + home_w + 18)), .h = 26 }, 12.5, theme.muted, null);
     }
+}
+
+/// How many of the word-forming first letters sit on the layout's home row.
+fn homeRowShare(owner: *const control.Controller) struct { home: usize, first: usize } {
+    if (!owner.profile_bound) return .{ .home = 0, .first = 0 };
+    var buf: [26]u8 = undefined;
+    const order = control.orderFor(&owner.profile, .word_forming, &buf);
+    const first = order[0..control.firstCountFor(&owner.profile, .word_forming, order.len)];
+    var home: usize = 0;
+    for (first) |ch| home += @intFromBool(std.mem.indexOfScalar(u8, owner.profile.zone1Letters(), ch) != null);
+    return .{ .home = home, .first = first.len };
 }
 
 fn drawProgressSheet(
@@ -467,7 +489,7 @@ fn drawProgressSheet(
 ) !void {
     const screen = dvui.windowRect();
     const w: f32 = @min(@as(f32, 920), screen.w - 40);
-    const h: f32 = @min(@as(f32, 580), screen.h - 40);
+    const h: f32 = @min(@as(f32, 780), screen.h - 40);
 
     var fw = dvui.floatingWindow(@src(), .{ .modal = true }, .{
         .rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h },
@@ -502,7 +524,7 @@ fn drawProgressSheet(
     const title = try std.fmt.allocPrint(arena, "Progress · {s}", .{
         if (ctx.profile_name.len > 0) ctx.profile_name else "Active layout",
     });
-    const subtitle = try std.fmt.allocPrint(arena, "Profile-scoped · {d} rounds · {d}-day streak · Local storage (ZON)", .{
+    const subtitle = try std.fmt.allocPrint(arena, "Profile-scoped · {d} lessons · {d}-day streak · Local storage (ZON)", .{
         owner.learning.total_rounds,
         storage.dailyView(owner.persisted, owner.utc_now_sec).streak_days,
     });
@@ -551,9 +573,11 @@ fn drawProgressSheet(
     const target_sub = try std.fmt.allocPrint(arena, "Target {d:.0} WPM", .{owner.config.target_wpm});
     drawKpiCard(theme, .{ .x = pad + (kpi_w + kpi_gap) * 2, .y = body_top, .w = kpi_w, .h = kpi_h }, "Unlocked keys", unlock_str, target_sub, theme.accent, 0xc003);
 
-    // 2. Lower 2-column grid: WPM Trend Chart (left) + Weakest Keys & Transitions + Weak-spot CTA (right)
+    // 2. Lower 2-column grid: WPM Trend Chart (left) + Weakest Keys & Transitions + Weak-spot CTA (right),
+    // then the recent lessons with what each one changed.
+    const recent_h = std.math.clamp((body_h - kpi_h) * 0.36, 128.0, 236.0);
     const lower_y = body_top + kpi_h + 14;
-    const lower_h = @max(180.0, body_h - kpi_h - 14);
+    const lower_h = @max(180.0, body_h - kpi_h - 14 - recent_h - 12);
     const stacked = body_w < 640;
     const left_w = if (stacked) body_w else body_w * 0.56;
     const right_w = if (stacked) body_w else body_w - left_w - 14;
@@ -563,6 +587,116 @@ fn drawProgressSheet(
 
     try drawWpmTrendPanel(owner, theme, .{ .x = pad, .y = lower_y, .w = left_w, .h = chart_h }, ctx.runs);
     try drawWeakSpotsPanel(owner, sheet, ctx.picks, theme, .{ .x = if (stacked) pad else pad + left_w + 14, .y = weak_y, .w = right_w, .h = weak_h }, pending);
+    try drawRecentLessons(owner, theme, .{ .x = pad, .y = lower_y + lower_h + 12, .w = body_w, .h = recent_h }, ctx.runs);
+}
+
+/// The last lessons, newest first: speed and its change, accuracy, and what
+/// each lesson brought: a new letter, keys that turned green, a weak-spot pair
+/// and the keys that were weakest after it.
+fn drawRecentLessons(owner: *const control.Controller, theme: ui.Theme, rect: dvui.Rect, runs: []const storage.RunRecord) !void {
+    const panel = dvui.box(@src(), .{}, .{
+        .rect = rect,
+        .background = true,
+        .color_fill = .{ .color = theme.panel },
+        .color_border = .{ .color = theme.border },
+        .border = .all(1),
+        .corners = .all(10),
+        .padding = .{},
+        .margin = .{},
+        .tag = "practice.recent_lessons",
+    });
+    defer panel.deinit();
+    const arena = dvui.currentWindow().arena();
+    boldLabel("Recent lessons", .{ .x = 14, .y = 10, .w = rect.w - 28, .h = 20 }, 14, theme.text, 0xe000);
+    const every = try std.fmt.allocPrint(arena, "Every {d}th lesson practises the slowest letter pair", .{control.weak_spot_every});
+    dvui.labelNoFmt(@src(), every, .{ .align_x = 1, .align_y = 0.5 }, .{
+        .rect = .{ .x = rect.w * 0.4, .y = 10, .w = rect.w * 0.6 - 14, .h = 20 },
+        .font = ui.editorFont(every, 12.5),
+        .color_text = .{ .color = theme.muted },
+        .padding = .{},
+        .margin = .{},
+    });
+    if (runs.len == 0) {
+        presentation.label("Finished lessons appear here.", .{ .x = 14, .y = 40, .w = rect.w - 28, .h = 22 }, 13, theme.muted, null);
+        return;
+    }
+    const row_h: f32 = 34;
+    const rows: usize = @intFromFloat(@max(1.0, @floor((rect.h - 40) / row_h)));
+    var shown: usize = 0;
+    var i = runs.len;
+    while (i > 0 and shown < rows) : (shown += 1) {
+        i -= 1;
+        const run = runs[i];
+        const y = 38 + @as(f32, @floatFromInt(shown)) * row_h;
+        ui.divider(theme, .{ .x = 14, .y = y, .w = rect.w - 28, .h = 1 }, 0xe100 + shown);
+        const age = agoText(arena, owner.utc_now_sec, run.utc_timestamp) catch "";
+        presentation.label(age, .{ .x = 14, .y = y + 6, .w = 70, .h = 22 }, 12.5, theme.muted, null);
+        const delta: ?f32 = if (i > 0) run.wpm - runs[i - 1].wpm else null;
+        const speed = try std.fmt.allocPrint(arena, "{d:.0} WPM", .{run.wpm});
+        boldLabel(speed, .{ .x = 90, .y = y + 6, .w = 70, .h = 22 }, 14, theme.text, 0xe200 + shown);
+        if (delta) |d| {
+            const dt = try std.fmt.allocPrint(arena, "{s}{d:.1}", .{ if (d >= 0) "+" else "", d });
+            presentation.label(dt, .{ .x = 160, .y = y + 6, .w = 44, .h = 22 }, 12.5, if (d >= 0) theme.success else theme.danger, null);
+        }
+        const acc = try std.fmt.allocPrint(arena, "{d:.1}%", .{run.accuracy});
+        presentation.label(acc, .{ .x = 210, .y = y + 6, .w = 60, .h = 22 }, 13, theme.text, null);
+
+        var px: f32 = 280;
+        const limit = rect.w - 14;
+        var slot: usize = shown * 16;
+        if (run.unlocked_char) |ch| if (ch < 128) {
+            px = lessonPill(theme, try std.fmt.allocPrint(arena, "New letter: {c}", .{std.ascii.toUpper(@intCast(ch))}), theme.success, px, y + 6, limit, nextSlot(&slot));
+        };
+        for (run.newly_green) |cp| if (cp < 128) {
+            px = lessonPill(theme, try std.fmt.allocPrint(arena, "{c} green", .{std.ascii.toUpper(@intCast(cp))}), theme.success, px, y + 6, limit, nextSlot(&slot));
+        };
+        if (run.weak_spot) |pair| if (pair[0] < 128 and pair[1] < 128) {
+            px = lessonPill(theme, try std.fmt.allocPrint(arena, "Weak spot: {c}{c}", .{ @as(u8, @intCast(pair[0])), @as(u8, @intCast(pair[1])) }), theme.warning, px, y + 6, limit, nextSlot(&slot));
+        };
+        if (run.top_weak_keys.len > 0) {
+            var names: std.ArrayList(u8) = .empty;
+            try names.appendSlice(arena, "Weakest:");
+            for (run.top_weak_keys) |cp| if (cp < 128) {
+                try names.append(arena, ' ');
+                try names.append(arena, std.ascii.toUpper(@intCast(cp)));
+            };
+            _ = lessonPill(theme, names.items, theme.muted, px, y + 6, limit, nextSlot(&slot));
+        }
+    }
+}
+
+fn nextSlot(slot: *usize) usize {
+    slot.* += 1;
+    return slot.*;
+}
+
+/// A small rounded label at `x`; returns where the next one starts.
+fn lessonPill(theme: ui.Theme, text: []const u8, color: dvui.Color, x: f32, y: f32, limit: f32, id: usize) f32 {
+    const w = ui.editorFont(text, 12).textSize(text).w + 18;
+    if (x + w > limit) return x;
+    const pill = dvui.box(@src(), .{}, .{
+        .id_extra = 0xe400 + id,
+        .rect = .{ .x = x, .y = y, .w = w, .h = 22 },
+        .background = true,
+        .color_fill = .{ .color = ui.mix(theme.panel, color, 0.14) },
+        .color_border = .{ .color = ui.mix(theme.panel, color, 0.55) },
+        .border = .all(1),
+        .corners = .all(11),
+        .padding = .{},
+        .margin = .{},
+    });
+    pill.deinit();
+    presentation.caption(text, .{ .x = x, .y = y, .w = w, .h = 22 }, 12, color, null);
+    return x + w + 6;
+}
+
+fn agoText(arena: std.mem.Allocator, now: u64, then: u64) ![]const u8 {
+    if (now == 0 or then == 0 or then > now) return "";
+    const secs = now - then;
+    if (secs < 60) return "just now";
+    if (secs < 3600) return std.fmt.allocPrint(arena, "{d} min ago", .{secs / 60});
+    if (secs < 86_400) return std.fmt.allocPrint(arena, "{d} h ago", .{secs / 3600});
+    return std.fmt.allocPrint(arena, "{d} d ago", .{secs / 86_400});
 }
 
 fn drawKpiCard(
@@ -962,14 +1096,12 @@ pub fn summarizeRuns(runs: []const storage.RunRecord) RunSummary {
     };
 }
 
+/// Stage 1 is done once all first letters are green.
 fn isHomeRowMastered(owner: *const control.Controller) bool {
-    const z1 = if (owner.profile_bound and owner.profile.zone1_len > 0)
-        owner.profile.zone1Letters()
-    else
-        owner.learning.unlock_order[0..@min(@as(usize, 8), owner.learning.unlock_len)];
-    if (z1.len == 0) return false;
-    for (z1) |ch| {
-        if (owner.learning.confidenceFor(ch) < 1.0) return false;
+    const first = owner.learning.firstLetters();
+    if (first.len == 0) return false;
+    for (first) |ch| {
+        if (!owner.learning.isGreen(ch)) return false;
     }
     return true;
 }
@@ -988,14 +1120,11 @@ fn stageAccentColor(theme: ui.Theme, st: generator.Stage) dvui.Color {
 fn stageProgress(owner: *const control.Controller, st: generator.Stage, home_mastered: bool) f32 {
     return switch (st) {
         .home_row => if (home_mastered) 1.0 else blk: {
-            const z1 = if (owner.profile_bound and owner.profile.zone1_len > 0)
-                owner.profile.zone1Letters()
-            else
-                owner.learning.unlock_order[0..@min(@as(usize, 8), owner.learning.unlock_len)];
-            if (z1.len == 0) break :blk 0.0;
+            const first = owner.learning.firstLetters();
+            if (first.len == 0) break :blk 0.0;
             var sum: f32 = 0;
-            for (z1) |ch| sum += owner.learning.confidenceFor(ch);
-            break :blk sum / @as(f32, @floatFromInt(z1.len));
+            for (first) |ch| sum += if (owner.learning.isGreen(ch)) 1.0 else owner.learning.confidenceFor(ch);
+            break :blk sum / @as(f32, @floatFromInt(first.len));
         },
         .all_letters => if (owner.learning.unlock_len == 0)
             0.0
@@ -1027,9 +1156,9 @@ fn describeHomeRow(
     owner: *const control.Controller,
     prof: ?*const lp.LayoutProfile,
 ) ![]const u8 {
-    const p = prof orelse return "Home-row anchor keys + thumb Space";
-    const z1 = p.zone1Letters();
-    if (z1.len == 0) return "Home-row anchor keys + thumb Space";
+    const p = prof orelse return "The first letters + thumb Space";
+    const z1 = owner.learning.firstLetters();
+    if (z1.len == 0) return "The first letters + thumb Space";
 
     var left_buf: [24]u8 = undefined;
     var left_len: usize = 0;

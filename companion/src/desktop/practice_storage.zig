@@ -29,6 +29,13 @@ pub const ErrorMode = enum(u8) {
     forgive,
 };
 
+/// Which letters the Tutor brings in first: the ones that form the most
+/// words, or the home row of the layout first.
+pub const LetterOrder = enum(u8) {
+    word_forming,
+    home_row,
+};
+
 pub const PersistedKeyStat = struct {
     cp: u32,
     ema_ms: f32,
@@ -37,6 +44,7 @@ pub const PersistedKeyStat = struct {
     acc_initialized: bool = true,
     recent_hits: u32 = 0,
     recent_len: u8 = 0,
+    mastered: bool = false,
 };
 
 pub const PersistedFocusSample = struct {
@@ -98,6 +106,10 @@ pub const ProfileState = struct {
     streak_days: u32 = 0,
 
     unlocked_count: u16 = 0,
+    letter_order: LetterOrder = .word_forming,
+    /// The unlocked letters. Saves before schema 3 leave it empty; their
+    /// letters are the first `unlocked_count` of the home-row order.
+    unlocked_letters: []const u8 = "",
     rounds_since_unlock: u32 = 0,
     total_rounds: u32 = 0,
     focus_cp: ?u32 = null,
@@ -385,28 +397,31 @@ pub fn resetProfile(
     }
 }
 
+fn letterBit(ch: u8) u32 {
+    if (ch < 'a' or ch > 'z') return 0;
+    return @as(u32, 1) << @intCast(ch - 'a');
+}
+
 /// Populates a `LearningModel` from persisted `ProfileState`. Nothing is reset
 /// when keys moved; `LearningModel.adoptPositions` takes over the layout.
+/// `order` is the letter order to follow and `first` how many of its letters
+/// are unlocked from the start; letters unlocked or mastered before stay
+/// unlocked in any order.
 pub fn hydrateLearningModel(
     state: ProfileState,
     profile: *const layout_profile.LayoutProfile,
+    order: []const u8,
+    first: usize,
     learning: *model.LearningModel,
 ) void {
-    const initial_unlocked = if (state.unlocked_count > 0)
-        @max(@as(usize, state.unlocked_count), profile.zone1_len)
-    else
-        profile.zone1_len;
-
     learning.* = model.LearningModel.init(
-        profile.unlockSlice(),
-        initial_unlocked,
+        order,
+        first,
         .{
             .language = state.language,
             .target_wpm = state.target_wpm,
         },
     );
-    learning.rounds_since_unlock = state.rounds_since_unlock;
-    learning.total_rounds = state.total_rounds;
 
     for (state.key_stats) |ks| {
         if (ks.cp > std.math.maxInt(u21)) continue;
@@ -419,8 +434,26 @@ pub fn hydrateLearningModel(
             .acc_initialized = ks.acc_initialized,
             .recent_hits = ks.recent_hits & ((@as(u32, 1) << model.accuracy_window) - 1),
             .recent_len = @min(ks.recent_len, model.accuracy_window),
+            .mastered = ks.mastered,
         };
+        // Saves before schema 3 did not record it: a key green now was mastered.
+        if (slot.confidence(state.target_wpm) >= 1.0) slot.mastered = true;
     }
+
+    var keep: u32 = 0;
+    if (state.unlocked_letters.len > 0) {
+        for (state.unlocked_letters) |ch| keep |= letterBit(ch);
+    } else {
+        const legacy = profile.unlockSlice();
+        const count = if (state.unlocked_count > 0) @max(@as(usize, state.unlocked_count), profile.zone1_len) else profile.zone1_len;
+        for (legacy[0..@min(count, legacy.len)]) |ch| keep |= letterBit(ch);
+    }
+    for (learning.stats[0..learning.stat_len]) |st| {
+        if (st.mastered and st.cp >= 'a' and st.cp <= 'z') keep |= letterBit(@intCast(st.cp));
+    }
+    learning.adoptOrderKeeping(order, first, keep);
+    learning.rounds_since_unlock = state.rounds_since_unlock;
+    learning.total_rounds = state.total_rounds;
     for (state.bigrams) |bg| {
         if (bg.prev > std.math.maxInt(u21) or bg.cur > std.math.maxInt(u21)) continue;
         if (learning.bigram_len >= model.max_bigrams) break;
@@ -513,6 +546,7 @@ pub fn buildProfileState(
             .acc_initialized = s.acc_initialized,
             .recent_hits = s.recent_hits,
             .recent_len = s.recent_len,
+            .mastered = s.mastered,
         };
     }
 
@@ -588,6 +622,7 @@ pub fn buildProfileState(
     state.layout_key_hash = try arena.dupe(u8, &hash_hex);
     state.host_layout = try arena.dupe(u8, host_layout);
     state.unlocked_count = @intCast(learning.unlocked_count);
+    state.unlocked_letters = try arena.dupe(u8, learning.activeLetters());
     state.rounds_since_unlock = learning.rounds_since_unlock;
     state.total_rounds = learning.total_rounds;
     state.focus_cp = if (learning.focus_cp) |f| @as(u32, f) else null;
@@ -840,7 +875,7 @@ test "daily goal, UTC streak rollover, and moved keys keeping their statistics" 
     };
 
     var learning: model.LearningModel = undefined;
-    hydrateLearningModel(persisted, &profile, &learning);
+    hydrateLearningModel(persisted, &profile, profile.unlockSlice(), 2, &learning);
     try t.expectEqual(@as(u32, 24), learning.getStat('a').?.samples);
     try t.expectEqual(@as(u32, 24), learning.getStat('s').?.samples);
     var current: [2]model.KnownPosition = undefined;

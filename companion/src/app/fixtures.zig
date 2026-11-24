@@ -224,16 +224,21 @@ fn seedTutorGalleryState(app: *App) !void {
     errdefer arena.deinit();
     const a = arena.allocator();
     const runs = try a.alloc(desktop.practice_storage.RunRecord, 14);
+    // The app sets the clock every frame; the lessons end just before it.
+    const now_sec: u64 = if (practice.utc_now_sec > 0) practice.utc_now_sec else 1_763_704_290;
     const wpms = [_]f32{ 24.5, 26.0, 25.2, 28.4, 30.1, 29.5, 32.0, 34.2, 33.8, 36.1, 37.5, 39.0, 38.4, 41.2 };
     const accs = [_]f32{ 94.2, 95.1, 95.8, 96.0, 96.5, 95.9, 97.0, 97.2, 96.8, 97.4, 97.9, 98.1, 97.5, 98.2 };
     for (runs, 0..) |*r, i| {
         r.* = .{
-            .utc_timestamp = @intCast(1_763_700_000 + i * 300),
+            .utc_timestamp = now_sec -| (runs.len - i) * 75,
             .stage = if (i < 4) 1 else 2,
             .wpm = wpms[i],
             .accuracy = accs[i],
             .active_seconds = 34.0,
             .unlocked_char = if (i == 6) 'p' else if (i == 11) 'l' else null,
+            .weak_spot = if (i == 9 or i == 4) .{ 't', 'h' } else null,
+            .newly_green = if (i == 12) &.{ 'd', 'c' } else if (i == 13) &.{'h'} else &.{},
+            .top_weak_keys = if (i >= 10) &.{ 'c', 'l', 'm' } else &.{},
         };
     }
     app.tutor.loaded_runs = .{ .arena = arena, .runs = runs, .skipped_lines = 0 };

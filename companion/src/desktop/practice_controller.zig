@@ -9,18 +9,23 @@ const model = @import("practice_model.zig");
 const generator = @import("practice_generator.zig");
 const storage = @import("practice_storage.zig");
 const key_progress = @import("practice_key_progress.zig");
+const word_list = @import("practice_words.zig");
 
 pub const Digest = [32]u8;
 pub const Mode = enum { tutor, test_keys };
 pub const Stage = generator.Stage;
 pub const GuidanceMode = storage.GuidanceMode;
 pub const ErrorMode = practice.ErrorMode;
+pub const LetterOrder = storage.LetterOrder;
+/// Letters unlocked from the start in the word-forming order.
+pub const first_letters: usize = 6;
 
 pub const Config = struct {
     mode: Mode = .tutor,
     stage: Stage = .home_row,
     guidance: GuidanceMode = .guided,
     error_mode: ErrorMode = .forgive,
+    letter_order: LetterOrder = .word_forming,
     target_wpm: f32 = 20.0,
     daily_goal_minutes: u16 = 15,
     punct_group: usize = 0,
@@ -278,6 +283,8 @@ pub const Intent = union(enum) {
     set_guidance: GuidanceMode,
     /// Changes how typos are handled; the lesson in progress keeps its mode.
     set_error_mode: ErrorMode,
+    /// Changes which letters come first; unlocked letters stay unlocked.
+    set_letter_order: LetterOrder,
     set_daily_goal: u16,
     set_stage5_filter: struct { filter: generator.Stage5Filter, layer: ?usize = null },
     set_stage6_source: struct { source: generator.Stage6Source, zig_lesson: usize = 0 },
@@ -392,6 +399,7 @@ pub const Controller = struct {
                 .daily_utc_day = st.daily_utc_day,
                 .streak_days = st.streak_days,
                 .unlocked_count = st.unlocked_count,
+                .letter_order = st.letter_order,
                 .rounds_since_unlock = st.rounds_since_unlock,
                 .total_rounds = st.total_rounds,
             };
@@ -407,14 +415,17 @@ pub const Controller = struct {
             };
             self.persisted.error_mode = storageErrorMode(self.config.error_mode);
             self.config.daily_goal_minutes = std.math.clamp(st.daily_goal_minutes, 5, 120);
-            storage.hydrateLearningModel(st, &self.profile, &self.learning);
+            self.config.letter_order = st.letter_order;
+            var order_buf: [26]u8 = undefined;
+            const order = self.letterOrder(&order_buf);
+            storage.hydrateLearningModel(st, &self.profile, order, self.firstCount(order.len), &self.learning);
             storage.hydrateBoards(st, &self.boards);
             self.learning.config.target_wpm = target_wpm;
         } else {
-            self.persisted = .{};
-            const order = if (profile.unlock_len > 0) profile.unlockSlice() else layout_profile.english_letter_frequency;
-            const initial = if (profile.zone1_len > 0) profile.zone1_len else @min(@as(usize, 8), order.len);
-            self.learning = model.LearningModel.init(order, initial, .{
+            self.persisted = .{ .letter_order = self.config.letter_order };
+            var order_buf: [26]u8 = undefined;
+            const order = self.letterOrder(&order_buf);
+            self.learning = model.LearningModel.init(order, self.firstCount(order.len), .{
                 .language = .en,
                 .target_wpm = self.config.target_wpm,
             });
@@ -510,8 +521,8 @@ pub const Controller = struct {
     /// Follows an edited layout of the bound profile. Statistics stay; moved
     /// practised characters wait for the user's answer in `review`.
     pub fn adoptLayout(self: *Controller, profile: layout_profile.LayoutProfile, board: ?BoardInput) void {
-        if (profile.unlock_len > 0) self.learning.setUnlockOrder(profile.unlockSlice());
         self.profile = profile;
+        if (profile.unlock_len > 0) self.followLetterOrder();
         if (board) |b| self.adoptBoard(b) else self.adoptCurrent();
     }
 
@@ -579,6 +590,15 @@ pub const Controller = struct {
                 self.persisted.guidance_mode = g;
                 self.needs_persist = true;
                 break :blk;
+            },
+            .set_letter_order => |order| blk: {
+                if (self.config.letter_order == order) break :blk;
+                self.config.letter_order = order;
+                self.persisted.letter_order = order;
+                self.followLetterOrder();
+                self.clearStalls();
+                self.needs_persist = true;
+                break :blk try self.start();
             },
             .set_error_mode => |mode| blk: {
                 self.config.error_mode = mode;
@@ -678,9 +698,10 @@ pub const Controller = struct {
         try self.resetKeys(request);
     }
 
-    /// Whether a key counts as learned for the strip and the unlock.
+    /// Whether a key counts as learned for the strip and the unlock: it was
+    /// mastered once or is fully confident now.
     pub fn isGreen(self: *const Controller, st: model.KeyStat) bool {
-        return st.confidence(self.learning.config.target_wpm) >= 1.0;
+        return st.green(self.learning.config.target_wpm);
     }
 
     const RoundChanges = struct { items: [max_round_changes]KeyChange = undefined, len: usize = 0 };
@@ -787,15 +808,27 @@ pub const Controller = struct {
         try self.start();
     }
 
+    /// The letters of the bound layout in the order they unlock.
+    pub fn letterOrder(self: *const Controller, buf: *[26]u8) []const u8 {
+        return orderFor(if (self.profile_bound) &self.profile else null, self.config.letter_order, buf);
+    }
+
+    pub fn firstCount(self: *const Controller, len: usize) usize {
+        return firstCountFor(if (self.profile_bound) &self.profile else null, self.config.letter_order, len);
+    }
+
+    /// Follows the letter order of the bound layout and setting; letters
+    /// unlocked or mastered before stay unlocked.
+    fn followLetterOrder(self: *Controller) void {
+        var order_buf: [26]u8 = undefined;
+        const order = self.letterOrder(&order_buf);
+        self.learning.adoptOrder(order, self.firstCount(order.len));
+    }
+
     pub fn resetProgress(self: *Controller) void {
-        const order = if (self.profile_bound and self.profile.unlock_len > 0)
-            self.profile.unlockSlice()
-        else
-            layout_profile.english_letter_frequency;
-        const initial = if (self.profile_bound and self.profile.zone1_len > 0)
-            self.profile.zone1_len
-        else
-            @min(@as(usize, 8), order.len);
+        var order_buf: [26]u8 = undefined;
+        const order = self.letterOrder(&order_buf);
+        const initial = self.firstCount(order.len);
         self.learning = model.LearningModel.init(order, initial, .{
             .language = .en,
             .target_wpm = self.config.target_wpm,
@@ -1130,6 +1163,7 @@ pub const Controller = struct {
         self.persisted.target_wpm = self.config.target_wpm;
         self.persisted.guidance_mode = self.config.guidance;
         self.persisted.error_mode = storageErrorMode(self.config.error_mode);
+        self.persisted.letter_order = self.config.letter_order;
         self.persisted.daily_goal_minutes = self.config.daily_goal_minutes;
 
         const state = try storage.buildProfileState(
@@ -1163,6 +1197,35 @@ pub const Controller = struct {
         };
     }
 };
+
+/// The letters `profile` can type in the order they unlock: the ones that
+/// form the most English words first, or the home row first.
+pub fn orderFor(profile: ?*const layout_profile.LayoutProfile, order: LetterOrder, buf: *[26]u8) []const u8 {
+    const p = profile orelse return layout_profile.english_letter_frequency;
+    if (p.unlock_len == 0) return layout_profile.english_letter_frequency;
+    const typeable = p.unlockSlice();
+    if (order == .home_row) return typeable;
+    var n: usize = 0;
+    for (word_list.english().letterOrder()) |ch| {
+        if (std.mem.indexOfScalar(u8, typeable, ch) == null) continue;
+        buf[n] = ch;
+        n += 1;
+    }
+    for (typeable) |ch| {
+        if (std.mem.indexOfScalar(u8, buf[0..n], ch) != null) continue;
+        buf[n] = ch;
+        n += 1;
+    }
+    return buf[0..n];
+}
+
+/// How many letters of an order of `len` letters are unlocked from the
+/// start: the first letters, or the home row of the layout.
+pub fn firstCountFor(profile: ?*const layout_profile.LayoutProfile, order: LetterOrder, len: usize) usize {
+    const p = profile orelse return @min(first_letters, len);
+    if (order == .word_forming) return @min(first_letters, len);
+    return if (p.zone1_len > 0) @min(p.zone1_len, len) else @min(@as(usize, 8), len);
+}
 
 fn storageErrorMode(mode: ErrorMode) storage.ErrorMode {
     return switch (mode) {
@@ -1222,6 +1285,8 @@ test "a finished lesson updates the model, unlocks a key, persists and loads the
     profile.unlock_order[0] = 'a';
     profile.unlock_order[1] = 's';
     profile.unlock_order[2] = 'd';
+    // The home row ("as") first, so 'd' has to be unlocked.
+    owner.config.letter_order = .home_row;
     _ = owner.bindProfile(profile, null);
     owner.utc_now_sec = 20_000 * 86_400 + 100;
 
@@ -1497,6 +1562,8 @@ test "a lesson names keys that turned green and stuck help appears after four fl
     profile.unlock_order[0] = 'a';
     profile.unlock_order[1] = 's';
     profile.unlock_order[2] = 'd';
+    // The home row ("as") first, so 'd' has to be unlocked.
+    owner.config.letter_order = .home_row;
     _ = owner.bindProfile(profile, null);
 
     // 'a' comes quickly, 's' always takes 900 ms (about 13 WPM against 20).
@@ -1587,4 +1654,49 @@ test "every fifth lesson of the first letters is built around the slowest pair" 
         start = i + 1;
     }
     try t.expectEqualSlices(u8, "st", &pair);
+}
+
+fn alphabetProfile(hash: u8) layout_profile.LayoutProfile {
+    var profile: layout_profile.LayoutProfile = .{
+        .unlock_len = 26,
+        .zone1_len = 8,
+        .profile_hash = @splat(hash),
+    };
+    @memcpy(profile.unlock_order[0..26], "arstneiodhgmlcpfuwybkvjxqz");
+    return profile;
+}
+
+test "letters come in the word-forming order and the home row is an option that keeps progress" {
+    const t = std.testing;
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    _ = owner.bindProfile(alphabetProfile(0x47), null);
+    try t.expectEqualStrings("esartl", owner.learning.activeLetters());
+    try t.expectEqualStrings("esartl", owner.learning.firstLetters());
+
+    try owner.dispatch(owner.action(.{ .set_letter_order = .home_row }), 0);
+    // The home row comes first, and nothing unlocked before is locked again.
+    try t.expectEqualStrings("arstneiol", owner.learning.activeLetters());
+    try t.expectEqualStrings("arstneio", owner.learning.firstLetters());
+    try t.expectEqual(LetterOrder.home_row, owner.persisted.letter_order);
+}
+
+test "a save from before the word-forming order keeps its unlocked letters" {
+    const t = std.testing;
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    // Schema 2: the first nine letters of the home-row order were unlocked.
+    _ = owner.bindProfile(alphabetProfile(0x48), .{
+        .schema_version = 2,
+        .unlocked_count = 9,
+        .error_mode = .stop_on_error,
+        .key_stats = &.{.{ .cp = 'q', .ema_ms = 300, .ema_acc = 1, .samples = 40 }},
+    });
+    for ("arstneiod" ++ "esartl" ++ "q") |ch| try t.expect(owner.learning.isUnlocked(ch));
+    try t.expectEqualStrings("esartl", owner.learning.firstLetters());
+    try t.expectEqual(ErrorMode.forgive, owner.config.error_mode);
+    // 'q' was green, so it counts as mastered and stays unlocked.
+    try t.expect(owner.learning.getStat('q').?.mastered);
 }
