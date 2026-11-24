@@ -98,18 +98,51 @@ All progress is stored **locally on your machine**—no account, no cloud sync,
 and no external database:
 
 - `<app_data>/tutor/profiles/<profile_hash>/state.zon` — atomic snapshot of
-  your per-key EMA speed/accuracy, unlocked keys, daily streak, and settings.
+  your per-key EMA speed/accuracy, unlocked keys, daily streak, settings, the
+  key positions your statistics were made at, and the single-character labels
+  of up to eight keyboards you practised on (schema 2; an older file is kept
+  as `state.zon.corrupt` and the profile starts over).
 - `<app_data>/tutor/profiles/<profile_hash>/runs.jsonl` — append-only round
   history loaded on demand when you open the Progress sheet.
 
 A profile is a layout type, not a keyboard: it is scoped to the home-row
 letters and the host keyboard layout. The same layout on two keyboards shares
 its progress, while QWERTY and Colemak stay apart. Key positions are compared
-by hand, finger and row, so switching keyboards resets nothing; moving an
-individual key in the editor only resets statistics for the moved keys rather
-than wiping your whole profile. Use the top-right **Settings** popover to
-adjust target speed (WPM), daily goal, guidance level, or to reset progress for
-the active profile.
+by hand, finger and row.
+
+### Moved keys
+
+Statistics are never reset on their own. When another keyboard or an edited
+layout puts a character you have practised somewhere else, for example a
+letter that becomes a combo or a symbol that moves to another layer, the
+Tutor asks once, between rounds and never while you type:
+
+- **Keep statistics** (or **Keep all**) keeps them. The new position joins the
+  ones the statistics count for, so switching back and forth between these
+  keyboards asks nothing again, also after a restart.
+- **Reset** starts that character over at its new position.
+- **Show change** or **Review changes…** opens **Layout changes**: one row per
+  character with **Keep** or **Reset**, and the key on the keyboard you
+  practised it on (dashed) next to the key on the current one, with the held
+  layer key and both keys of a combo marked.
+
+A letter and its capital count as one entry. Each character remembers up to
+four positions; a fifth replaces the oldest, which can bring the question back
+once. A question you leave unanswered is asked again after the next round.
+
+### Reset characters
+
+**Settings → Reset characters…** (also linked from **Weakest keys &
+transitions** in Progress) starts chosen letters and symbols over: their
+speed, accuracy and every transition into or out of them. Letters stay
+unlocked, but a reset letter has to be mastered again before the next one
+unlocks, and it usually becomes the focus key. Streak, daily goal and round history
+are unchanged. The sheet marks the chosen keys on the current keyboard, lists
+practised characters this layout cannot type under **Not on this layout**, and
+asks for confirmation.
+
+Use the top-right **Settings** popover to adjust target speed (WPM), daily
+goal, guidance level, or to reset all progress for the active profile.
 
 ## Test Layout Mode
 
@@ -186,6 +219,11 @@ LK07 running the same layout):
 8. Quit and restart the application: unlocked letters, streak and round count
    are unchanged.
 9. Connect the second board with the same layout: the same progress is shown
-   and no key statistics are reset.
+   and no key statistics are reset. If a practised character sits elsewhere
+   there, the question appears once, only after the running round; choose
+   **Keep all**, then switch boards twice more: nothing is asked again.
 10. **Settings → Reset profile progress** resets only the active profile; a
     different layout type keeps its progress.
+11. **Settings → Reset characters…**: pick two letters and confirm. Only
+    those start over, one becomes the focus key, the unlocked count stays, and
+    all of it is the same after a restart.
