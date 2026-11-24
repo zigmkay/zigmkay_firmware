@@ -1,5 +1,6 @@
 //! Hardware-free, bounded Unicode copy practice. Times are monotonic microseconds.
-//! Supports Stop-on-error (default for Stages 1-5) and Flow+Backspace modes,
+//! Supports forgiving input (the Tutor default), Stop-on-error and
+//! Flow+Backspace modes,
 //! clean motor-latency collection, hesitation tracking, and extended Shift/Layer/
 //! One-Shot/Combo guidance.
 const std = @import("std");
@@ -7,7 +8,16 @@ const layout_profile = @import("practice_layout_profile.zig");
 const model = @import("practice_model.zig");
 
 pub const State = enum { ready, running, paused, complete };
-pub const ErrorMode = enum { stop_on_error, flow_backspace };
+/// `forgive`: a wrong keystroke keeps the cursor and marks the position once;
+/// whoever just types on is caught up after `recover_after` matching
+/// keystrokes. `stop_on_error`: the cursor waits for the right key and every
+/// wrong keystroke counts. `flow_backspace`: wrong text stays until erased.
+pub const ErrorMode = enum { forgive, stop_on_error, flow_backspace };
+/// Matching keystrokes after a skipped or wrong character that move the
+/// cursor past it.
+pub const recover_after: usize = 3;
+/// Wrong keystrokes kept for catching up; more are not remembered.
+pub const max_slips: usize = 10;
 
 /// The arrival time the platform layer recorded for the DVUI event `number`.
 pub const EventTime = struct { number: u16, now_us: u64 };
@@ -104,6 +114,13 @@ pub const Session = struct {
     last_event_us: ?u64 = null,
     previous_cr: bool = false,
     collector: model.RoundCollector = .{},
+    /// Forgiving mode: positions that were passed with a mistake, and the
+    /// wrong keystrokes since the last accepted character with their times.
+    missed: std.StaticBitSet(8192) = .empty,
+    missed_count: usize = 0,
+    slips: [max_slips]u21 = undefined,
+    slip_at: [max_slips]u64 = undefined,
+    slip_len: usize = 0,
 
     pub fn load(self: *Session, bytes: []const u8) !void {
         try self.loadWithMode(bytes, self.error_mode);
@@ -147,6 +164,9 @@ pub const Session = struct {
         self.last_event_us = null;
         self.previous_cr = false;
         self.collector.reset();
+        self.missed = .empty;
+        self.missed_count = 0;
+        self.slip_len = 0;
     }
 
     pub fn insert(self: *Session, bytes: []const u8, now: u64, paste: bool) !void {
@@ -167,7 +187,11 @@ pub const Session = struct {
             self.previous_cr = raw == '\r';
             const cp: u21 = if (raw == '\r') '\n' else raw;
 
-            if (self.error_mode == .stop_on_error) {
+            if (self.error_mode == .forgive) {
+                if (self.len >= self.reference_len) break;
+                self.typeForgiving(cp, now);
+                if (self.state == .complete) break;
+            } else if (self.error_mode == .stop_on_error) {
                 if (self.len >= self.reference_len) break;
                 const expected = self.reference[self.len];
                 // A Space typed out of habit after the previous text is not a miss.
@@ -259,6 +283,17 @@ pub const Session = struct {
 
     pub fn backspace(self: *Session) void {
         if (self.state == .paused or self.state == .complete) return;
+        if (self.error_mode == .forgive) {
+            // Backspace only takes back wrong keystrokes, never accepted text.
+            if (self.slip_len > 0) self.slip_len -= 1;
+            if (self.slip_len == 0) {
+                self.current_error = false;
+                self.last_wrong_cp = null;
+            } else {
+                self.last_wrong_cp = self.slips[self.slip_len - 1];
+            }
+            return;
+        }
         if (self.error_mode == .stop_on_error) {
             // Stop-on-error does not require Backspace, but pressing it clears the visual red mark.
             self.current_error = false;
@@ -329,8 +364,104 @@ pub const Session = struct {
         return wordsPerMinute(self.matched(), self.duration(now));
     }
 
+    /// Forgiving mode counts positions: one passed with a mistake is one
+    /// error however many keystrokes it took. The other modes count keystrokes.
     pub fn accuracy(self: *const Session) f64 {
+        if (self.error_mode == .forgive) return accuracyPercent(self.len - self.missed_count, self.len);
         return accuracyPercent(self.correct_attempts, self.attempts);
+    }
+
+    /// Whether the accepted character at `index` was passed with a mistake.
+    pub fn wasMissed(self: *const Session, index: usize) bool {
+        return index < self.len and index < self.missed.capacity() and self.missed.isSet(index);
+    }
+
+    fn typeForgiving(self: *Session, cp: u21, now: u64) void {
+        const expected = self.reference[self.len];
+        // An extra Space at the start or after a Space is ignored while no
+        // mistake is open, so is a Space typed out of habit after a lesson.
+        if (cp == ' ' and expected != ' ' and !self.position_had_error and
+            (self.len == 0 or self.reference[self.len - 1] == ' ')) return;
+        if (self.state == .ready) {
+            if (cp != expected) {
+                // The clock starts with the first right keystroke.
+                self.attempts += 1;
+                self.error_count += 1;
+                self.markSlip(cp, now, false);
+                return;
+            }
+            self.state = .running;
+            self.started = now;
+            self.segment = now;
+        }
+        self.attempts += 1;
+        self.last_event_us = now;
+        if (cp == expected) {
+            self.correct_attempts += 1;
+            self.accept(now, self.position_had_error, true);
+            return;
+        }
+        self.error_count += 1;
+        self.markSlip(cp, now, true);
+        self.catchUp();
+    }
+
+    fn markSlip(self: *Session, cp: u21, now: u64, keep: bool) void {
+        self.current_error = true;
+        self.position_had_error = true;
+        self.last_wrong_cp = cp;
+        self.last_error_us = now;
+        if (!keep or self.slip_len >= max_slips) return;
+        self.slips[self.slip_len] = cp;
+        self.slip_at[self.slip_len] = now;
+        self.slip_len += 1;
+    }
+
+    /// Moves past a skipped character once the last `recover_after` wrong
+    /// keystrokes match the text after it, or past a wrong character once
+    /// the keystrokes after it do. The character counts as one mistake; the
+    /// matching keystrokes are accepted with their own times.
+    fn catchUp(self: *Session) void {
+        const n = recover_after;
+        const ahead = self.reference[@min(self.len + 1, self.reference_len)..self.reference_len];
+        if (ahead.len < n) return;
+        const skip = if (self.slip_len == n and std.mem.eql(u21, self.slips[0..n], ahead[0..n]))
+            @as(usize, 0)
+        else if (self.slip_len == n + 1 and std.mem.eql(u21, self.slips[1 .. n + 1], ahead[0..n]))
+            @as(usize, 1)
+        else
+            return;
+        const slips = self.slips;
+        const times = self.slip_at;
+        self.accept(times[0], true, false);
+        for (slips[skip .. skip + n], times[skip .. skip + n]) |_, at| {
+            if (self.state == .complete) break;
+            self.accept(at, false, true);
+        }
+    }
+
+    /// Accepts the expected character at the cursor.
+    fn accept(self: *Session, at: u64, had_err: bool, timed: bool) void {
+        const expected = self.reference[self.len];
+        if (had_err) {
+            self.corrected += 1;
+            self.missed_count += 1;
+            if (self.len < self.missed.capacity()) self.missed.set(self.len);
+        }
+        if (self.scored) {
+            if (!timed) self.collector.notePauseOrBlur();
+            self.collector.recordCommit(expected, at, had_err);
+        }
+        self.typed[self.len] = expected;
+        self.len += 1;
+        self.current_error = false;
+        self.position_had_error = false;
+        self.last_wrong_cp = null;
+        self.slip_len = 0;
+        if (self.len == self.reference_len) {
+            self.active_us += at -| self.segment;
+            self.state = .complete;
+        }
     }
 };
 
@@ -687,6 +818,89 @@ test "Stop-on-error keeps cursor waiting, counts accuracy, invalidates latency o
     try t.expectEqual(@as(u32, 0), lm.getStat('b').?.samples);
     try t.expectEqual(@as(u32, 1), lm.getStat('c').?.samples);
     try t.expectApproxEqAbs(@as(f32, 200.0), lm.getStat('c').?.ema_ms, 0.01);
+}
+
+fn typeAll(s: *Session, keys: []const u8, start: u64) !u64 {
+    var now = start;
+    for (keys) |ch| {
+        now += 200_000;
+        if (ch == '<') s.backspace() else try s.insert(&.{ch}, now, false);
+    }
+    return now;
+}
+
+test "forgiving input catches up after a skipped or wrong character and counts it once" {
+    const t = std.testing;
+    var s: Session = .{ .error_mode = .forgive };
+
+    // "learn now" typed without the 'a': three matching keystrokes move past it.
+    try s.load("learn now");
+    _ = try typeAll(&s, "lern ", 1_000_000);
+    try t.expectEqual(@as(usize, 6), s.len);
+    try t.expect(s.wasMissed(2) and !s.wasMissed(3));
+    try t.expectEqual(@as(usize, 1), s.missed_count);
+    try t.expect(!s.current_error);
+
+    // A wrong key in place of 'b' is passed once the next three keys match.
+    try s.load("abcde");
+    _ = try typeAll(&s, "axcde", 1_000_000);
+    try t.expectEqual(State.complete, s.state);
+    try t.expectEqual(@as(usize, 1), s.missed_count);
+    try t.expectApproxEqAbs(@as(f64, 80), s.accuracy(), 0.001);
+
+    // Many wrong keystrokes at one position are one mistake.
+    try s.load("ab");
+    _ = try typeAll(&s, "azzzb", 1_000_000);
+    try t.expectEqual(State.complete, s.state);
+    try t.expectEqual(@as(usize, 1), s.missed_count);
+    try t.expectEqual(@as(usize, 3), s.error_count);
+
+    // The statistics see one miss on 'b' and none on the keys after it.
+    var lm = model.LearningModel.init("ab", 2, .{});
+    _ = lm.completeRound(&s.collector);
+    try t.expectEqual(@as(u32, 1), lm.getStat('b').?.recent_len);
+    try t.expectEqual(@as(u32, 0), lm.getStat('b').?.recent_hits & 1);
+}
+
+test "forgiving input ignores extra spaces and Backspace only takes back typos" {
+    const t = std.testing;
+    var s: Session = .{ .error_mode = .forgive };
+    try s.load("a b");
+    // A Space out of habit before the text and a doubled Space are no mistakes.
+    _ = try typeAll(&s, " a  b", 1_000_000);
+    try t.expectEqual(State.complete, s.state);
+    try t.expectEqual(@as(usize, 0), s.missed_count);
+    try t.expectEqual(@as(f64, 100), s.accuracy());
+
+    try s.load("abcdef");
+    _ = try typeAll(&s, "abx<", 1_000_000);
+    // The typo is gone, the accepted text stays and the position stays marked.
+    try t.expectEqual(@as(usize, 2), s.len);
+    try t.expect(!s.current_error);
+    _ = try typeAll(&s, "<<cdef", 2_000_000);
+    try t.expectEqual(State.complete, s.state);
+    try t.expectEqual(@as(usize, 1), s.missed_count);
+
+    // Near the end there is nothing left to catch up with: the right key is needed.
+    try s.load("abc");
+    _ = try typeAll(&s, "axc", 1_000_000);
+    try t.expectEqual(@as(usize, 1), s.len);
+    try t.expect(s.current_error);
+    _ = try typeAll(&s, "bc", 2_000_000);
+    try t.expectEqual(State.complete, s.state);
+}
+
+test "a long gap pauses the clock without a prompt" {
+    const t = std.testing;
+    var s: Session = .{ .error_mode = .forgive };
+    try s.load("abc");
+    try s.insert("a", 1_000_000, false);
+    try s.insert("b", 1_500_000, false);
+    // Idle for a minute: the clock stands at the last keystroke.
+    try t.expectEqual(@as(u64, 500_000), s.duration(61_500_000));
+    try s.insert("c", 61_500_000, false);
+    try t.expectEqual(State.complete, s.state);
+    try t.expectEqual(@as(u64, 500_000), s.duration(99_000_000));
 }
 
 test "combo and one-shot Shift/Layer guidance highlight both combo triggers and one-shot activators" {

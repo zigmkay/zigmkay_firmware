@@ -68,7 +68,7 @@ pub fn drawSettingsPopover(
 ) !bool {
     if (!open.*) return false;
     const pop_w: f32 = 324;
-    const pop_h: f32 = if (confirm_reset.*) 325 else 299;
+    const pop_h: f32 = if (confirm_reset.*) 386 else 360;
     const screen = dvui.windowRect();
     const x = std.math.clamp(anchor_right - pop_w, 12.0, @max(12.0, screen.w - pop_w - 12.0));
     const y = std.math.clamp(anchor_top, 12.0, @max(12.0, screen.h - pop_h - 12.0));
@@ -145,7 +145,23 @@ pub fn drawSettingsPopover(
     }
     cy += 38;
 
-    // 4. Reset single characters, then the whole profile (two-step confirmation)
+    // 4. How typos are handled
+    presentation.label("Typos", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
+    cy += 23;
+    const emodes = [_]struct { m: control.ErrorMode, lbl: []const u8 }{
+        .{ .m = .forgive, .lbl = "Forgiving" },
+        .{ .m = .stop_on_error, .lbl = "Stop on error" },
+    };
+    const emw = (inner_w - 4) / 2.0;
+    for (emodes, 0..) |em, i| {
+        const active = owner.config.error_mode == em.m;
+        if (pillButton(theme, em.lbl, .{ .x = pad + @as(f32, @floatFromInt(i)) * (emw + 4), .y = cy, .w = emw, .h = 28 }, active, 0xa400 + i) and pending.* == null) {
+            pending.* = .{ .set_error_mode = em.m };
+        }
+    }
+    cy += 38;
+
+    // 5. Reset single characters, then the whole profile (two-step confirmation)
     ui.divider(theme, .{ .x = pad, .y = cy - 6, .w = inner_w, .h = 1 }, 0xa002);
     var reset_keys = false;
     if (ui.button(theme, "Reset characters…", "practice.settings.reset_keys", .{ .x = pad, .y = cy + 4, .w = inner_w, .h = 30 })) {

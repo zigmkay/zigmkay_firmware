@@ -739,13 +739,14 @@ pub fn typingCard(
     const max_pill_w = @max(120.0, inner_w * 0.64);
     const pill_text_w = ui.editorFont(next_info.text, 13.5).textSize(next_info.text).w;
     const pill_w = @min(max_pill_w, pill_text_w + 34.0);
-    const pill_fill = if (s.current_error)
+    const loud_error = s.current_error and s.error_mode != .forgive;
+    const pill_fill = if (loud_error)
         ui.mix(theme.bg, theme.danger, 0.14)
     else if (same_hand_shift_nudge)
         ui.mix(theme.bg, theme.warning, 0.14)
     else
         theme.bg;
-    const pill_border = if (s.current_error)
+    const pill_border = if (loud_error)
         ui.mix(theme.border, theme.danger, 0.55)
     else if (same_hand_shift_nudge)
         ui.mix(theme.border, theme.warning, 0.55)
@@ -821,6 +822,7 @@ fn drawThreeLineTextStage(
 
     const s = &owner.session;
     const zig_code = owner.config.stage == .free_text and owner.config.stage6_source == .zig_code;
+    const forgiving = s.error_mode == .forgive;
 
     if (!owner.active or s.reference_len == 0) {
         caption("Press any key or click Start to begin typing", .{ .x = 12, .y = 0, .w = bounds.w - 24, .h = bounds.h }, 16, theme.muted, null);
@@ -877,10 +879,19 @@ fn drawThreeLineTextStage(
             const cx = start_x + @as(f32, @floatFromInt(col)) * cell_w;
             const char_rect: dvui.Rect = .{ .x = cx, .y = y + 1, .w = cell_w, .h = @max(14.0, line_h - 3) };
             const is_cur = (idx == focus);
-            const is_wrong = (idx < s.len and s.typed[idx] != s.reference[idx]) or (is_cur and s.current_error);
+            // Forgiving input marks a typo quietly: a dimmer cursor with a thin
+            // red line and the wrong key beside it; a character passed with a
+            // mistake turns red only once it is behind the cursor.
+            const quiet_typo = forgiving and is_cur and s.current_error;
+            const is_wrong = if (forgiving)
+                s.wasMissed(idx)
+            else
+                (idx < s.len and s.typed[idx] != s.reference[idx]) or (is_cur and s.current_error);
             const is_typed_ok = idx < s.len and !is_wrong;
 
-            const fg: dvui.Color = if (is_cur and !is_wrong)
+            const fg: dvui.Color = if (quiet_typo)
+                theme.text
+            else if (is_cur and !is_wrong)
                 theme.bg
             else if (is_wrong)
                 theme.danger
@@ -891,7 +902,9 @@ fn drawThreeLineTextStage(
             else
                 theme.muted;
 
-            const bg_fill: ?dvui.Color = if (is_wrong)
+            const bg_fill: ?dvui.Color = if (quiet_typo)
+                ui.mix(theme.bg, theme.warning, 0.5)
+            else if (is_wrong and !forgiving)
                 ui.mix(theme.bg, theme.danger, 0.22)
             else if (is_cur)
                 theme.warning
@@ -911,6 +924,7 @@ fn drawThreeLineTextStage(
                 });
                 cell_box.deinit();
             }
+            if (quiet_typo) quietTypoMark(theme, char_rect, s.last_wrong_cp, idx);
 
             var gbuf: [4]u8 = undefined;
             const cp = s.reference[idx];
@@ -948,6 +962,33 @@ fn drawThreeLineTextStage(
             }
         }
     }
+}
+
+/// A thin red line under the cursor and the wrong key, small, beside it.
+fn quietTypoMark(theme: ui.Theme, cell: dvui.Rect, wrong: ?u21, idx: usize) void {
+    const line = dvui.box(@src(), .{}, .{
+        .id_extra = 0x7800 + idx,
+        .rect = .{ .x = cell.x + 2, .y = cell.y + cell.h - 2, .w = @max(2, cell.w - 4), .h = 3 },
+        .background = true,
+        .color_fill = .{ .color = theme.danger },
+        .corners = .all(1.5),
+        .padding = .{},
+        .margin = .{},
+        .tag = "practice.typo",
+    });
+    line.deinit();
+    const cp = wrong orelse return;
+    var buf: [4]u8 = undefined;
+    const text = view.glyph(cp, true, &buf);
+    if (text.len == 0) return;
+    dvui.labelNoFmt(@src(), text, .{ .align_x = 0, .align_y = 0 }, .{
+        .id_extra = 0x7900 + idx,
+        .rect = .{ .x = cell.x + cell.w - 1, .y = cell.y - 6, .w = 18, .h = 18 },
+        .font = dvui.Font.theme(.mono).withSize(13),
+        .color_text = .{ .color = ui.mix(theme.bg, theme.danger, 0.8) },
+        .padding = .{},
+        .margin = .{},
+    });
 }
 
 /// Notices of the last lesson in the top right corner of `area`. They fade
@@ -1286,7 +1327,8 @@ fn formatNextKeyHint(
     if (s.state == .complete) {
         return .{ .text = "Round complete", .dot_color = theme.success, .text_color = theme.success };
     }
-    if (s.current_error) {
+    // Forgiving input keeps the hint calm; typing on catches up by itself.
+    if (s.current_error and s.error_mode != .forgive) {
         if (focus < s.reference_len) {
             var gb: [4]u8 = undefined;
             const g = view.glyph(s.reference[focus], true, &gb);

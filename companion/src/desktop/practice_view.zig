@@ -10,7 +10,7 @@ pub fn whitespace(cp: u21) bool {
 
 /// Keep a mistake in view until it is corrected, rather than moving past it.
 pub fn focus(session: *const Session) usize {
-    if (session.error_mode == .stop_on_error) {
+    if (session.error_mode != .flow_backspace) {
         return @min(session.len, session.reference_len);
     }
     for (session.typed[0..@min(session.len, session.reference_len)], 0..) |cp, i| {

@@ -20,7 +20,7 @@ pub const Config = struct {
     mode: Mode = .tutor,
     stage: Stage = .home_row,
     guidance: GuidanceMode = .guided,
-    error_mode: ErrorMode = .stop_on_error,
+    error_mode: ErrorMode = .forgive,
     target_wpm: f32 = 20.0,
     daily_goal_minutes: u16 = 15,
     punct_group: usize = 0,
@@ -267,6 +267,8 @@ pub const Intent = union(enum) {
     stop,
     set_target_wpm: f32,
     set_guidance: GuidanceMode,
+    /// Changes how typos are handled; the lesson in progress keeps its mode.
+    set_error_mode: ErrorMode,
     set_daily_goal: u16,
     set_stage5_filter: struct { filter: generator.Stage5Filter, layer: ?usize = null },
     set_stage6_source: struct { source: generator.Stage6Source, zig_lesson: usize = 0 },
@@ -384,9 +386,13 @@ pub const Controller = struct {
             self.config.target_wpm = target_wpm;
             self.config.guidance = st.guidance_mode;
             self.config.error_mode = switch (st.error_mode) {
-                .stop_on_error => .stop_on_error,
+                // Before schema 3 nobody could choose; the old default
+                // becomes the forgiving one.
+                .stop_on_error => if (st.schema_version < 3) .forgive else .stop_on_error,
                 .flow_backspace => .flow_backspace,
+                .forgive => .forgive,
             };
+            self.persisted.error_mode = storageErrorMode(self.config.error_mode);
             self.config.daily_goal_minutes = std.math.clamp(st.daily_goal_minutes, 5, 120);
             storage.hydrateLearningModel(st, &self.profile, &self.learning);
             storage.hydrateBoards(st, &self.boards);
@@ -558,6 +564,12 @@ pub const Controller = struct {
             .set_guidance => |g| blk: {
                 self.config.guidance = g;
                 self.persisted.guidance_mode = g;
+                self.needs_persist = true;
+                break :blk;
+            },
+            .set_error_mode => |mode| blk: {
+                self.config.error_mode = mode;
+                self.persisted.error_mode = storageErrorMode(mode);
                 self.needs_persist = true;
                 break :blk;
             },
@@ -1069,10 +1081,7 @@ pub const Controller = struct {
         self.persisted.active_stage = self.config.stage.number();
         self.persisted.target_wpm = self.config.target_wpm;
         self.persisted.guidance_mode = self.config.guidance;
-        self.persisted.error_mode = switch (self.config.error_mode) {
-            .stop_on_error => .stop_on_error,
-            .flow_backspace => .flow_backspace,
-        };
+        self.persisted.error_mode = storageErrorMode(self.config.error_mode);
         self.persisted.daily_goal_minutes = self.config.daily_goal_minutes;
 
         const state = try storage.buildProfileState(
@@ -1106,6 +1115,14 @@ pub const Controller = struct {
         };
     }
 };
+
+fn storageErrorMode(mode: ErrorMode) storage.ErrorMode {
+    return switch (mode) {
+        .forgive => .forgive,
+        .stop_on_error => .stop_on_error,
+        .flow_backspace => .flow_backspace,
+    };
+}
 
 /// The single-character tap labels of one layer; 0 for any other key.
 pub fn snapshotLayer(labels: practice.Labels, layer: usize, out: []u21) void {

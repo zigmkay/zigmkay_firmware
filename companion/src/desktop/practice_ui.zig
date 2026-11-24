@@ -258,8 +258,9 @@ fn consumeInput(
         }
     }
 
-    // Track physical mis-key flash when Live-HID has a pressed key on mismatch.
-    if (owner.session.error_count > prev_errors) {
+    // Track physical mis-key flash when Live-HID has a pressed key on mismatch;
+    // forgiving input keeps typos quiet.
+    if (owner.session.error_count > prev_errors and owner.session.error_mode != .forgive) {
         if (input.frame) |frame| {
             for (frame.pressed, 0..) |is_down, kidx| {
                 if (is_down) {

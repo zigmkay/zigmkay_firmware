@@ -6,7 +6,11 @@ const layout_profile = @import("practice_layout_profile.zig");
 const model = @import("practice_model.zig");
 
 /// 2 replaced the layout-diff key positions with known positions and board snapshots.
-pub const schema_version: u32 = 2;
+/// 3 made forgiving input the default; a schema 2 `stop_on_error` was never
+/// chosen by the user and loads as `forgive`.
+pub const schema_version: u32 = 3;
+/// The oldest schema that still loads; its missing fields take their defaults.
+pub const min_schema_version: u32 = 2;
 pub const state_filename = "state.zon";
 pub const corrupt_backup_filename = "state.zon.corrupt";
 pub const runs_filename = "runs.jsonl";
@@ -22,6 +26,7 @@ pub const GuidanceMode = enum(u8) {
 pub const ErrorMode = enum(u8) {
     stop_on_error,
     flow_backspace,
+    forgive,
 };
 
 pub const PersistedKeyStat = struct {
@@ -86,7 +91,7 @@ pub const ProfileState = struct {
     active_stage: u8 = 1,
     target_wpm: f32 = 20.0,
     guidance_mode: GuidanceMode = .guided,
-    error_mode: ErrorMode = .stop_on_error,
+    error_mode: ErrorMode = .forgive,
     daily_goal_minutes: u16 = 15,
     daily_active_seconds: u32 = 0,
     daily_utc_day: u32 = 0,
@@ -261,7 +266,9 @@ pub fn loadState(
         backupCorrupt(io, dir);
         return .{ .arena = arena, .state = .{}, .existed = true, .recovered_from_corrupt = true };
     };
-    if (parsed.schema_version != schema_version or parsed.active_stage < 1 or parsed.active_stage > 6) {
+    if (parsed.schema_version < min_schema_version or parsed.schema_version > schema_version or
+        parsed.active_stage < 1 or parsed.active_stage > 6)
+    {
         backupCorrupt(io, dir);
         return .{ .arena = arena, .state = .{}, .existed = true, .recovered_from_corrupt = true };
     }
@@ -605,7 +612,7 @@ test "state.zon roundtrip, atomic overwrite, corrupt recovery and reset" {
     try t.expect(!initial.existed);
     try t.expect(!initial.recovered_from_corrupt);
     try t.expectEqual(model.Language.en, initial.state.language);
-    try t.expectEqual(ErrorMode.stop_on_error, initial.state.error_mode);
+    try t.expectEqual(ErrorMode.forgive, initial.state.error_mode);
 
     // Save full state and verify roundtrip
     const saved_stats = [_]PersistedKeyStat{
