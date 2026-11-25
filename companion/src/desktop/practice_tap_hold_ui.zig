@@ -379,7 +379,8 @@ pub fn testRow(
     if (decisions.len == 0) {
         const note = switch (support) {
             .reporting => "hold or roll a home-row key to see how the keyboard decides",
-            .old_firmware, .unknown => "needs current firmware on the keyboard",
+            .old_firmware => "needs current firmware on the keyboard",
+            .unknown => "connect your Zigmkay keyboard to see how it decides",
         };
         drawText(note, .{ .x = rect.x + label_w, .y = y, .w = @max(0, rect.w - label_w), .h = h }, 14, theme.muted, 0, .normal);
         return;

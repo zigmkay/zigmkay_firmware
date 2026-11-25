@@ -307,6 +307,9 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
 
     // Mirror telemetry into Test keys mode without touching tutor scoring or persistence.
     if (practice.config.mode == .test_keys) {
+        // Decisions name key indices of the keyboard that sent them; without
+        // a verified keyboard (unplugged, or swapped for another) they go.
+        if (app.frame_limit == null and app.live.tapHoldSupport() == .unknown) practice.test_keys.tap_hold_len = 0;
         practice.test_keys.active_layers = active_layers;
         practice.test_keys.highest_layer = layer;
         practice.test_keys.modifiers = modifiers.toByte();

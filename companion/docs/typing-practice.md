@@ -197,8 +197,9 @@ accidental hold still counts as a normal miss of the letter.
   was still down". The key that held gets a teal outline with `HOLD ⇧` on the
   keyboard, the key whose release made it hold a blue one with `went up`;
   both fade after two seconds. Test layout stays unscored: these decisions are
-  only shown. Without decisions from a keyboard that speaks protocol version
-  2 the row reads "needs current firmware on the keyboard".
+  only shown. A keyboard with older firmware (protocol version 1) shows
+  "needs current firmware on the keyboard"; without a connected Zigmkay
+  keyboard the row asks you to connect one.
 - **Confidence strip:** a key with at least two accidental holds in its last
   30 decisions carries a small teal marker such as `⇧3`; one that tapped at
   least twice when its hold was wanted carries an amber `TAP 2`. Its hover card
