@@ -552,6 +552,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
             .{ .name = "onboarding-ui", .module = onboarding_ui },
             .{ .name = "native-hid", .module = host.native_hid },
             .{ .name = "live-adapter", .module = host.live_adapter },
+            .{ .name = "release-options", .module = core.release_options.createModule() },
         })),
         .usb_acceptance_deps = dupe(b, &.{
             .{ .name = "native-hid", .module = host.native_hid },

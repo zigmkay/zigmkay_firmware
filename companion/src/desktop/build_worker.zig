@@ -17,6 +17,17 @@ pub const Request = struct {
     environment: std.process.Environ.Map,
     captured: [32]u8,
     generation: u64,
+    /// The compiler's output, set by `prepare` once the build process ended,
+    /// whether or not it produced firmware. Read it after the worker joined.
+    output: Output = .{},
+
+    /// The last `output_capacity` bytes of each stream, in the request's arena.
+    pub const Output = struct {
+        stderr: []const u8 = "",
+        stdout: []const u8 = "",
+        ran: bool = false,
+    };
+    pub const output_capacity = 64 * 1024;
 
     pub fn capture(
         model: *const Model,
@@ -149,7 +160,7 @@ pub const Request = struct {
         return request;
     }
 
-    pub fn prepare(self: *const Request, gpa: std.mem.Allocator, io: std.Io) !Prepared {
+    pub fn prepare(self: *Request, gpa: std.mem.Allocator, io: std.Io) !Prepared {
         const export_start = std.Io.Clock.awake.now(io);
         const request = try self.verifiedRequest(gpa, io, .create_export);
         // A snapshot exported earlier is reused as is. Mark it used, so cache
@@ -171,6 +182,12 @@ pub const Request = struct {
         std.log.info("build phase child_wait_ms={d}", .{
             wait_start.durationTo(std.Io.Clock.awake.now(io)).toMilliseconds(),
         });
+        const a = self.arena.allocator();
+        self.output = .{
+            .stderr = try a.dupe(u8, tail(result.process.stderr, output_capacity)),
+            .stdout = try a.dupe(u8, tail(result.process.stdout, output_capacity)),
+            .ran = true,
+        };
         const output_path = std.fs.path.dirname(std.fs.path.dirname(job.command.uf2_path).?).?;
         var output = try std.Io.Dir.cwd().openDir(io, output_path, .{});
         defer output.close(io);
@@ -197,6 +214,10 @@ pub const Request = struct {
         };
     }
 };
+
+fn tail(bytes: []const u8, limit: usize) []const u8 {
+    return bytes[bytes.len - @min(bytes.len, limit) ..];
+}
 
 pub const Prepared = struct {
     ticket: Ticket,

@@ -13,6 +13,7 @@ const callbacks = @import("callback-ui");
 const App = @import("App.zig");
 const onboarding_flow = @import("onboarding_flow.zig");
 const maintenance = @import("maintenance.zig");
+const build_status = @import("build_status.zig");
 
 pub const FileJob = struct {
     worker: *desktop.project_worker.Owner,
@@ -34,6 +35,9 @@ pub const BuildJob = struct {
     worker: *desktop.build_worker.Owner,
     editor_generation: u64,
     first_build: bool,
+    trigger: desktop.build_activity.Trigger,
+    /// Start on the awake clock, in milliseconds.
+    started_ms: u64,
 };
 
 pub const Jobs = struct {
@@ -104,7 +108,7 @@ pub fn startFile(app: *App, action: paths.Action, generation: u64) !FileJob {
     };
 }
 
-pub fn startBuild(app: *App, config: desktop.build_worker.Config, generation: u64) !BuildJob {
+pub fn startBuild(app: *App, config: desktop.build_worker.Config, generation: u64, trigger: desktop.build_activity.Trigger) !BuildJob {
     var request = try desktop.build_worker.Request.capture(&app.model, config, app.environ_map, generation);
     errdefer request.deinit();
     const first_build = jobs_api.managed_build.isFirstBuild(app.gpa, app.io, config.request);
@@ -112,16 +116,19 @@ pub fn startBuild(app: *App, config: desktop.build_worker.Config, generation: u6
         .worker = try desktop.build_worker.Owner.create(app.gpa, app.io, &request, generation),
         .editor_generation = app.owner_generation,
         .first_build = first_build,
+        .trigger = trigger,
+        .started_ms = build_status.awakeMs(app),
     };
 }
 
 /// Starts the user's build. A background warm-up of the same snapshot
 /// becomes this build; any other build waits for the warm-up's cache lease.
-pub fn beginBuild(app: *App, config: desktop.build_worker.Config) !void {
+pub fn beginBuild(app: *App, config: desktop.build_worker.Config, trigger: desktop.build_activity.Trigger) !void {
     if (try maintenance.adopt(app)) return;
     const next_job = try std.math.add(u64, app.job_generation, 1);
-    app.jobs.build = try startBuild(app, config, next_job);
+    app.jobs.build = try startBuild(app, config, next_job, trigger);
     app.job_generation = next_job;
+    build_status.buildStarted(app, app.jobs.build.?);
 }
 
 pub fn startSource(app: *App, action: callbacks.Action, generation: u64) !SourceJob {
@@ -158,19 +165,23 @@ fn pollBuild(app: *App) !App.Flow {
     app.jobs.build = null;
     defer job.worker.destroy();
     var prepared = event.result catch |err| {
+        build_status.buildFinished(app, job, err);
         app.flash.buildFailed(&app.view, err);
         return .next_frame;
     };
     defer prepared.deinit();
     if (job.editor_generation != app.owner_generation or !std.meta.eql(event.ticket, job.worker.ticket)) {
+        build_status.buildFinished(app, job, error.StaleBuild);
         app.flash.buildFailed(&app.view, error.StaleBuild);
         return .next_frame;
     }
     const snapshot = try app.model.id();
     const bundle = prepared.takeBundle(&app.model, .{ .generation = app.job_generation, .snapshot = snapshot }) catch |err| {
+        build_status.buildFinished(app, job, err);
         app.flash.buildFailed(&app.view, err);
         return .next_frame;
     };
+    build_status.buildFinished(app, job, bundle.firmware.uf2_size);
     try app.flash.buildSucceeded(&app.model, app.owner_generation);
     if (app.build.artifact) |*previous| previous.deinit();
     app.build.artifact = bundle.firmware;

@@ -10,6 +10,7 @@ const boards = @import("catalog-project");
 const App = @import("App.zig");
 const cli = @import("cli.zig");
 const workers = @import("workers.zig");
+const build_status = @import("build_status.zig");
 const warmup = desktop.build_warmup;
 
 pub const Warmup = struct {
@@ -77,8 +78,9 @@ fn startWarmup(app: *App) !void {
     var config = plan.config;
     config.request.parallelism = jobs_api.compiler_cache.hostParallelism(true);
     const next_job = try std.math.add(u64, app.job_generation, 1);
-    const job = try workers.startBuild(app, config, next_job);
+    const job = try workers.startBuild(app, config, next_job, .warmup);
     app.job_generation = next_job;
+    build_status.warmupStarted(app, config, selected.entry.selector);
     app.build.warmup = .{ .job = job, .ticket = .{
         .job_generation = next_job,
         .editor_generation = app.owner_generation,
@@ -104,7 +106,9 @@ pub fn adopt(app: *App) !bool {
     const running = app.build.warmup orelse return false;
     if (warmup.userBuild(running.ticket, try currentState(app)) != .adopt) return false;
     app.jobs.build = running.job;
+    app.jobs.build.?.trigger = .warmup_adopted;
     app.build.warmup = null;
+    build_status.warmupAdopted(app);
     std.log.info("User build adopted the background warm-up", .{});
     return true;
 }
@@ -115,6 +119,7 @@ fn pollWarmup(app: *App) !void {
     app.build.warmup = null;
     defer running.job.worker.destroy();
     var prepared = event.result catch |err| {
+        build_status.warmupFinished(app, running.job, err, false);
         std.log.info("Background build warm-up failed: {t}", .{err});
         return;
     };
@@ -124,13 +129,16 @@ fn pollWarmup(app: *App) !void {
     if (warmup.finished(running.ticket, state, true, app.jobs.build != null) != .accept or
         !std.meta.eql(event.ticket, running.job.worker.ticket))
     {
+        build_status.warmupFinished(app, running.job, {}, false);
         std.log.info("Background build warm-up finished; compiler cache ready", .{});
         return;
     }
     const bundle = prepared.takeBundle(&app.model, .{ .generation = app.job_generation, .snapshot = state.snapshot }) catch |err| {
+        build_status.warmupFinished(app, running.job, {}, false);
         std.log.info("Background build warm-up result not used: {t}", .{err});
         return;
     };
+    build_status.warmupFinished(app, running.job, {}, true);
     try app.flash.buildSucceeded(&app.model, app.owner_generation);
     if (app.build.artifact) |*previous| previous.deinit();
     app.build.artifact = bundle.firmware;
@@ -173,7 +181,8 @@ pub fn startCleanup(app: *App) void {
 
 fn pollCleanup(app: *App) void {
     const owner = app.build.cleanup orelse return;
-    _ = owner.poll() orelse return;
+    const report = owner.poll() orelse return;
+    build_status.cleanupFinished(app, report);
     owner.destroy();
     app.build.cleanup = null;
 }

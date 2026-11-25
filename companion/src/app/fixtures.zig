@@ -790,8 +790,25 @@ fn nativeTrayScript(app: *App) !void {
     }
 }
 
-/// The status fixture shows each toolbar state for four frames. Scene 6 is the
-/// plain editor with nothing open, as in the README screenshot.
+/// The status fixture shows each toolbar state for four frames:
+/// 0: building, with the key editor on F's tap
+/// 1: flashing, with the key editor on F's new Shift hold
+/// 2: flashed, with the Export Zig source sheet
+/// 3: Flash failed, with the layout menu and the flash panel
+/// 4: Flash failed, with Details on the activity
+/// 5: Flash failed in a narrow window
+/// 6: the plain editor, ready, as in the README screenshot
+/// Scenes 7 and later render dark, then light:
+/// 7: preparing build caches, with an estimated progress bar
+/// 8: a changed layout with Auto-build off: Build glows as the next step
+/// 9: building, started by Auto-build
+/// 10: built, not flashed: Flash glows as the next step
+/// 11: the build failed with one error in the keymap
+/// 12: Details on the activity while the caches are prepared
+/// 13: Details on the compiler output of the failed build
+/// 14: a Build click queued behind the cache warm-up
+/// 15: ready, and the keyboard runs this layout
+/// 16: scene 13 at content scale 2
 pub fn statusScene(app: *const App) usize {
     return if (app.mode.isStatus()) (app.count - 1) / 4 else 0;
 }
@@ -807,15 +824,38 @@ pub fn resizeStatusWindow(app: *App) void {
         if (app.count == 113) _ = c.SDL_SetWindowSize(app.native.window, 2560, 1600);
         if (app.count == 121) _ = c.SDL_SetWindowSize(app.native.window, 1600, 1000);
     }
-    if (!app.mode.isStatus() or (app.count != 1 and app.count != 21 and app.count != 25)) return;
+    if (!app.mode.isStatus()) return;
+    // The last scene renders the editor's canvas at content scale 2.
+    app.fixture.content_scale = if (statusScene(app) == status_scaled_scene) 2 else null;
+    if (app.count == status_scaled_scene * 4 + 1) _ = c.SDL_SetWindowSize(app.native.window, 3200, 2200);
+    if (app.count != 1 and app.count != 21 and app.count != 25) return;
     const narrow = app.count == 21;
     _ = c.SDL_SetWindowSize(app.native.window, if (narrow) 900 else 1440, if (narrow) 600 else 1000);
 }
 
+/// Scenes from here on render twice in the dark theme, then twice in the
+/// light one, and save both.
+const status_themed_scenes = 7;
+const status_scaled_scene = 16;
+
+/// The status scene of this frame in both themes.
+fn statusLight(app: *const App) bool {
+    return statusScene(app) >= status_themed_scenes and (app.count - 1) % 4 >= 2;
+}
+
 pub fn showStatusDetails(app: *App) void {
     if (!app.mode.isStatus()) return;
-    app.view.toolbar.auto_build = true;
-    app.view.toolbar.details_open = statusScene(app) == 4;
+    const shown = statusScene(app);
+    app.view.toolbar.light = statusLight(app);
+    app.view.toolbar.auto_build = shown != 8;
+    app.view.toolbar.details_open = switch (shown) {
+        4, 12, 13, status_scaled_scene => true,
+        else => false,
+    };
+    if ((app.count - 1) % 4 == 0) {
+        app.view.toolbar.details_tab = .activity;
+        app.view.toolbar.output_shown = false;
+    }
     // Scene 3 shows the layout menu, opened by a click on the layout crumb.
     if (statusScene(app) != 3) app.view.toolbar.menu_open = false;
     // Scene 2 shows the Export Zig source sheet.
@@ -846,26 +886,100 @@ pub fn showStatusDetails(app: *App) void {
     app.view.key_editor.layer = app.model.layer;
 }
 
-pub fn statusToolbar(app: *const App, toolbar: *@FieldType(editor.Frame, "toolbar")) void {
+/// A fixed frame time, so moving parts render at a fixed point: the sweep
+/// across the middle of its button and the next step's glow at its peak.
+const status_time_ms = 700;
+
+/// The head of the status fixture moves as in a focused window, frozen in time.
+pub fn statusToolbar(app: *App, toolbar: *@FieldType(editor.Frame, "toolbar")) void {
     if (!app.mode.isStatus()) return;
+    toolbar.now_ms = status_time_ms;
+    toolbar.animate = true;
+    fillStatusActivity(app);
+}
+
+/// The build and flash state of each status scene. The fixture has no build
+/// plan, no keyboard and no jobs; the installed application would show these.
+pub fn statusInput(app: *const App, input: *desktop.build_flash_state.Input) void {
+    if (!app.mode.isStatus()) return;
+    const built: desktop.build_flash_state.Built = .{ .duration_ms = 1200, .by_user = true };
+    const warmup: desktop.build_flash_state.Warmup = .{ .elapsed_ms = 14_000, .estimate_ms = 35_000 };
+    input.* = .{ .auto_build = app.view.toolbar.auto_build };
+    switch (statusScene(app)) {
+        0 => input.building = .{ .trigger = .click, .elapsed_ms = 12_000, .first = true },
+        1 => {
+            input.built = built;
+            input.flash = .{ .working = .writing };
+            input.flash_status = "Transferring checked firmware; result pending";
+        },
+        2 => {
+            input.built = built;
+            input.flash = .{ .done = 1000 };
+            input.keyboard_runs_layout = true;
+        },
+        3, 4, 5 => {
+            input.built = built;
+            input.flash = .failed;
+            input.flash_failure = "Flash failed: the selected firmware could not be verified against the current project snapshot. " ++
+                "Review the complete diagnostic here before starting a new transfer.";
+        },
+        7, 12 => input.warmup = warmup,
+        8 => input.changed = true,
+        9 => input.building = .{ .trigger = .auto_build, .elapsed_ms = 2400 },
+        10 => input.built = built,
+        11, 13, status_scaled_scene => input.build_failed = .{ .count = 1, .keymap = true },
+        14 => {
+            input.warmup = warmup;
+            input.queued = .build;
+        },
+        15 => input.keyboard_runs_layout = true,
+        else => {},
+    }
+}
+
+/// A plausible session timeline and, for failed builds, compiler output with
+/// one error in the keymap, at fixed times.
+fn fillStatusActivity(app: *App) void {
+    const log = &app.activity;
+    log.first = 0;
+    log.count = 0;
+    log.utc_offset_s = 0;
+    const start: i64 = (19 * 3600 + 42 * 60 + 40) * 1000;
+    log.add(start, .info, "App started · Zigmkay 0.2.1 (a4e5f3e)", .{});
+    log.add(start + 400, .info, "Cache cleanup: removed 1 old entry", .{});
+    log.add(start + 3000, .warn, "Preparing build caches · keycaprio_qwerty_0_7 · 7 of 14 cores", .{});
     const scene = statusScene(app);
-    toolbar.can_build = true;
-    toolbar.can_flash = true;
-    toolbar.build_active = scene == 0;
-    toolbar.first_build = scene == 0;
-    toolbar.flash_active = scene == 1;
-    toolbar.flash_succeeded = scene == 2;
-    toolbar.flash_failed = scene >= 3 and scene != 6;
-    // The fixture has no build plan; the plain editor shows the installed
-    // application's idle status instead of the missing-resources notice.
-    if (scene == 6) toolbar.build_status = "Ready to build and Flash";
-    toolbar.flash_status = switch (scene) {
-        0, 6 => "",
-        1 => "Transferring firmware to keyboard…",
-        2 => "Matching firmware reconnected",
-        else => "Flash failed: the selected firmware could not be verified against the current project snapshot. " ++
-            "Review the complete diagnostic here before starting a new transfer.",
-    };
+    if (scene == 7 or scene == 12 or scene == 14) {
+        if (scene == 14) log.add(start + 9000, .info, "Build queued until the build caches are ready", .{});
+        return;
+    }
+    log.add(start + 36_700, .ok, "Build caches ready · 34 s", .{});
+    log.add(start + 442_000, .info, "Build started · Auto-build after a change · keycaprio_qwerty_0_7", .{});
+    const failed = scene == 11 or scene == 13 or scene == status_scaled_scene;
+    if (failed) {
+        log.add(start + 445_100, .err, "Build failed after 3.1 s · 1 error in the keymap", .{});
+    } else log.add(start + 443_200, .ok, "Built in 1.2 s · UF2 64.5 KB", .{});
+    if (scene >= 1 and scene <= 5) log.add(start + 461_000, .info, "Flash started · checking the firmware", .{});
+    if (scene >= 3 and scene <= 5) log.add(start + 467_000, .err, "Flash failed · FlashFirmwareUnverified", .{});
+    if (!failed or (app.count - 1) % 4 != 0) return;
+    const output =
+        \\/Users/me/Library/Caches/Zigmkay/exports/v2/9f3c0d1e/keymap.zig:212:31: error: expected ',' after initializer
+        \\    .{ .tap = .{ .key = .KC_A }, .hold = .{ .layer = 2 } .tapping_term = 200 },
+        \\                                                    ^
+        \\referenced by:
+        \\    keymap: /Users/me/Library/Caches/Zigmkay/exports/v2/9f3c0d1e/keymap.zig:4:1
+        \\    root: firmware/main.zig:18:5
+        \\error: the following command failed with 1 compilation errors:
+        \\zig build-exe -fno-emit-bin firmware/main.zig ...
+        \\error: the following build command failed with exit code 1:
+        \\.zig-cache/o/2b1f/build ...
+    ;
+    log.setOutput(app.gpa, output, "", .{
+        .at_ms = start + 445_100,
+        .trigger = .auto_build,
+        .succeeded = false,
+        .duration_ms = 3100,
+    }) catch {};
 }
 
 /// Injects the SDL events of the practice and status fixtures before the pump.
@@ -917,7 +1031,8 @@ fn pushEvent(event: *c.SDL_Event) !void {
 
 /// Verifies the drawn frame and saves screenshots of the screenshot fixtures.
 pub fn capture(app: *App) !void {
-    if (app.mode.isStatus() and app.count % 4 == 0) try captureStatus(app);
+    // Themed scenes save their dark frame too.
+    if (app.mode.isStatus() and (app.count % 4 == 0 or (statusScene(app) >= status_themed_scenes and app.count % 4 == 2))) try captureStatus(app);
     if (app.mode.isDrawers() and app.count % 4 == 0) {
         app.window.endRendering(.{ .manage_backend = false });
         const path = try std.fmt.allocPrintSentinel(app.window.arena(), ".zig-cache/editor-drawers/{d}.bmp", .{(app.count - 1) / 4}, 0);
@@ -971,9 +1086,34 @@ fn captureStatus(app: *App) !void {
     if (message.rect.x + message.rect.w > automatic.rect.x) return error.ActivityControlsOverlap;
     if (dvui.tagGet("system.status") != null) return error.SeparateStatusBarRetained;
     if (statusScene(app) == 3 and dvui.tagGet("layout.menu.popup") == null) return error.LayoutMenuNotDrawn;
+    if (app.view.toolbar.details_open) try checkDetails();
     app.window.endRendering(.{ .manage_backend = false });
-    const path = try std.fmt.allocPrintSentinel(app.window.arena(), ".zig-cache/editor-status/{d}.bmp", .{statusScene(app)}, 0);
+    const scene = statusScene(app);
+    const path = if (scene < status_themed_scenes)
+        try std.fmt.allocPrintSentinel(app.window.arena(), ".zig-cache/editor-status/{d}.bmp", .{scene}, 0)
+    else
+        try std.fmt.allocPrintSentinel(app.window.arena(), ".zig-cache/editor-status/{d}-{s}.bmp", .{ scene, if (app.view.toolbar.light) "light" else "dark" }, 0);
     try screenshot(app, path, error.StatusScreenshotRead, error.StatusScreenshotSave);
+}
+
+/// The Details popup lies inside the window and its controls inside its frame.
+fn checkDetails() !void {
+    const panel = (dvui.tagGet("editor.activity.details_panel") orelse return error.DetailsMissing).rect;
+    const window = dvui.windowRectPixels();
+    if (panel.x < 0 or panel.y < 0 or panel.x + panel.w > window.w + 1 or panel.y + panel.h > window.h + 1)
+        return error.DetailsOutsideWindow;
+    const log = dvui.tagGet("editor.activity.timeline") orelse dvui.tagGet("editor.activity.output") orelse return error.DetailsLogMissing;
+    for ([_]dvui.Rect.Physical{
+        log.rect,
+        (dvui.tagGet("editor.activity.copy") orelse return error.DetailsCopyMissing).rect,
+        (dvui.tagGet("editor.activity.close") orelse return error.DetailsCloseMissing).rect,
+        (dvui.tagGet("editor.activity.tab.output") orelse return error.DetailsTabsMissing).rect,
+    }) |inner| {
+        if (inner.x < panel.x or inner.y < panel.y or inner.x + inner.w > panel.x + panel.w + 1 or inner.y + inner.h > panel.y + panel.h + 1) {
+            std.log.err("Details control {any} outside its frame {any}", .{ inner, panel });
+            return error.DetailsControlOutsideFrame;
+        }
+    }
 }
 
 /// The wizard never exposes a target or creates its destination before commit.

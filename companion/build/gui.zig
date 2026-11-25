@@ -40,7 +40,7 @@ const fixtures = [_]struct { []const u8, []const u8 }{
     .{ "--offline-frames", "3" },
     .{ "--offline-onboarding-frames", "24" },
     .{ "--offline-catalog-frames", "56" },
-    .{ "--offline-status-frames", "24" },
+    .{ "--offline-status-frames", "68" },
     .{ "--offline-practice-frames", "3" },
     .{ "--offline-tutor-frames", "124" },
     .{ "--offline-companion-frames", "9" },

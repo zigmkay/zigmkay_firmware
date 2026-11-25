@@ -6,6 +6,8 @@ const desktop = @import("desktop-core");
 const ui = @import("editor-ui");
 pub const layout_menu = @import("layout_menu.zig");
 const dispatch = desktop.editor_dispatch;
+const flow = desktop.build_flash_state;
+const activity = desktop.build_activity;
 
 /// Where the open layout stands relative to its saved project.
 pub const Save = enum {
@@ -24,25 +26,33 @@ pub const Frame = struct {
     /// The layouts of this keyboard, for the layout menu.
     layouts: []const layout_menu.Choice = &.{},
     save: Save = .saved,
-    build_status: []const u8 = "",
-    can_build: bool = false,
-    can_flash: bool = false,
-    flash_status: []const u8 = "",
-    flash_active: bool = false,
-    build_active: bool = false,
-    first_build: bool = false,
-    flash_succeeded: bool = false,
-    flash_failed: bool = false,
+    /// The status row, the Build and Flash buttons and the Details headline.
+    state: flow.State = .{},
+    /// The session's Build and Flash timeline and the last compiler output.
+    activity: ?*const activity.Log = null,
     diagnostic: []const u8 = "",
     now_ms: u64 = 0,
+    /// Whether the head may animate: the window is shown and focused.
+    animate: bool = false,
+};
+
+pub const Tab = enum { activity, output };
+
+/// When a button took its current style, for its motion.
+pub const Motion = struct {
+    style: ?flow.Style = null,
+    since_ms: u64 = 0,
 };
 
 pub const View = struct {
     light: bool = false,
     auto_build: bool = false,
     details_open: bool = false,
-    result_hash: u64 = 0,
-    result_until: u64 = 0,
+    details_tab: Tab = .activity,
+    /// Details already switched to the compiler output for this failure.
+    output_shown: bool = false,
+    build_motion: Motion = .{},
+    flash_motion: Motion = .{},
     /// Whether the layout menu is open.
     menu_open: bool = false,
     /// The layout menu command chosen this frame, for the application.
@@ -79,13 +89,14 @@ pub fn draw(view: *View, model: *const desktop.model.Model, frame: Frame) !?disp
         if (command == .rename) startRename(view, model.document().name) else view.command = command;
     }
     drawSave(theme, frame.save);
-    const build = ui.iconButtonEnabled(theme, icons.build, "Build", "firmware.build", .{ .x = 820, .y = 14, .w = 118, .h = 36 }, true, frame.can_build);
-    try offer(&result, model, build, .build);
-    flowArrow(theme, 942);
-    const flash_label = if (frame.flash_active) "Flash details" else "Flash";
-    const flash_bounds: dvui.Rect = .{ .x = 962, .y = 14, .w = 128, .h = 36 };
-    const flash = ui.iconButtonEnabled(theme, icons.flash, flash_label, "firmware.inspect", flash_bounds, true, frame.can_flash or frame.flash_active);
-    try offer(&result, model, flash, .flash);
+    const state = frame.state;
+    const motion: Clock = .{ .now_ms = frame.now_ms, .animate = frame.animate };
+    // Clicking a working step opens Details instead of starting it again.
+    const build = flowButton(theme, state.build, "firmware.build", .{ .x = 816, .y = 14, .w = 132, .h = 36 }, &view.build_motion, motion);
+    if (build and state.build.style == .working) view.details_open = true else try offer(&result, model, build, .build);
+    flowArrow(theme, 952);
+    const flash = flowButton(theme, state.flash, "firmware.inspect", .{ .x = 972, .y = 14, .w = 132, .h = 36 }, &view.flash_motion, motion);
+    if (flash and state.flash.style == .working) view.details_open = true else try offer(&result, model, flash, .flash);
     const right = width - 16;
     const undo = ui.iconButtonEnabled(theme, icons.undo, "", "edit.undo", .{ .x = right - 132, .y = 14, .w = 36, .h = 36 }, false, model.undo_stack.items.len != 0);
     try offer(&result, model, undo, .undo);
@@ -95,7 +106,8 @@ pub fn draw(view: *View, model: *const desktop.model.Model, frame: Frame) !?disp
     if (ui.iconButton(theme, theme_icon, "", "theme.toggle", .{ .x = right - 36, .y = 14, .w = 36, .h = 36 }, false)) {
         view.light = !view.light;
     }
-    drawActivity(view, theme, frame, width);
+    drawActivity(view, theme, frame, width, motion);
+    motion.schedule(state, view);
     return result;
 }
 
@@ -171,58 +183,217 @@ fn flowArrow(theme: ui.Theme, x: f32) void {
     });
 }
 
-const Activity = struct {
-    busy: bool,
-    failed: bool,
-    /// The complete latest status, shown in the details popup.
-    full: []const u8,
-    hint: []const u8,
-    /// The short status shown in the toolbar row.
-    message: []const u8,
+// Motion ----------------------------------------------------------------------
 
-    /// Summarizes build and flash progress. A success message is shown for five
-    /// seconds after the status last changed, then collapses to "Ready".
-    fn init(view: *View, frame: Frame) Activity {
-        const busy = frame.build_active or frame.flash_active;
-        const failed = frame.diagnostic.len != 0 or (frame.flash_failed and !frame.build_active);
-        const full = if (frame.diagnostic.len != 0)
-            frame.diagnostic
-        else if (frame.build_active)
-            "Building firmware…"
-        else if (frame.flash_status.len != 0)
-            frame.flash_status
-        else
-            frame.build_status;
-        const hint = if (failed)
-            ""
-        else if (frame.build_active and frame.first_build)
-            "First build may take a few minutes"
-        else if (frame.build_active)
-            "Compiling firmware and practice runner"
-        else
-            "";
-        const result_hash = std.hash.Wyhash.hash(0, full);
-        if (view.result_hash != result_hash) {
-            view.result_hash = result_hash;
-            view.result_until = frame.now_ms +| 5000;
+/// The frame time of the head and whether it may move. Motion is a pure
+/// function of the time, so a fixture with a fixed time draws a fixed frame.
+const Clock = struct {
+    now_ms: u64,
+    animate: bool,
+
+    /// About 30 frames per second while something moves.
+    const frame_us = 33_000;
+    /// The next step pulses this long after it became the next step, then
+    /// keeps a steady highlight.
+    const pulse_ms = 7200;
+    const glow_period_ms = 2400;
+
+    /// 0 to 1 along a repeating cycle of `period_ms`.
+    fn phase(self: Clock, period_ms: u64) f32 {
+        return @as(f32, @floatFromInt(self.now_ms % period_ms)) / @as(f32, @floatFromInt(period_ms));
+    }
+
+    /// Strength of the glow of a next step: a slow pulse at first, then a
+    /// steady highlight. Without animation the steady one.
+    fn glow(self: Clock, since_ms: u64) f32 {
+        const steady = 0.55;
+        const elapsed = self.now_ms -| since_ms;
+        if (!self.animate or elapsed >= pulse_ms) return steady;
+        const wave = @cos(@as(f32, @floatFromInt(elapsed % glow_period_ms)) / glow_period_ms * std.math.tau);
+        return 0.5 + 0.5 * wave;
+    }
+
+    /// Wakes the next frame: soon while something moves, once a second
+    /// while a counter runs unseen, never when everything rests.
+    fn schedule(self: Clock, state: flow.State, view: *const View) void {
+        const pulsing = (state.build.style == .next and self.now_ms -| view.build_motion.since_ms < pulse_ms) or
+            (state.flash.style == .next and self.now_ms -| view.flash_motion.since_ms < pulse_ms);
+        const id = dvui.parentGet().extendId(@src(), 0);
+        if (self.animate and (state.working() or pulsing)) {
+            dvui.timer(id, frame_us);
+        } else if (state.working()) {
+            dvui.timer(id, 1_000_000);
         }
-        const success = !busy and !failed and (frame.flash_succeeded or std.mem.eql(u8, full, "Built snapshot"));
-        const message = if (frame.diagnostic.len != 0)
-            "Needs attention · open Details"
-        else if (failed)
-            "Flash failed · open Details"
-        else if (success and frame.now_ms > view.result_until)
-            "Ready"
-        else if (full.len == 0)
-            "Ready"
-        else
-            full;
-        return .{ .busy = busy, .failed = failed, .full = full, .hint = hint, .message = message };
     }
 };
 
-fn drawActivity(view: *View, theme: ui.Theme, frame: Frame, width: f32) void {
-    const activity: Activity = .init(view, frame);
+// Build and Flash buttons ------------------------------------------------------
+
+const Palette = struct {
+    fill: dvui.Color,
+    border: dvui.Color,
+    text: dvui.Color,
+    /// The colour of a sweeping light, if the style has one.
+    sweep: ?dvui.Color = null,
+    sweep_period_ms: u64 = 1600,
+};
+
+fn palette(theme: ui.Theme, style: flow.Style) Palette {
+    const white = ui.color(0xFFFFFF);
+    return switch (style) {
+        .idle => .{ .fill = theme.control, .border = theme.border, .text = theme.text },
+        .off => .{
+            .fill = ui.mix(theme.panel, theme.control, 0.55),
+            .border = ui.mix(theme.panel, theme.border, 0.7),
+            .text = ui.mix(theme.panel, theme.muted, 0.6),
+        },
+        .next => .{ .fill = theme.accent, .border = theme.accent, .text = white },
+        .working, .queued => .{
+            .fill = ui.mix(theme.panel, theme.accent, 0.2),
+            .border = ui.mix(theme.panel, theme.accent, 0.7),
+            .text = ui.mix(theme.text, theme.accent, 0.35),
+            .sweep = ui.mix(white, theme.accent, 0.35),
+        },
+        .preparing => .{
+            .fill = ui.mix(theme.panel, theme.warning, 0.08),
+            .border = ui.mix(theme.panel, theme.warning, 0.4),
+            .text = ui.mix(theme.muted, theme.warning, 0.45),
+            .sweep = theme.warning,
+            .sweep_period_ms = 2200,
+        },
+        .done => .{
+            .fill = ui.mix(theme.panel, theme.success, 0.14),
+            .border = ui.mix(theme.panel, theme.success, 0.5),
+            .text = ui.mix(theme.text, theme.success, 0.55),
+        },
+        .failed => .{
+            .fill = ui.mix(theme.panel, theme.danger, 0.13),
+            .border = ui.mix(theme.panel, theme.danger, 0.55),
+            .text = ui.mix(theme.text, theme.danger, 0.7),
+        },
+    };
+}
+
+fn iconBytes(icon: flow.Icon) []const u8 {
+    return switch (icon) {
+        .build => ui.control_icons.build,
+        .flash => ui.control_icons.flash,
+        .check => ui.control_icons.check,
+        .warning => ui.control_icons.warning,
+    };
+}
+
+/// One step of the work flow in its state's style; returns whether it was
+/// clicked. A disabled step keeps its style but ignores clicks.
+fn flowButton(theme: ui.Theme, button: flow.Button, tag: []const u8, r: dvui.Rect, motion: *Motion, clock: Clock) bool {
+    if (motion.style != button.style) {
+        motion.style = button.style;
+        motion.since_ms = clock.now_ms;
+    }
+    const id = std.hash.Wyhash.hash(0, tag);
+    const colors = palette(theme, button.style);
+    var opts = ui.options(theme, r, 15);
+    opts.tag = tag;
+    opts.id_extra = id;
+    opts.background = true;
+    opts.border = .all(1);
+    opts.corners = .all(8);
+    opts.padding = .{};
+    opts.color_fill = .{ .color = colors.fill };
+    opts.color_border = .{ .color = colors.border };
+    opts.color_text = .{ .color = colors.text };
+    if (button.style == .next) opts.box_shadow = .{
+        .color = theme.accent,
+        .offset = .{},
+        .shrink = -3,
+        .fade = 5,
+        .alpha = 0.5 * clock.glow(motion.since_ms),
+    };
+    var data: dvui.WidgetData = undefined;
+    opts.data_out = &data;
+    var clicked = false;
+    if (button.enabled) {
+        clicked = dvui.button(@src(), "", .{}, opts);
+    } else {
+        const box = dvui.box(@src(), .{}, opts);
+        box.deinit();
+    }
+    if (colors.sweep) |light| if (clock.animate) sweep(r, id, light, clock.phase(colors.sweep_period_ms), if (button.style == .preparing) 0.22 else 0.3);
+    const font = ui.editorFont(button.label, 15);
+    const icon_size: f32 = 18;
+    const gap: f32 = 8;
+    const text_w = font.textSize(button.label).w;
+    var x = r.x + (r.w - icon_size - gap - text_w) / 2;
+    dvui.icon(@src(), tag, iconBytes(button.icon), .{}, .{
+        .id_extra = id,
+        .color_text = .{ .color = colors.text },
+        .rect = .{ .x = x, .y = r.y + (r.h - icon_size) / 2, .w = icon_size, .h = icon_size },
+        .padding = .{},
+        .margin = .{},
+    });
+    x += icon_size + gap;
+    const slack = font.size * 0.5;
+    dvui.labelNoFmt(@src(), button.label, .{ .align_x = 0.5, .align_y = 0.5 }, .{
+        .id_extra = id,
+        .rect = .{ .x = x - slack, .y = r.y, .w = text_w + slack * 2, .h = r.h },
+        .font = font,
+        .color_text = .{ .color = colors.text },
+        .padding = .{},
+        .margin = .{},
+    });
+    if (button.tooltip.len != 0) tooltip(theme, data.borderRectScale().r, button.tooltip, id);
+    return clicked;
+}
+
+/// A soft band of light crossing `r` from left to right once per period.
+fn sweep(r: dvui.Rect, id: u64, light: dvui.Color, phase: f32, strength: f32) void {
+    // The band is 40% of the width and starts and ends outside the button.
+    const center = -0.2 + phase * 1.4;
+    // dvui scales a gradient fill by its first stop's alpha, so the ramp
+    // starts opaque far outside the button and fades out long before it.
+    const stops = [_]dvui.Gradient.Stop{
+        .{ .color = light, .offset = -1000 },
+        .{ .color = light.opacity(0), .offset = center - 0.2 },
+        .{ .color = light.opacity(strength), .offset = center },
+        .{ .color = light.opacity(0), .offset = center + 0.2 },
+    };
+    const band = dvui.box(@src(), .{}, .{
+        .id_extra = id,
+        .rect = r,
+        .background = true,
+        .color_fill = .{ .gradient = .{ .linear = .{ .stops = &stops, .angle_degrees = 0 } } },
+        .corners = .all(8),
+        .padding = .{},
+        .margin = .{},
+    });
+    band.deinit();
+}
+
+fn tooltip(theme: ui.Theme, active: dvui.Rect.Physical, text: []const u8, id: u64) void {
+    dvui.tooltip(@src(), .{ .active_rect = active, .position = .vertical, .delay = 450_000 }, "{s}", .{text}, .{
+        .id_extra = id,
+        .font = ui.editorFont(text, 12),
+        .color_text = .{ .color = theme.text },
+        .color_fill = .{ .color = theme.panel },
+        .color_border = .{ .color = theme.border },
+        .border = .all(1),
+        .corners = .all(6),
+    });
+}
+
+// The status row ---------------------------------------------------------------
+
+fn drawActivity(view: *View, theme: ui.Theme, frame: Frame, width: f32, clock: Clock) void {
+    var state = frame.state;
+    // Other editor failures, such as a failed save, still need attention.
+    if (frame.diagnostic.len != 0 and (state.tone == .ready or state.tone == .next)) {
+        state.tone = .failed;
+        state.message = "Needs attention · open Details";
+        state.hint = "";
+        state.progress = .none;
+    }
+    if (state.show_output and !view.output_shown) view.details_tab = .output;
+    view.output_shown = state.show_output;
     const row = dvui.box(@src(), .{}, .{
         .rect = .{ .x = 16, .y = 64, .w = width - 32, .h = 36 },
         .padding = .{},
@@ -231,26 +402,30 @@ fn drawActivity(view: *View, theme: ui.Theme, frame: Frame, width: f32) void {
     });
     defer row.deinit();
     const row_width = width - 32;
-    const separator = dvui.box(@src(), .{}, .{
-        .rect = .{ .x = 0, .y = 0, .w = row_width, .h = 1 },
-        .background = true,
-        .color_fill = .{ .color = theme.border },
-        .padding = .{},
-        .margin = .{},
-    });
-    separator.deinit();
-    drawActivityIcon(activity, theme);
+    ui.divider(theme, .{ .x = 0, .y = 0, .w = row_width, .h = 1 }, 0xac71);
+    drawMark(theme, state.tone, .{ .x = 4, .y = 7 }, 22, clock);
     const controls_x = row_width - 470;
-    const message_width = if (activity.hint.len != 0) @min(@as(f32, 300), controls_x - 40) else controls_x - 40;
+    const font = ui.editorFont(state.message, 14);
+    const space = controls_x - 40;
+    const message_width = @min(font.textSize(state.message).w + 2, space);
     var label_options = ui.options(theme, .{ .x = 30, .y = 6, .w = message_width, .h = 26 }, 14);
+    label_options.font = font;
     label_options.padding = .{};
     label_options.tag = "editor.activity.message";
-    dvui.labelNoFmt(@src(), activity.message, .{ .align_y = 0.5, .ellipsize = true }, label_options);
+    dvui.labelNoFmt(@src(), state.message, .{ .align_y = 0.5, .ellipsize = true }, label_options);
+    var x = 30 + message_width + 14;
+    if (state.progress != .none and x + 120 < controls_x) {
+        drawProgress(theme, state.progress, .{ .x = x, .y = 16, .w = 120, .h = 4 }, clock);
+        x += 120 + 14;
+    }
     var muted = theme;
     muted.text = theme.muted;
-    if (activity.hint.len != 0) {
-        const hint_bounds: dvui.Rect = .{ .x = 30 + message_width + 12, .y = 10, .w = @max(0, controls_x - message_width - 52), .h = 20 };
-        ui.label(muted, activity.hint, hint_bounds, 12);
+    if (state.hint.len != 0 and x + 40 < controls_x) {
+        var hint_options = ui.options(muted, .{ .x = x, .y = 9, .w = controls_x - 20 - x, .h = 20 }, 12);
+        hint_options.font = ui.editorFont(state.hint, 12);
+        hint_options.padding = .{};
+        hint_options.tag = "editor.activity.hint";
+        dvui.labelNoFmt(@src(), state.hint, .{ .align_y = 0.5, .ellipsize = true }, hint_options);
     }
     ui.label(muted, frame.connection, .{ .x = controls_x, .y = 10, .w = 220, .h = 20 }, 12);
     var auto_options = ui.options(theme, .{ .x = row_width - 220, .y = 8, .w = 120, .h = 22 }, 13);
@@ -260,179 +435,331 @@ fn drawActivity(view: *View, theme: ui.Theme, frame: Frame, width: f32) void {
     if (ui.iconButton(theme, if (view.details_open) null else ui.control_icons.expand, "Details", "editor.activity.details", .{ .x = row_width - 92, .y = 5, .w = 92, .h = 26 }, false)) {
         view.details_open = !view.details_open;
     }
-    if (view.details_open) drawDetails(view, activity, frame, theme);
+    if (view.details_open) drawDetails(view, theme, frame, state, clock);
 }
 
-/// A spinner while busy, otherwise a status dot or a warning mark.
-fn drawActivityIcon(activity: Activity, theme: ui.Theme) void {
-    const tint = if (activity.failed) theme.danger else if (activity.busy) theme.accent else theme.success;
-    if (activity.failed) {
-        dvui.icon(@src(), "activity.failed", ui.control_icons.warning, .{}, .{
-            .rect = .{ .x = 7, .y = 10, .w = 16, .h = 16 },
-            .color_text = .{ .color = tint },
+/// The status mark in a square of `size` at `at`: a dot, a spinner, a
+/// pulsing dot while the caches are prepared, or a warning mark.
+fn drawMark(theme: ui.Theme, tone: flow.Tone, at: dvui.Point, size: f32, clock: Clock) void {
+    const center: dvui.Point = .{ .x = at.x + size / 2, .y = at.y + size / 2 };
+    switch (tone) {
+        .failed => dvui.icon(@src(), "activity.failed", ui.control_icons.warning, .{}, .{
+            .rect = .{ .x = center.x - 8, .y = center.y - 8, .w = 16, .h = 16 },
+            .color_text = .{ .color = theme.danger },
             .padding = .{},
             .margin = .{},
-        });
-        return;
+        }),
+        .busy => {
+            const bounds: dvui.Rect = .{ .x = at.x, .y = at.y, .w = size, .h = size };
+            const track = dvui.box(@src(), .{}, .{
+                .rect = bounds,
+                .padding = .{},
+                .margin = .{},
+                .border = .all(3),
+                .corners = .all(size / 2),
+                .color_border = .{ .color = theme.control },
+            });
+            track.deinit();
+            if (clock.animate) {
+                dvui.spinner(@src(), .{
+                    .rect = bounds,
+                    .min_size_content = .{ .w = size, .h = size },
+                    .padding = .{},
+                    .margin = .{},
+                    .color_text = .{ .color = theme.accent },
+                });
+            } else dot(center, 4, theme.accent);
+        },
+        else => {
+            const tint = switch (tone) {
+                .ready => theme.success,
+                .next => theme.accent,
+                .preparing => theme.warning,
+                else => theme.muted,
+            };
+            // The orange dot breathes between full and a third of its strength.
+            const alpha: f32 = if (tone == .preparing and clock.animate)
+                0.675 + 0.325 * @cos(clock.phase(1600) * std.math.tau)
+            else
+                1;
+            dot(center, 4.5, tint.opacity(alpha));
+        },
     }
-    if (!activity.busy) {
-        const dot = dvui.box(@src(), .{}, .{
-            .rect = .{ .x = 11, .y = 14, .w = 8, .h = 8 },
-            .background = true,
-            .color_fill = .{ .color = tint },
-            .corners = .all(4),
-            .padding = .{},
-            .margin = .{},
-        });
-        dot.deinit();
-        return;
-    }
+}
+
+fn dot(center: dvui.Point, radius: f32, tint: dvui.Color) void {
+    const mark = dvui.box(@src(), .{}, .{
+        .rect = .{ .x = center.x - radius, .y = center.y - radius, .w = radius * 2, .h = radius * 2 },
+        .background = true,
+        .color_fill = .{ .color = tint },
+        .corners = .all(radius),
+        .padding = .{},
+        .margin = .{},
+    });
+    mark.deinit();
+}
+
+/// A thin bar: the estimated share of the warm-up, or a band that keeps
+/// crossing it while no estimate exists.
+fn drawProgress(theme: ui.Theme, progress: flow.Progress, r: dvui.Rect, clock: Clock) void {
     const track = dvui.box(@src(), .{}, .{
-        .rect = .{ .x = 4, .y = 7, .w = 22, .h = 22 },
+        .rect = r,
+        .background = true,
+        .color_fill = .{ .color = theme.control },
+        .corners = .all(r.h / 2),
         .padding = .{},
         .margin = .{},
-        .border = .all(3),
-        .corners = .all(11),
-        .color_border = .{ .color = theme.control },
+        .tag = "editor.activity.progress",
     });
-    track.deinit();
-    dvui.spinner(@src(), .{
-        .rect = .{ .x = 4, .y = 7, .w = 22, .h = 22 },
-        .min_size_content = .{ .w = 22, .h = 22 },
+    defer track.deinit();
+    const start: f32, const share: f32 = switch (progress) {
+        .none => return,
+        .fraction => |fraction| .{ 0, fraction },
+        .indeterminate => .{ if (clock.animate) clock.phase(1800) * 1.3 - 0.3 else 0.35, 0.3 },
+    };
+    const left = std.math.clamp(start, 0, 1);
+    const right = std.math.clamp(start + share, 0, 1);
+    if (right <= left) return;
+    const fill = dvui.box(@src(), .{}, .{
+        .rect = .{ .x = left * r.w, .y = 0, .w = (right - left) * r.w, .h = r.h },
+        .background = true,
+        .color_fill = .{ .color = theme.warning },
+        .corners = .all(r.h / 2),
         .padding = .{},
         .margin = .{},
-        .color_text = .{ .color = tint },
     });
+    fill.deinit();
 }
 
-const Step = enum { pending, active, done, failed };
+// Details ------------------------------------------------------------------------
 
-/// The work flow as three steps, derived from the build and flash state.
-fn steps(frame: Frame) [3]Step {
-    if (frame.build_active) return .{ .active, .pending, .pending };
-    if (frame.flash_active) return .{ .done, .active, .pending };
-    if (frame.flash_succeeded) return .{ .done, .done, .done };
-    if (frame.flash_failed) return .{ .done, .failed, .pending };
-    if (std.mem.eql(u8, frame.build_status, "Built snapshot")) return .{ .done, .pending, .pending };
-    return .{ .pending, .pending, .pending };
-}
+const details_width: f32 = 640;
+const details_height: f32 = 500;
 
-fn drawDetails(view: *View, activity: Activity, frame: Frame, theme: ui.Theme) void {
-    const w: f32 = 600;
-    const h: f32 = 380;
+fn drawDetails(view: *View, theme: ui.Theme, frame: Frame, state: flow.State, clock: Clock) void {
+    const w = details_width;
+    const h = details_height;
+    const scale = dvui.parentGet().screenRectScale(.{}).s / dvui.windowNaturalScale();
+    const screen = dvui.windowRect();
     var window = ui.frameOptions(theme.panel, 12, "editor.activity.details_panel");
-    window.rect = .{ .x = @max(16, dvui.windowRect().w - w - 24), .y = 108, .w = w, .h = h };
+    window.rect = .{ .x = @max(8, screen.w - (w + 24) * scale), .y = 108 * scale, .w = w * scale, .h = h * scale };
     window.color_text = .{ .color = theme.text };
-    const popup = dvui.floatingWindow(@src(), .{ .modal = false }, window);
+    window.box_shadow = .{ .offset = .{ .x = 0, .y = 8 }, .fade = 24, .alpha = 0.3 };
+    const popup = dvui.floatingWindow(@src(), .{ .modal = false, .resize = .none }, window);
     defer popup.deinit();
-    defer ui.frameBorder(theme, w, h, 12);
+    defer ui.frameBorder(theme, window.rect.?.w, window.rect.?.h, 12);
     var muted = theme;
     muted.text = theme.muted;
-    ui.label(theme, "Build and Flash activity", .{ .x = 20, .y = 18, .w = 480, .h = 26 }, 18);
+    ui.label(theme, "Build and Flash activity", .{ .x = 20, .y = 18, .w = w - 80, .h = 26 }, 18);
     if (ui.iconButton(theme, ui.control_icons.remove, "", "editor.activity.dismiss", .{ .x = w - 48, .y = 16, .w = 30, .h = 30 }, false)) view.details_open = false;
 
-    // The current state with its icon, as in the status row.
-    const tint = if (activity.failed) theme.danger else if (activity.busy) theme.accent else theme.success;
-    if (activity.busy) {
-        dvui.spinner(@src(), .{
-            .rect = .{ .x = 20, .y = 60, .w = 18, .h = 18 },
-            .min_size_content = .{ .w = 18, .h = 18 },
-            .padding = .{},
-            .margin = .{},
-            .color_text = .{ .color = tint },
-        });
-    } else {
-        dvui.icon(@src(), "activity.state", if (activity.failed) ui.control_icons.warning else ui.control_icons.saved, .{}, .{
-            .rect = .{ .x = 20, .y = 60, .w = 18, .h = 18 },
-            .color_text = .{ .color = tint },
-            .padding = .{},
-            .margin = .{},
-        });
-    }
-    const headline = if (activity.failed) (if (frame.diagnostic.len != 0) "Needs attention" else "Flash failed") else activity.message;
+    drawMark(theme, state.tone, .{ .x = 18, .y = 59 }, 20, clock);
     var strong = theme;
-    strong.text = if (activity.failed) theme.danger else theme.text;
+    strong.text = if (state.tone == .failed) theme.danger else theme.text;
+    // An editor failure outside Build and Flash, such as a failed save.
+    const attention = frame.diagnostic.len != 0 and state.tone == .failed and
+        state.build.style != .failed and state.flash.style != .failed;
+    const headline = if (attention) "Needs attention" else state.headline;
     var headline_options = ui.options(strong, .{ .x = 48, .y = 58, .w = w - 68, .h = 22 }, 15);
     headline_options.padding = .{};
     headline_options.font = headline_options.font.?.withWeight(.bold);
+    headline_options.tag = "editor.activity.headline";
     dvui.labelNoFmt(@src(), headline, .{ .align_y = 0.5, .ellipsize = true }, headline_options);
-    const detail = if (activity.hint.len != 0) activity.hint else if (activity.failed) "Press Flash to try again once the cause is fixed" else frame.connection;
-    ui.label(muted, detail, .{ .x = 48, .y = 82, .w = w - 68, .h = 18 }, 12);
+    const detail = if (attention) frame.diagnostic else state.detail;
+    paragraph(muted, detail, .{ .x = 48, .y = 82, .w = w - 68, .h = 36 }, 12);
 
-    drawSteps(theme, steps(frame), w);
+    drawSteps(theme, state.steps, w);
+    drawTabs(view, theme);
+    const log_rect: dvui.Rect = .{ .x = 20, .y = 232, .w = w - 40, .h = h - 232 - 72 };
+    switch (view.details_tab) {
+        .activity => drawTimeline(theme, frame.activity, log_rect),
+        .output => drawOutput(theme, frame.activity, log_rect),
+    }
+    if (ui.iconButton(theme, ui.control_icons.copy, "Copy details", "editor.activity.copy", .{ .x = 20, .y = h - 56, .w = 150, .h = 36 }, false)) {
+        copyDetails(frame.activity, headline, detail);
+    }
+    if (ui.iconButton(theme, null, "Close", "editor.activity.close", .{ .x = w - 20 - 100, .y = h - 56, .w = 100, .h = 36 }, false)) view.details_open = false;
+}
 
-    const log = dvui.box(@src(), .{}, .{
-        .rect = .{ .x = 20, .y = 176, .w = w - 40, .h = h - 176 - 72 },
+/// Wrapping text in `bounds`, cut at its bottom edge.
+fn paragraph(theme: ui.Theme, text: []const u8, bounds: dvui.Rect, size: f32) void {
+    const layout = dvui.textLayout(@src(), .{ .break_lines = true }, .{
+        .rect = bounds,
+        .background = false,
+        .font = ui.editorFont(text, size),
+        .color_text = .{ .color = theme.text },
+        .padding = .{},
+        .margin = .{},
+    });
+    layout.addText(text, .{});
+    layout.deinit();
+}
+
+fn copyDetails(log: ?*const activity.Log, headline: []const u8, detail: []const u8) void {
+    var text: std.Io.Writer.Allocating = .init(dvui.currentWindow().arena());
+    if (log) |value| {
+        value.writeDetails(&text.writer, headline, detail) catch return;
+    } else {
+        text.writer.print("{s}\n{s}\n", .{ headline, detail }) catch return;
+    }
+    dvui.clipboardTextSet(text.written());
+}
+
+fn drawTabs(view: *View, theme: ui.Theme) void {
+    const tabs = [_]struct { Tab, []const u8, []const u8, f32 }{
+        .{ .activity, "Activity", "editor.activity.tab.activity", 84 },
+        .{ .output, "Compiler output", "editor.activity.tab.output", 132 },
+    };
+    var x: f32 = 20;
+    for (tabs) |tab| {
+        const selected = view.details_tab == tab[0];
+        var opts = ui.options(theme, .{ .x = x, .y = 196, .w = tab[3], .h = 28 }, 13);
+        opts.tag = tab[2];
+        opts.id_extra = std.hash.Wyhash.hash(0, tab[2]);
+        opts.font = ui.editorFont(tab[1], 13);
+        opts.corners = .all(6);
+        opts.padding = .{};
+        opts.border = .all(if (selected) 1 else 0);
+        opts.background = selected;
+        opts.color_fill = .{ .color = if (selected) theme.control else theme.panel };
+        opts.color_text = .{ .color = if (selected) theme.text else theme.muted };
+        if (dvui.button(@src(), tab[1], .{}, opts)) view.details_tab = tab[0];
+        x += tab[3] + 6;
+    }
+}
+
+fn logBox(theme: ui.Theme, r: dvui.Rect, tag: []const u8) *dvui.BoxWidget {
+    return dvui.box(@src(), .{}, .{
+        .rect = r,
         .background = true,
         .color_fill = .{ .color = theme.bg },
         .color_border = .{ .color = theme.border },
         .border = .all(1),
         .corners = .all(8),
-        .padding = .all(12),
+        .padding = .{ .x = 12, .y = 8, .w = 4, .h = 8 },
         .margin = .{},
+        .tag = tag,
     });
-    {
-        defer log.deinit();
-        const scroll = dvui.scrollArea(@src(), .{}, .{ .expand = .both, .background = false, .padding = .{} });
-        defer scroll.deinit();
-        const text = dvui.textLayout(@src(), .{ .break_lines = true }, .{
-            .expand = .horizontal,
-            .background = false,
-            .font = ui.options(theme, .{}, 13).font,
-            .color_text = .{ .color = theme.text },
-            .padding = .{},
-        });
-        text.addText(if (activity.full.len != 0) activity.full else "Nothing has been built in this session.", .{});
-        if (activity.hint.len != 0) {
-            text.addText("\n\n", .{});
-            text.addText(activity.hint, .{});
-        }
-        text.deinit();
-    }
-    if (ui.iconButton(theme, ui.control_icons.copy, "Copy details", "editor.activity.copy", .{ .x = 20, .y = h - 56, .w = 150, .h = 36 }, false)) {
-        const full = activity.full;
-        const details = if (activity.hint.len == 0)
-            full
-        else
-            std.fmt.allocPrint(dvui.currentWindow().arena(), "{s}\n\n{s}", .{ full, activity.hint }) catch full;
-        dvui.clipboardTextSet(details);
-    }
-    if (ui.iconButton(theme, null, "Close", "editor.activity.close", .{ .x = w - 20 - 100, .y = h - 56, .w = 100, .h = 36 }, false)) view.details_open = false;
 }
 
-/// Build › Flash › Reconnect as dots on a line; the current step is ringed.
-fn drawSteps(theme: ui.Theme, state: [3]Step, w: f32) void {
-    const names = [_][]const u8{ "Build", "Flash", "Reconnect" };
-    const left: f32 = 60;
-    const right = w - 60;
-    const y: f32 = 128;
-    const spacing = (right - left) / 2;
-    for (0..2) |index| {
+fn monoFont() dvui.Font {
+    // Matches the 12-point editor text: editor sizes scale by 0.76 for dvui.
+    return dvui.Font.theme(.mono).withSize(12 * 0.76);
+}
+
+fn kindColor(theme: ui.Theme, kind: activity.Kind) dvui.Color {
+    return switch (kind) {
+        .info => theme.text,
+        .ok => theme.success,
+        .warn => theme.warning,
+        .err => theme.danger,
+    };
+}
+
+/// The session timeline: muted times, the lead of each line in its colour.
+fn drawTimeline(theme: ui.Theme, log: ?*const activity.Log, r: dvui.Rect) void {
+    const box = logBox(theme, r, "editor.activity.timeline");
+    defer box.deinit();
+    const scroll = dvui.scrollArea(@src(), .{}, .{ .expand = .both, .background = false, .padding = .{} });
+    defer scroll.deinit();
+    const text = dvui.textLayout(@src(), .{ .break_lines = true }, .{
+        .expand = .horizontal,
+        .background = false,
+        .font = monoFont(),
+        .color_text = .{ .color = theme.text },
+        .padding = .{},
+    });
+    defer text.deinit();
+    const entries = log orelse {
+        text.addText("Nothing has happened in this session yet.", .{});
+        return;
+    };
+    if (entries.count == 0) text.addText("Nothing has happened in this session yet.", .{});
+    for (0..entries.count) |index| {
+        const entry = entries.at(index);
+        var time: [8]u8 = undefined;
+        if (index != 0) text.addText("\n", .{});
+        text.addText(entries.clock(&time, entry.at_ms), .{ .color_text = .{ .color = theme.muted } });
+        text.addText("  ", .{});
+        const line = entry.text();
+        const lead_end = if (entry.kind == .info) 0 else std.mem.indexOf(u8, line, " · ") orelse line.len;
+        if (lead_end != 0) text.addText(line[0..lead_end], .{ .color_text = .{ .color = kindColor(theme, entry.kind) } });
+        text.addText(line[lead_end..], .{});
+    }
+}
+
+/// The last build's compiler output under a one-line summary.
+fn drawOutput(theme: ui.Theme, log: ?*const activity.Log, r: dvui.Rect) void {
+    const box = logBox(theme, r, "editor.activity.output");
+    defer box.deinit();
+    const scroll = dvui.scrollArea(@src(), .{}, .{ .expand = .both, .background = false, .padding = .{} });
+    defer scroll.deinit();
+    const text = dvui.textLayout(@src(), .{ .break_lines = true }, .{
+        .expand = .horizontal,
+        .background = false,
+        .font = monoFont(),
+        .color_text = .{ .color = theme.text },
+        .padding = .{},
+    });
+    defer text.deinit();
+    const output = if (log) |value| value.output else activity.Output{};
+    if (output.text.len == 0 and output.at_ms == 0) {
+        text.addText("No build has finished in this session.", .{ .color_text = .{ .color = theme.muted } });
+        return;
+    }
+    var summary: std.Io.Writer.Allocating = .init(dvui.currentWindow().arena());
+    var time: [8]u8 = undefined;
+    log.?.writeOutputSummary(&summary.writer, &time) catch {};
+    text.addText(summary.written(), .{ .color_text = .{ .color = if (output.succeeded) theme.muted else theme.danger } });
+    text.addText("\n\n", .{});
+    if (output.text.len == 0) {
+        text.addText("The compiler printed nothing.", .{ .color_text = .{ .color = theme.muted } });
+        return;
+    }
+    // Located errors stand out; everything else stays plain.
+    var lines = std.mem.splitScalar(u8, output.text, '\n');
+    var first = true;
+    while (lines.next()) |line| {
+        if (!first) text.addText("\n", .{});
+        first = false;
+        const located = std.mem.indexOf(u8, line, ": error: ") != null;
+        text.addText(line, if (located) .{ .color_text = .{ .color = theme.danger } } else .{});
+    }
+}
+
+/// Caches › Build › Flash › Reconnect as dots on a line; the current step is ringed.
+fn drawSteps(theme: ui.Theme, state: [flow.step_names.len]flow.Step, w: f32) void {
+    const count = flow.step_names.len;
+    const left: f32 = 70;
+    const right = w - 70;
+    const y: f32 = 146;
+    const spacing = (right - left) / @as(f32, @floatFromInt(count - 1));
+    for (0..count - 1) |index| {
         const x = left + spacing * @as(f32, @floatFromInt(index));
-        const done = state[index] == .done;
-        ui.divider(theme, .{ .x = x + 8, .y = y - 1, .w = spacing - 16, .h = 2 }, 40 + index);
-        if (done) {
-            const line = dvui.box(@src(), .{}, .{
+        const line: dvui.Rect = .{ .x = x + 10, .y = y - 1, .w = spacing - 20, .h = 2 };
+        ui.divider(theme, line, 40 + index);
+        if (state[index] == .done and state[index + 1] != .pending) {
+            const done = dvui.box(@src(), .{}, .{
                 .id_extra = index,
-                .rect = .{ .x = x + 8, .y = y - 1, .w = spacing - 16, .h = 2 },
+                .rect = line,
                 .background = true,
                 .color_fill = .{ .color = theme.success },
                 .padding = .{},
                 .margin = .{},
             });
-            line.deinit();
+            done.deinit();
         }
     }
-    for (names, state, 0..) |name, step, index| {
+    for (flow.step_names, state, 0..) |name, step, index| {
         const x = left + spacing * @as(f32, @floatFromInt(index));
         const tint = switch (step) {
             .pending => theme.border,
-            .active => theme.accent,
+            .active => if (index == 0) theme.warning else theme.accent,
             .done => theme.success,
             .failed => theme.danger,
         };
         const size: f32 = if (step == .active or step == .failed) 16 else 12;
-        const dot = dvui.box(@src(), .{}, .{
+        const mark = dvui.box(@src(), .{}, .{
             .id_extra = index,
             .rect = .{ .x = x - size / 2, .y = y - size / 2, .w = size, .h = size },
             .background = true,
@@ -443,7 +770,7 @@ fn drawSteps(theme: ui.Theme, state: [3]Step, w: f32) void {
             .padding = .{},
             .margin = .{},
         });
-        dot.deinit();
+        mark.deinit();
         var caption = theme;
         caption.text = if (step == .pending) theme.muted else if (step == .failed) theme.danger else theme.text;
         var opts = ui.options(caption, .{ .x = x - 60, .y = y + 14, .w = 120, .h = 18 }, 13);

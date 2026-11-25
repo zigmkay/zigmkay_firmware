@@ -102,15 +102,6 @@ pub fn buildSucceeded(self: *Flash, model: *const desktop.model.Model, generatio
     self.session = null;
 }
 
-/// The flash status shown in the toolbar.
-pub fn toolbarStatus(self: *const Flash, arena: std.mem.Allocator, building: bool, now_ms: u64) ![]const u8 {
-    if (building) return "";
-    if (self.session) |*session| return session.status(arena, now_ms);
-    if (self.pending != null) return "Building for Flash";
-    if (self.failure != null) return "Flash failed";
-    return "";
-}
-
 fn finished(value: Phase) bool {
     return switch (value) {
         .ready, .failed, .cancelled, .reconnect_timeout, .stale => true,
@@ -395,7 +386,7 @@ pub fn request(app: *App, captured: desktop.editor_dispatch.Request, board: *con
             app.view.report(error.FreshFirmwareBuildRequired);
             return .next_frame;
         }
-        workers.beginBuild(app, app.build.plan.?.config) catch |err| {
+        workers.beginBuild(app, app.build.plan.?.config, .flash) catch |err| {
             app.view.report(err);
             return .next_frame;
         };

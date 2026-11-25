@@ -38,6 +38,7 @@ const screens = @import("screens.zig");
 const tray_menu = @import("tray_menu.zig");
 const workers = @import("workers.zig");
 const maintenance = @import("maintenance.zig");
+const build_status = @import("build_status.zig");
 
 const App = @This();
 
@@ -66,6 +67,8 @@ pub const Build = struct {
     warmup_attempted: bool = false,
     cleanup: ?*desktop.cache_cleanup.Owner = null,
     first_frame_ms: ?u64 = null,
+    /// Queued clicks, the accepted and failed builds, warm-up timing.
+    status: build_status.Status = .{},
 };
 
 gpa: std.mem.Allocator,
@@ -115,6 +118,8 @@ jobs: workers.Jobs = .{},
 build: Build = .{},
 flash: Flash = .{},
 fixture: fixtures.State = .{},
+/// The Build and Flash timeline of this session and the last compiler output.
+activity: desktop.build_activity.Log = .{},
 
 pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     const gpa = process.gpa;
@@ -193,12 +198,14 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     errdefer if (app.build.tools) |*tools| tools.deinit();
     errdefer if (app.build.resources) |*resources| resources.deinit();
     try app.loadBundle();
+    build_status.startup(app);
     maintenance.startup(app);
 }
 
 /// Releases everything in the reverse order of `init`.
 pub fn deinit(app: *App) void {
     maintenance.deinit(app);
+    app.activity.deinit(app.gpa);
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.flash.deinit();
     if (app.build.resources) |*resources| resources.deinit();
@@ -362,6 +369,7 @@ fn frame(app: *App) !Flow {
     const now_us: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
     app.acceptEditorGeneration(now_us);
     try Flash.step(app, now_us);
+    build_status.observe(app);
     try app.refreshSource(now_us);
     try Tutor.observe(app, now_us);
     try app.refreshCaptions();
@@ -441,7 +449,12 @@ fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, now_us:
     Tutor.finishFrame(app, drawn.screen.tutor, now_us);
     try Flash.afterFrame(app, drawn.flash_panel, now_us);
     try onboarding_flow.apply(app, drawn.screen.onboarding);
-    if (try commands.apply(app, drawn.screen.rendered, board, drawn.can_build) != .proceed) return .next_frame;
+    // A click queued behind the cache warm-up runs once the warm-up ended.
+    const rendered = if (drawn.screen.rendered == .effect and drawn.screen.rendered.effect == .none)
+        try build_status.takeQueued(app) orelse drawn.screen.rendered
+    else
+        drawn.screen.rendered;
+    if (try commands.apply(app, rendered, board, drawn.can_build) != .proceed) return .next_frame;
     try app.handleWindowRequests(now_us);
     try app.scheduleBuild(drawn.can_build, now_us);
     // Never enter SDL's potentially unbounded wait after accepting Quit.
@@ -576,11 +589,11 @@ fn scheduleBuild(app: *App, can_build: bool, now_us: u64) !void {
     const scheduler = &app.build.scheduler;
     scheduler.observe(try app.model.id(), now_us / 1000);
     const blocked = app.onboarding.active or !app.onboarding.selected or !app.view.toolbar.auto_build or
-        app.build.plan == null or !can_build or app.jobs.busy() or app.flash.pending != null or
+        app.build.plan == null or !can_build or app.jobs.busy() or app.build.warmup != null or app.flash.pending != null or
         desktop.flash_presenter.blocksAutoBuild(app.flash.phase()) or app.practicing or app.view.modal != .none or
         app.owner.closed or app.owner.close_requested != null or app.editorBusy();
     if (!scheduler.take(now_us / 1000, blocked)) return;
-    workers.beginBuild(app, app.build.plan.?.config) catch |err| return app.view.report(err);
+    workers.beginBuild(app, app.build.plan.?.config, .auto_build) catch |err| return app.view.report(err);
     app.flash.discard();
     app.view.diagnostic = @splat(0);
 }
@@ -620,6 +633,12 @@ pub fn discardEditorWork(app: *App) void {
     app.flash.pending = null;
     app.flash.advance = false;
     app.build.scheduler = .{};
+    // Builds, failures and queued clicks belonged to the previous project.
+    const status = &app.build.status;
+    status.queued = null;
+    status.accepted = null;
+    status.failed = null;
+    status.flashed_ms = null;
 }
 
 pub fn closePopups(app: *App) void {
