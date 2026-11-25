@@ -71,6 +71,27 @@ pub fn poll(self: *LiveKeyboard) !?bool {
     return self.visibility.updateAt(self.frame, received, driver.transport.now());
 }
 
+/// A digest of what frames show of the live keyboard: the presented frame,
+/// the held keys, the overlay gesture, the connection and the queued tap/hold
+/// decisions. A poll that keeps it and receives no event needs no frame.
+pub fn presentation(self: *const LiveKeyboard) u64 {
+    var hash = std.hash.Wyhash.init(0);
+    std.hash.autoHashStrat(&hash, self.frame, .Shallow);
+    hash.update(std.mem.sliceAsBytes(&self.pressed));
+    std.hash.autoHash(&hash, self.visibility);
+    std.hash.autoHash(&hash, self.status());
+    std.hash.autoHash(&hash, self.tapHoldSupport());
+    std.hash.autoHash(&hash, self.tap_holds.len);
+    if (self.driver) |*driver| std.hash.autoHash(&hash, driver.session.token);
+    return hash.final();
+}
+
+/// Whether the last poll received signals or tap/hold decisions.
+pub fn receivedEvents(self: *const LiveKeyboard) bool {
+    const driver = if (self.driver) |*value| value else return false;
+    return driver.signal_event_count > 0 or driver.decision_event_count > 0;
+}
+
 pub fn status(self: *const LiveKeyboard) Status {
     return statusOf(if (self.driver) |*driver| driver else null, self.frame);
 }

@@ -105,6 +105,8 @@ life: desktop.tray_lifecycle.Lifecycle,
 companion: CompanionOverlay = .{},
 events: Events,
 interrupted: bool = false,
+/// Builds frames only on change while live monitoring polls every 10 ms.
+pacer: desktop.live_keyboard.Pacer = .{},
 fonts_installed: bool = false,
 count: usize = 0,
 
@@ -357,7 +359,7 @@ fn frame(app: *App) !Flow {
     if (app.frame_limit) |limit| if (app.count == limit) return .stop;
     app.count += 1;
 
-    tray_menu.handle(app);
+    _ = tray_menu.handle(app);
     tray_menu.updateResidency(app);
     try app.refreshBuildPlan();
     try maintenance.step(app);
@@ -463,17 +465,46 @@ fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, now_us:
         return .stop;
     }
     if (app.frame_limit == null) {
-        const busy = app.jobs.busy();
-        const budget = desktop.live_keyboard.waitBudget(app.live_enabled, busy, false);
-        app.interrupted = try app.native.waitEventTimeout(@min(app.window.waitTime(drawn.delay), budget));
+        const dvui_wait = app.window.waitTime(drawn.delay);
+        app.pacer.drew(app.clockUs(), dvui_wait);
+        try app.waitForChange();
     }
     return .proceed;
+}
+
+pub fn clockUs(app: *App) u64 {
+    return @intCast(@max(0, app.native.nanoTime()) / 1000);
+}
+
+/// Waits until the next frame is due. HID reports do not wake SDL, so live
+/// monitoring polls the keyboard and the tray every `waitBudget` in between
+/// and builds a frame only when a poll changed something.
+fn waitForChange(app: *App) !void {
+    while (true) {
+        const busy = app.jobs.busy() or app.flash.working();
+        const poll_us = desktop.live_keyboard.waitBudget(app.live_enabled, busy, false);
+        app.interrupted = try app.native.waitEventTimeout(app.pacer.timeout(app.clockUs(), poll_us));
+        var wake: desktop.live_keyboard.Pacer.Wake = .{ .event = app.interrupted, .busy = busy };
+        if (!wake.event and !wake.busy) {
+            wake.live = try app.pollLiveChanged();
+            wake.tray = tray_menu.handle(app);
+        }
+        if (app.pacer.due(app.clockUs(), wake)) return;
+    }
 }
 
 fn pollLive(app: *App) !void {
     const visible = try app.live.poll() orelse return;
     app.life.companion_visible = visible;
     CompanionOverlay.hideIfSuppressed(app);
+}
+
+/// Polls the live keyboard; whether the poll changed what a frame shows.
+pub fn pollLiveChanged(app: *App) !bool {
+    const before = app.live.presentation();
+    const visible = app.life.companion_visible;
+    try app.pollLive();
+    return app.live.receivedEvents() or visible != app.life.companion_visible or before != app.live.presentation();
 }
 
 /// Plans builds for the editor's board with the bundled toolchain.

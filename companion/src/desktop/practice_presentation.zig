@@ -767,6 +767,12 @@ pub fn typingCard(
         state_tag,
     });
     label(metrics_str, .{ .x = pad_x, .y = metrics_y, .w = @max(0, inner_w - 260), .h = metrics_h }, 15.5, if (last != null) theme.muted else theme.text, "practice.metrics");
+    // The frame loop builds frames only on change: while the lesson clock
+    // runs, draw again when its tenths change.
+    if (last == null and s.state == .running) {
+        const clock_runs = if (s.last_event_us) |event| now_us -| event < practice.idle_pause_us else true;
+        if (clock_runs) dvui.timer(card.data().id.update("lesson_clock"), @intCast(100_000 - s.duration(now_us) % 100_000));
+    }
 
     // Daily goal readout + progress bar on right
     const goal_mins: f32 = @floatFromInt(@max(@as(u16, 1), owner.config.daily_goal_minutes));

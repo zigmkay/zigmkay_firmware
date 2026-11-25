@@ -269,6 +269,104 @@ pub fn waitBudget(live_enabled: bool, busy: bool, resident_idle: bool) u32 {
     return if (live_enabled or busy) 10_000 else if (resident_idle) 500_000 else 250_000;
 }
 
+/// Decides when the frame loop builds a frame. Live monitoring wakes the
+/// loop every `waitBudget` to poll HID reports, but a wake builds a frame only
+/// when something may have changed: an SDL event, a changed live keyboard, a
+/// tray action, running work, the wake DVUI asked for, or the heartbeat that
+/// paces an editor without live monitoring as well.
+pub const Pacer = struct {
+    /// The longest time between frames of a visible window, the wait budget
+    /// of an editor without live monitoring.
+    pub const heartbeat_us: u64 = 250_000;
+
+    /// When the last frame was built, in microseconds of one monotonic clock.
+    drawn_us: u64 = 0,
+    /// When DVUI wants the next frame for its timers and animations; null
+    /// when it waits for events only.
+    wanted_us: ?u64 = null,
+
+    /// What a wake brought besides the passing time.
+    pub const Wake = struct {
+        /// SDL has an event.
+        event: bool = false,
+        /// The poll changed what the live keyboard presents.
+        live: bool = false,
+        /// The tray took an action.
+        tray: bool = false,
+        /// Jobs or flashing run and report progress on every poll.
+        busy: bool = false,
+    };
+
+    /// Records a built frame. `dvui_wait_us` is DVUI's wait time after it,
+    /// with `maxInt(u32)` for no timer.
+    pub fn drew(self: *Pacer, now_us: u64, dvui_wait_us: u32) void {
+        self.drawn_us = now_us;
+        self.wanted_us = if (dvui_wait_us == std.math.maxInt(u32)) null else now_us +| dvui_wait_us;
+    }
+
+    /// The next SDL wait: at most one poll interval, and never past the wake
+    /// DVUI asked for or the heartbeat.
+    pub fn timeout(self: Pacer, now_us: u64, poll_us: u32) u32 {
+        var until = self.drawn_us +| heartbeat_us;
+        if (self.wanted_us) |wanted| until = @min(until, wanted);
+        return @intCast(@min(poll_us, until -| now_us));
+    }
+
+    /// Whether a wake at `now_us` builds a frame.
+    pub fn due(self: Pacer, now_us: u64, wake: Wake) bool {
+        if (wake.event or wake.live or wake.tray or wake.busy) return true;
+        if (self.wanted_us) |wanted| if (now_us >= wanted) return true;
+        return now_us -| self.drawn_us >= heartbeat_us;
+    }
+};
+
+test "an idle live editor polls often but builds frames only on change" {
+    const t = std.testing;
+    const poll = waitBudget(true, false, false);
+    var pacer = Pacer{};
+    // A frame without DVUI timers: the loop polls every 10 ms and builds no
+    // frame until the heartbeat, about four frames a second instead of 100.
+    pacer.drew(1_000_000, std.math.maxInt(u32));
+    var now: u64 = 1_000_000;
+    var frames: usize = 0;
+    var polls: usize = 0;
+    while (now < 2_000_000) {
+        now += pacer.timeout(now, poll);
+        polls += 1;
+        if (pacer.due(now, .{})) {
+            frames += 1;
+            pacer.drew(now, std.math.maxInt(u32));
+        }
+    }
+    try t.expect(polls >= 100);
+    try t.expectEqual(@as(usize, 4), frames);
+    try t.expectEqual(@as(u32, 10_000), pacer.timeout(now, poll));
+
+    // Every cause of change builds the next frame at once.
+    pacer.drew(5_000_000, std.math.maxInt(u32));
+    try t.expect(!pacer.due(5_010_000, .{}));
+    try t.expect(pacer.due(5_010_000, .{ .event = true }));
+    try t.expect(pacer.due(5_010_000, .{ .live = true }));
+    try t.expect(pacer.due(5_010_000, .{ .tray = true }));
+    try t.expect(pacer.due(5_010_000, .{ .busy = true }));
+
+    // DVUI timers and animations get their frames on time.
+    pacer.drew(6_000_000, 33_000);
+    try t.expectEqual(@as(u32, 10_000), pacer.timeout(6_000_000, poll));
+    try t.expectEqual(@as(u32, 3_000), pacer.timeout(6_030_000, poll));
+    try t.expect(!pacer.due(6_030_000, .{}));
+    try t.expect(pacer.due(6_033_000, .{}));
+    // A wake DVUI asks for at once is not delayed by the poll interval.
+    pacer.drew(7_000_000, 0);
+    try t.expectEqual(@as(u32, 0), pacer.timeout(7_000_000, poll));
+    try t.expect(pacer.due(7_000_000, .{}));
+
+    // Without live monitoring the heartbeat keeps the former pace.
+    pacer.drew(8_000_000, std.math.maxInt(u32));
+    try t.expectEqual(@as(u32, 250_000), pacer.timeout(8_000_000, waitBudget(false, false, false)));
+    try t.expect(pacer.due(8_250_000, .{}));
+}
+
 test "live SDL wait budget preserves quick-tap timing with visible and hidden windows" {
     const t = std.testing;
     try t.expectEqual(@as(u32, 10_000), waitBudget(true, false, false));

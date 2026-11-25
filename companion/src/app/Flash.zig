@@ -102,6 +102,13 @@ pub fn buildSucceeded(self: *Flash, model: *const desktop.model.Model, generatio
     self.session = null;
 }
 
+/// Whether a flash operation is under way: a queued click, a confirmation
+/// waiting for the keyboard, or a session before its outcome. A finished
+/// session stays for its outcome panel but needs no frames of its own.
+pub fn working(self: *const Flash) bool {
+    return self.pending != null or self.retained_view != null or self.active();
+}
+
 fn finished(value: Phase) bool {
     return switch (value) {
         .ready, .failed, .cancelled, .reconnect_timeout, .stale => true,
