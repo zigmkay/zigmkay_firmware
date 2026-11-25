@@ -29,6 +29,8 @@ pub const Sheet = enum { none, stages, progress, layout_changes, reset_keys };
 pub const SheetContext = struct {
     board_name: []const u8 = "",
     profile_name: []const u8 = "",
+    /// The person whose progress this is.
+    person_name: []const u8 = "",
     labels: ?*const desktop.label_cache.LabelCache = null,
     runs: []const storage.RunRecord = &.{},
     custom_text_buf: *[256]u8,
@@ -530,10 +532,14 @@ fn drawProgressSheet(
     const close_x = w - 58;
     const cta_x = close_x - 12 - cta_w;
 
-    const title = try std.fmt.allocPrint(arena, "Progress · {s}", .{
-        if (ctx.profile_name.len > 0) ctx.profile_name else "Active layout",
-    });
-    const subtitle = try std.fmt.allocPrint(arena, "Profile-scoped · {d} lessons · {d}-day streak · Local storage (ZON)", .{
+    const layout_name = if (ctx.profile_name.len > 0) ctx.profile_name else "Active layout";
+    const title = if (ctx.person_name.len > 0)
+        try std.fmt.allocPrint(arena, "Progress · {s} · {s}", .{ ctx.person_name, layout_name })
+    else
+        try std.fmt.allocPrint(arena, "Progress · {s}", .{layout_name});
+    const subtitle = try std.fmt.allocPrint(arena, "{s}{s}{d} lessons · {d}-day streak · Stored on this computer", .{
+        if (ctx.person_name.len > 0) "Profile " else "",
+        if (ctx.person_name.len > 0) try std.fmt.allocPrint(arena, "{s} · ", .{ctx.person_name}) else "",
         owner.learning.total_rounds,
         storage.dailyView(owner.persisted, owner.utc_now_sec).streak_days,
     });

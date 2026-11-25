@@ -11,6 +11,7 @@ const App = @import("App.zig");
 const Captions = @import("Captions.zig");
 
 const Tutor = @This();
+const people_mod = desktop.practice_people;
 
 controller: desktop.practice_controller.Controller,
 /// The project of the active run, frozen when it starts.
@@ -29,6 +30,20 @@ persistence_blocked: bool = false,
 persist_retry_us: u64 = 0,
 /// Whether the last save failed; the failure is reported once per streak.
 persist_failing: bool = false,
+/// The people who practise here. Loaded, and old progress moved to the
+/// first person, on the first frame.
+people: people_mod.People = .{},
+people_ready: bool = false,
+/// The people index could not be read: nothing is loaded or saved this
+/// session, so the progress on disk stays as it is.
+people_failed: bool = false,
+/// The person menu's rows; their progress lines are read when it opens.
+menu_entries: [people_mod.max_people]tutor.PersonEntry = undefined,
+menu_details: [people_mod.max_people][96]u8 = undefined,
+menu_detail_lens: [people_mod.max_people]usize = @splat(0),
+menu_built: bool = false,
+/// What the gallery shows for people other than the current one.
+fixture_summaries: [people_mod.max_people]?people_mod.Summary = @splat(null),
 
 /// Time between retries of a failed progress save.
 const persist_retry_interval_us: u64 = 5 * std.time.us_per_s;
@@ -83,6 +98,8 @@ pub const Outcome = struct {
     action: ?desktop.practice_controller.Action = null,
     /// Opens this key in the editor with its tapping term focused.
     edit_key: ?tutor.EditKey = null,
+    /// A person to switch to, create, rename or delete.
+    people: ?tutor.PeopleAction = null,
 };
 
 pub fn deinit(self: *Tutor) void {
@@ -165,17 +182,23 @@ fn syncProfileAndPersistence(
     var blocked = false;
     if (app.frame_limit == null) {
         if (app.user_paths) |owned| {
-            if (std.Io.Dir.cwd().createDirPathOpen(app.io, owned.paths.data, .{})) |data_dir| {
-                var d = data_dir;
+            if (self.people_failed) {
+                blocked = true;
+            } else if (openPersonDir(app, owned.paths.data, false)) |person_dir| {
+                var d = person_dir;
                 defer d.close(app.io);
                 loaded = desktop.practice_storage.loadState(app.gpa, app.io, d, derived.profile_hash) catch |err| failed: {
                     blocked = true;
                     app.view.report(err);
                     break :failed null;
                 };
-            } else |err| {
-                blocked = true;
-                app.view.report(err);
+            } else |err| switch (err) {
+                // A person who never practised has no directory yet.
+                error.FileNotFound => {},
+                else => {
+                    blocked = true;
+                    app.view.report(err);
+                },
             }
         }
     }
@@ -190,6 +213,180 @@ fn syncProfileAndPersistence(
     const hl_len = @min(host_layout.len, self.bound_host_layout.len);
     @memcpy(self.bound_host_layout[0..hl_len], host_layout[0..hl_len]);
     self.bound_host_layout_len = hl_len;
+}
+
+fn utcNowSec(app: *App) u64 {
+    const ns = std.Io.Timestamp.now(app.io, .real).nanoseconds;
+    return if (ns > 0) @intCast(@divTrunc(ns, std.time.ns_per_s)) else 0;
+}
+
+/// Loads the people index once, moving progress from before personal
+/// profiles to the first person. Fixtures and sessions without a data
+/// directory keep one person in memory.
+fn ensurePeople(app: *App) void {
+    const self = &app.tutor;
+    if (self.people_ready or self.people_failed) return;
+    const owned = if (app.frame_limit == null) app.user_paths else null;
+    if (owned == null) {
+        self.people = .{};
+        _ = self.people.add(people_mod.first_name, 0, 0) catch unreachable;
+        self.people.current = self.people.items[0].id;
+        self.people_ready = true;
+        return;
+    }
+    var data_dir = std.Io.Dir.cwd().createDirPathOpen(app.io, owned.?.paths.data, .{}) catch |err| {
+        self.people_failed = true;
+        app.view.report(err);
+        return;
+    };
+    defer data_dir.close(app.io);
+    const loaded = people_mod.load(app.gpa, app.io, data_dir, utcNowSec(app)) catch |err| {
+        self.people_failed = true;
+        app.view.report(err);
+        return;
+    };
+    if (loaded.migrated > 0)
+        std.log.info("Tutor: moved the progress of {d} layout types to the profile \"{s}\"", .{ loaded.migrated, loaded.people.find(loaded.people.oldest() orelse 0).?.name() });
+    if (loaded.left_behind > 0)
+        std.log.warn("Tutor: {d} layout types stay in tutor/profiles because the profile already has them", .{loaded.left_behind});
+    self.people = loaded.people;
+    self.people_ready = true;
+}
+
+fn saveIndex(app: *App) !void {
+    if (app.frame_limit != null) return;
+    const owned = app.user_paths orelse return;
+    var data_dir = try std.Io.Dir.cwd().createDirPathOpen(app.io, owned.paths.data, .{});
+    defer data_dir.close(app.io);
+    try people_mod.save(app.gpa, app.io, data_dir, &app.tutor.people);
+}
+
+/// Leaves the current person between lessons: their unsaved work is saved
+/// first (unless they are being deleted), the lesson in progress is dropped
+/// without counting, and the next frame binds the next person's progress.
+fn leaveCurrent(app: *App, now_us: u64, keep_work: bool) void {
+    const self = &app.tutor;
+    if (keep_work and self.bound_profile_hash != null and self.controller.needs_persist and
+        !self.persistence_blocked and app.frame_limit == null)
+    {
+        if (app.user_paths) |owned| persistTo(app, owned.paths.data) catch |err| app.view.report(err);
+    }
+    self.controller.discardPending();
+    self.controller.leavePerson(now_us);
+    self.bound_profile_hash = null;
+    self.persistence_blocked = false;
+    self.persist_failing = false;
+    if (self.loaded_runs) |*runs| runs.deinit();
+    self.loaded_runs = null;
+    self.view.sheet = .none;
+    self.view.settings_open = false;
+    self.view.confirm_reset = false;
+    self.view.picks = .{};
+}
+
+fn applyPeople(app: *App, action: tutor.PeopleAction, now_us: u64) void {
+    const self = &app.tutor;
+    if (!self.people_ready) return;
+    const now_sec = if (self.controller.utc_now_sec > 0) self.controller.utc_now_sec else utcNowSec(app);
+    self.menu_built = false;
+    switch (action) {
+        .switch_to => |id| {
+            if (id == self.people.current or self.people.find(id) == null) return;
+            leaveCurrent(app, now_us, true);
+            self.people.select(id, now_sec) catch return;
+        },
+        .create => |named| {
+            const id = self.people.add(named.name(), named.colour, now_sec) catch |err| return app.view.report(err);
+            leaveCurrent(app, now_us, true);
+            self.people.select(id, now_sec) catch return;
+        },
+        .rename => |r| self.people.rename(r.id, r.named.name(), r.named.colour) catch |err| return app.view.report(err),
+        .delete => |id| {
+            if (self.people.len <= 1 or self.people.find(id) == null) return;
+            // The deleted person's unsaved work goes with them.
+            if (id == self.people.current) leaveCurrent(app, now_us, false);
+            self.people.remove(id) catch |err| return app.view.report(err);
+            if (self.people.find(self.people.current)) |_| self.people.select(self.people.current, now_sec) catch {};
+            // The index goes first, so a crash never leaves a listed person
+            // without their files; an unlisted directory is never reused.
+            saveIndex(app) catch |err| return app.view.report(err);
+            if (app.frame_limit == null) if (app.user_paths) |owned| {
+                var data_dir = std.Io.Dir.cwd().openDir(app.io, owned.paths.data, .{}) catch |err| return app.view.report(err);
+                defer data_dir.close(app.io);
+                people_mod.deleteData(app.io, data_dir, id) catch |err| app.view.report(err);
+            };
+            return;
+        },
+    }
+    saveIndex(app) catch |err| app.view.report(err);
+}
+
+/// The person chip's and menu's rows. Progress lines are read from each
+/// person's saved state for the bound layout type when the menu opens.
+fn personEntries(app: *App) []const tutor.PersonEntry {
+    const self = &app.tutor;
+    if (!self.people_ready or self.people_failed) return &.{};
+    const open = self.view.people.menu_open;
+    if (!open) self.menu_built = false;
+    const build = open and !self.menu_built;
+    for (self.people.slice(), 0..) |*person, i| {
+        if (build) {
+            const detail = personDetail(app, person, &self.menu_details[i]);
+            self.menu_detail_lens[i] = detail.len;
+            if (@intFromPtr(detail.ptr) != @intFromPtr(&self.menu_details[i])) {
+                @memcpy(self.menu_details[i][0..detail.len], detail);
+            }
+        }
+        self.menu_entries[i] = .{
+            .id = person.id,
+            .name = person.name(),
+            .colour = person.colour,
+            .detail = if (open) self.menu_details[i][0..self.menu_detail_lens[i]] else "",
+            .current = person.id == self.people.current,
+        };
+    }
+    if (build) self.menu_built = true;
+    return self.menu_entries[0..self.people.len];
+}
+
+fn personDetail(app: *App, person: *const people_mod.Person, buf: *[96]u8) []const u8 {
+    const self = &app.tutor;
+    const practice = &self.controller;
+    const now = practice.utc_now_sec;
+    if (!practice.profile_bound) return "";
+    var summary: people_mod.Summary = .{ .started = false };
+    if (person.id == self.people.current) {
+        summary = .{
+            .started = true,
+            .unlocked = practice.learning.unlocked_count,
+            .letters = practice.learning.unlock_len,
+            .last_day = practice.persisted.daily_utc_day,
+            .streak_days = desktop.practice_storage.dailyView(practice.persisted, now).streak_days,
+        };
+    } else if (app.frame_limit != null) {
+        const index = (@intFromPtr(person) - @intFromPtr(&self.people.items[0])) / @sizeOf(people_mod.Person);
+        summary = self.fixture_summaries[index] orelse summary;
+    } else if (app.user_paths) |owned| {
+        var data_dir = std.Io.Dir.cwd().openDir(app.io, owned.paths.data, .{}) catch return "";
+        defer data_dir.close(app.io);
+        var rel_buf: [48]u8 = undefined;
+        var dir = data_dir.openDir(app.io, people_mod.personRelPath(person.id, &rel_buf), .{}) catch
+            return people_mod.summaryText(buf, summary, now);
+        defer dir.close(app.io);
+        var loaded = desktop.practice_storage.loadState(app.gpa, app.io, dir, practice.profile.profile_hash) catch return "";
+        defer loaded.deinit();
+        if (loaded.existed and !loaded.recovered_from_corrupt) {
+            const st = loaded.state;
+            summary = .{
+                .started = true,
+                .unlocked = if (st.unlocked_letters.len > 0) st.unlocked_letters.len else st.unlocked_count,
+                .letters = practice.learning.unlock_len,
+                .last_day = st.daily_utc_day,
+                .streak_days = desktop.practice_storage.dailyView(st, now).streak_days,
+            };
+        }
+    }
+    return people_mod.summaryText(buf, summary, now);
 }
 
 fn rememberBoard(self: *Tutor, board_id: []const u8) void {
@@ -213,14 +410,24 @@ fn flushPersistence(app: *App, now_us: u64) void {
     self.persist_retry_us = 0;
 }
 
-fn persistTo(app: *App, data_path: []const u8) !void {
-    const self = &app.tutor;
+/// The current person's directory, `<data>/tutor/people/<id>`.
+fn openPersonDir(app: *App, data_path: []const u8, create: bool) !std.Io.Dir {
     var data_dir = try std.Io.Dir.cwd().createDirPathOpen(app.io, data_path, .{});
     defer data_dir.close(app.io);
+    var buf: [48]u8 = undefined;
+    const rel = people_mod.personRelPath(app.tutor.people.current, &buf);
+    return if (create) data_dir.createDirPathOpen(app.io, rel, .{}) else data_dir.openDir(app.io, rel, .{});
+}
+
+fn persistTo(app: *App, data_path: []const u8) !void {
+    const self = &app.tutor;
+    if (self.people_failed or !self.people_ready) return error.TutorPeopleUnavailable;
+    var person_dir = try openPersonDir(app, data_path, true);
+    defer person_dir.close(app.io);
     try self.controller.persistPending(
         app.gpa,
         app.io,
-        data_dir,
+        person_dir,
         self.bound_board_id[0..self.bound_board_id_len],
         self.bound_host_layout[0..self.bound_host_layout_len],
     );
@@ -279,6 +486,7 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
     const model = if (self.snapshot) |*value| &value.model else if (live) &app.live.model else &app.model;
     const host_layout = if (app.source) |*source| source.id() else "offline";
 
+    ensurePeople(app);
     syncProfileAndPersistence(app, active_board, labels, model, host_layout);
     if (!app.practicing) tutor.hidden(&self.view);
 
@@ -391,13 +599,16 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
     // Load runs.jsonl on demand only while the Progress sheet is open; free when closed.
     if (self.view.sheet == .progress) {
         if (self.loaded_runs == null and app.frame_limit == null and practice.profile_bound) {
-            if (app.user_paths) |owned| {
-                if (std.Io.Dir.cwd().openDir(app.io, owned.paths.data, .{})) |data_dir| {
-                    var d = data_dir;
+            if (app.user_paths) |owned| if (!self.people_failed) {
+                if (openPersonDir(app, owned.paths.data, false)) |person_dir| {
+                    var d = person_dir;
                     defer d.close(app.io);
                     self.loaded_runs = desktop.practice_storage.loadRuns(app.gpa, app.io, d, practice.profile.profile_hash) catch null;
-                } else |_| {}
-            }
+                } else |_| {
+                    // No directory yet: no lessons, and no need to look again.
+                    self.loaded_runs = .{ .arena = .init(app.gpa), .runs = &.{} };
+                }
+            };
         }
     } else if (app.frame_limit == null and self.loaded_runs != null) {
         self.loaded_runs.?.deinit();
@@ -415,6 +626,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
         .runs = if (self.loaded_runs) |r| r.runs else &.{},
         .board_lookup = boardLookup,
         .editor_board = frame.editor_board,
+        .people = personEntries(app),
     };
     const rect = app.window.data().rect;
     const bounds: dvui.Rect = .{ .x = 0, .y = 0, .w = @max(300, rect.w), .h = @max(300, rect.h) };
@@ -425,6 +637,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
     outcome.leave = drawn.leave;
     outcome.action = drawn.action;
     outcome.edit_key = drawn.edit_key;
+    outcome.people = drawn.people;
     return outcome;
 }
 
@@ -432,6 +645,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
 pub fn finishFrame(app: *App, outcome: Outcome, now_us: u64) void {
     const self = &app.tutor;
     const practice = &self.controller;
+    if (outcome.people) |action| applyPeople(app, action, now_us);
     if (outcome.edit_key) |key| {
         // A tapping term suggestion: back to the editor on that key's hold,
         // with the tapping term field focused. Nothing changes until the

@@ -1,6 +1,9 @@
 //! Lightweight native persistence for the adaptive typing tutor:
 //! atomic `state.zon` snapshots and append-only `runs.jsonl` history under
-//! `<app_data>/tutor/profiles/<profile_hash>/`. Zero SQLite or C dependencies.
+//! `profiles/<profile_hash>/` of a person's directory,
+//! `<app_data>/tutor/people/<person id>/` (`practice_people.zig`). Every
+//! function takes that person directory as `base_dir`. Zero SQLite or C
+//! dependencies.
 const std = @import("std");
 const layout_profile = @import("practice_layout_profile.zig");
 const model = @import("practice_model.zig");
@@ -204,10 +207,13 @@ pub const LoadedRuns = struct {
     }
 };
 
-/// Formats the relative profile directory path `<app_data>/tutor/profiles/<profile_hash>`.
+/// Formats the profile directory path `profiles/<profile_hash>` relative to
+/// a person's directory, `<app_data>/tutor/people/<person id>` (see
+/// `practice_people`). Builds before personal profiles kept it under
+/// `<app_data>/tutor`.
 pub fn profileRelPath(profile_hash: [32]u8, buf: *[96]u8) []const u8 {
     const hex = std.fmt.bytesToHex(profile_hash, .lower);
-    return std.fmt.bufPrint(buf, "tutor/profiles/{s}", .{&hex}) catch unreachable;
+    return std.fmt.bufPrint(buf, "profiles/{s}", .{&hex}) catch unreachable;
 }
 
 /// Updates daily active seconds and day streak across UTC calendar days.

@@ -534,6 +534,32 @@ pub const Controller = struct {
         self.needs_persist = false;
     }
 
+    /// Leaves the current person: the lesson in progress is dropped without
+    /// counting, and what this session remembered about their lessons goes.
+    /// Their settings give way to the defaults until the next person's
+    /// saved state is bound. Call `discardPending` after saving first.
+    pub fn leavePerson(self: *Controller, now: u64) void {
+        self.stop(now);
+        self.session = .{};
+        self.config = .{ .mode = self.config.mode };
+        self.last_lesson = null;
+        self.event_len = 0;
+        self.last_round_wpm = null;
+        self.round_recorded = false;
+        self.slow_round = false;
+        self.slow_round_next = false;
+        self.lessons_since_weak_spot = 0;
+        self.lesson_bigram = null;
+        self.lessons_since_refresh = 0;
+        self.lesson_refresh = null;
+        self.refresh_hold_next = false;
+        self.lesson_tap_holds = .{};
+        self.lesson_tap_hold_key_len = 0;
+        self.tap_hold_noticed_len = 0;
+        self.last_term_hold = null;
+        self.tap_claim_len = 0;
+    }
+
     /// Binds a derived `LayoutProfile` and optional persisted `ProfileState`.
     /// Nothing is reset when keys moved; returns how many practised
     /// characters sit at a position their statistics were not made at.
@@ -2393,4 +2419,45 @@ test "weak letters other than the focus weigh in the choice of words" {
     try t.expect(weakness[letters[2] - 'a'] > 0.6);
     try t.expectEqual(@as(f32, 0), weakness[letters[3] - 'a']);
     try t.expectEqual(@as(f32, 0), weakness[letters[1] - 'a']);
+}
+
+test "leaving a person drops the lesson in progress and their settings, counting nothing" {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    const profile = alphabetProfile(0x54);
+    _ = owner.bindProfile(profile, null);
+    try owner.dispatch(owner.action(.{ .set_target_wpm = 35 }), 0);
+    try owner.dispatch(owner.action(.{ .set_refresh_slipped = false }), 0);
+    var now: u64 = 1_000_000;
+    try owner.start();
+    try typeLesson(owner, &now, 0);
+    const rounds = owner.learning.total_rounds;
+    // Half of the next lesson is typed when the person leaves.
+    for (0..10) |_| {
+        now += 200_000;
+        var bytes: [4]u8 = undefined;
+        const n = try std.unicode.utf8Encode(owner.session.reference[owner.session.len], &bytes);
+        try owner.insertOs(true, bytes[0..n], now, false);
+    }
+    try owner.persistPending(t.allocator, t.io, tmp.dir, "board", "en-US");
+    owner.discardPending();
+    owner.leavePerson(now);
+    try t.expect(!owner.active and owner.last_lesson == null and owner.pending_run == null);
+    try t.expectEqual(@as(f32, 20), owner.config.target_wpm);
+    try t.expect(owner.config.refresh_slipped);
+
+    // The next person has no progress on this layout yet and starts fresh.
+    _ = owner.bindProfile(profile, null);
+    try t.expectEqual(@as(u32, 0), owner.learning.total_rounds);
+    try owner.start();
+    // The person who left kept exactly their finished lesson and settings.
+    var saved = try storage.loadState(t.allocator, t.io, tmp.dir, profile.profile_hash);
+    defer saved.deinit();
+    try t.expectEqual(rounds, saved.state.total_rounds);
+    try t.expectApproxEqAbs(@as(f32, 35), saved.state.target_wpm, 0.001);
+    try t.expect(!saved.state.refresh_slipped);
 }

@@ -11,6 +11,7 @@ const keyboard_view = @import("practice_keyboard_ui.zig");
 const presentation = @import("practice_presentation.zig");
 const sheets_ui = @import("practice_sheets_ui.zig");
 const tap_hold_ui = @import("practice_tap_hold_ui.zig");
+const people_ui = @import("practice_people_ui.zig");
 
 const control = desktop.practice_controller;
 const storage = desktop.practice_storage;
@@ -21,6 +22,8 @@ pub const Picks = sheets_ui.Picks;
 pub const BoardInfo = sheets_ui.BoardInfo;
 pub const BoardLookup = sheets_ui.BoardLookup;
 pub const EditKey = tap_hold_ui.EditKey;
+pub const PersonEntry = people_ui.Entry;
+pub const PeopleAction = people_ui.Action;
 
 pub const Frame = struct {
     /// Live frames must come from the coherent identity-checked session adapter.
@@ -75,6 +78,9 @@ pub const Input = struct {
     /// The practised keyboard is the one the editor shows, so a key can be
     /// opened there.
     editor_board: bool = false,
+    /// The people who practise on this computer, for the person chip; empty
+    /// hides it.
+    people: []const PersonEntry = &.{},
 };
 
 pub const View = struct {
@@ -102,6 +108,8 @@ pub const View = struct {
     forced_tooltip: ?u21 = null,
     /// Test layout's text field: whether it holds the keys, and its size.
     test_field: presentation.TestField = .{},
+    /// The person menu and the new-profile and rename dialog.
+    people: people_ui.State = .{},
 };
 
 pub const DrawResult = struct {
@@ -109,6 +117,8 @@ pub const DrawResult = struct {
     action: ?control.Action = null,
     /// The Progress sheet asked to open this key in the editor.
     edit_key: ?EditKey = null,
+    /// A person to switch to, create, rename or delete.
+    people: ?PeopleAction = null,
 };
 
 fn running(owner: *const control.Controller) bool {
@@ -177,6 +187,8 @@ fn consumeInput(
     pending: *?control.Intent,
 ) !void {
     if (!input.owns_input or !input.window_focused) return;
+    // The person menu and dialog take the keys; nothing reaches the lesson.
+    if (view.people.open()) return;
     if (view.sheet != .none or view.settings_open) {
         // Esc closes any open sheet or settings popover cleanly.
         for (dvui.events()) |*event| {
@@ -475,7 +487,8 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
 
     // 1. Unified Editor-style Top Bar (64px height matching Editor toolbar scale)
     const topbar_h: f32 = 64;
-    const leave = try drawTopBar(owner, view, theme, .{ .x = 0, .y = 0, .w = size.w, .h = topbar_h }, input, &pending);
+    var people_action: ?PeopleAction = null;
+    const leave = try drawTopBar(owner, view, theme, .{ .x = 0, .y = 0, .w = size.w, .h = topbar_h }, input, &pending, &people_action);
 
     // 2. Centered Workspace (Editor-proportioned width for readable fonts & full keyboard)
     const max_content_w: f32 = 1440;
@@ -495,6 +508,9 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     try sheets_ui.drawSheet(owner, &view.sheet, theme, .{
         .board_name = if (input.frame) |f| f.board_name else "",
         .profile_name = if (input.frame) |f| f.profile else "",
+        .person_name = for (input.people) |p| {
+            if (p.current) break p.name;
+        } else "",
         .labels = if (input.frame) |f| f.labels else null,
         .runs = input.runs,
         .custom_text_buf = &view.custom_text_buf,
@@ -509,12 +525,14 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     }, &pending);
     if (try sheets_ui.drawSettingsPopover(owner, &view.settings_open, &view.confirm_reset, theme, size.w - 16, topbar_h + 6, &pending))
         sheets_ui.openSheet(&view.sheet, &view.picks, .reset_keys);
+    if (people_ui.dialog(&view.people, theme, input.people)) |action| people_action = action;
 
     view.drawn_len = owner.session.len;
     return .{
         .leave = leave,
         .action = if (pending) |intent| owner.action(intent) else null,
         .edit_key = edit_key,
+        .people = people_action,
     };
 }
 
@@ -535,6 +553,7 @@ fn drawTopBar(
     bounds: dvui.Rect,
     input: Input,
     pending: *?control.Intent,
+    people_action: *?PeopleAction,
 ) !bool {
     const bar = dvui.box(@src(), .{}, .{
         .rect = bounds,
@@ -607,7 +626,17 @@ fn drawTopBar(
     lx += seg_w + 12;
 
     // Stage pill (Tutor mode only) — reserve exact width for right-hand controls so items never overlap.
-    const right_fixed_w: f32 = if (owner.config.mode == .tutor) 18 + 38 + 130 + 104 + 12 else 18 + 38 + 104 + 12;
+    // The person chip shows in the Tutor only; Test layout is shared and unscored.
+    const current_person: ?*const PersonEntry = if (owner.config.mode == .tutor) for (input.people) |*p| {
+        if (p.current) break p;
+    } else null else null;
+    const base_right_w: f32 = if (owner.config.mode == .tutor) 18 + 38 + 130 + 104 + 12 else 18 + 38 + 104 + 12;
+    // Where the stage pill would be squeezed, the chip shows the avatar alone.
+    const full_chip_w: f32 = if (current_person) |p| people_ui.chipWidth(p.name, false) else 0;
+    const compact_chip = bounds.w - base_right_w - lx - 8 - (full_chip_w + 10) < 260;
+    const chip_w: f32 = if (current_person) |p| people_ui.chipWidth(p.name, compact_chip) else 0;
+    const chip_room: f32 = if (current_person != null) chip_w + 10 else 0;
+    const right_fixed_w = base_right_w + chip_room;
     if (owner.config.mode == .tutor) {
         const st = owner.config.stage;
         const stage_lbl = if (st == .all_letters or st == .home_row)
@@ -649,6 +678,7 @@ fn drawTopBar(
     if (ui.iconButton(theme, ui.control_icons.settings, "", "practice.settings_btn", .{ .x = rx, .y = y, .w = 38, .h = ctrl_h }, false)) {
         view.settings_open = !view.settings_open;
         view.confirm_reset = false;
+        view.people.close();
         if (view.settings_open) view.sheet = .none;
     }
 
@@ -694,7 +724,7 @@ fn drawTopBar(
 
     // Live / Draft status pill (only shown when guaranteed not to collide with left controls)
     const status_pill_w: f32 = 126;
-    if (rx - status_pill_w - 14 >= lx) {
+    if (rx - status_pill_w - 14 - chip_room >= lx) {
         const is_live = input.frame != null and input.frame.?.source == .live and !input.frame.?.stale;
         rx -= status_pill_w + 10;
         if (is_live) {
@@ -713,6 +743,17 @@ fn drawTopBar(
             });
             pill.deinit();
             presentation.caption(pill_text, .{ .x = rx, .y = y + 6, .w = status_pill_w, .h = 26 }, 13, theme.muted, null);
+        }
+    }
+
+    // Person chip and its menu
+    if (current_person != null) {
+        rx -= chip_w + 10;
+        const was_open = view.people.menu_open;
+        if (people_ui.chipAndMenu(&view.people, theme, .{ .x = rx, .y = y + 2, .w = chip_w, .h = ctrl_h - 4 }, input.people, compact_chip)) |action| people_action.* = action;
+        if (view.people.menu_open and !was_open) {
+            view.settings_open = false;
+            view.sheet = .none;
         }
     }
 
@@ -1071,6 +1112,7 @@ pub fn apply(owner: *control.Controller, view: *View, rendered: control.Action, 
         .set_mode => {
             view.sheet = .none;
             view.settings_open = false;
+            view.people.close();
         },
         else => {},
     }
