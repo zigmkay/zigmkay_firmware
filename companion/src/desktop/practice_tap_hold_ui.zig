@@ -761,11 +761,14 @@ pub fn progressSection(
 
     if (with_mini) {
         const mx = rect.w - pad - mini_w;
-        const legend_h: f32 = 22;
+        // The two legend entries are wider than the keyboard side by side,
+        // so they stand one above the other.
+        const legend_line_h: f32 = 18;
+        const legend_h: f32 = 22 + legend_line_h;
         const area: dvui.Rect = .{ .x = mx, .y = header_y, .w = mini_w, .h = @max(80, rect.h - header_y - foot_h - legend_h) };
         try miniKeyboard(owner, theme, area, geometry, rows);
         legendSwatch(theme, mx, area.y + area.h + 4, hold, "mistaken holds", 0x9a80);
-        legendSwatch(theme, mx + 118, area.y + area.h + 4, theme.warning, "mistaken taps", 0x9a90);
+        legendSwatch(theme, mx, area.y + area.h + 4 + legend_line_h, theme.warning, "mistaken taps", 0x9a90);
     }
 
     const note = try std.fmt.allocPrint(arena, "The suggestion opens the key in the editor with the tapping term field focused; nothing changes until you flash. Shown once a key has {d} decisions.", .{control.tap_hold_suggest_after});
@@ -881,7 +884,7 @@ fn legendSwatch(theme: ui.Theme, x: f32, y: f32, color: dvui.Color, label: []con
     const swatch: dvui.Rect = .{ .x = x, .y = y + 4, .w = 12, .h = 12 };
     fill(swatch, ui.mix(theme.panel, color, 0.12), null, 3, id);
     keyboard_view.drawDashedOutline(swatch, .{}, color, 1.5);
-    drawText(label, .{ .x = x + 18, .y = y, .w = 96, .h = 20 }, 11.5, theme.muted, 0, .normal);
+    drawText(label, .{ .x = x + 18, .y = y, .w = mini_w - 18, .h = 20 }, 11.5, theme.muted, 0, .normal);
 }
 
 /// A small outline of the keyboard: keys with mistaken holds teal dashed,
