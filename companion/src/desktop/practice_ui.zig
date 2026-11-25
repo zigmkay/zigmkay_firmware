@@ -108,6 +108,10 @@ pub const View = struct {
     forced_tooltip: ?u21 = null,
     /// Test layout's text field: whether it holds the keys, and its size.
     test_field: presentation.TestField = .{},
+    /// Where the open sheet sits and how large the user made it.
+    sheet_rect: dvui.Rect = .{},
+    /// The sheet `sheet_rect` belongs to; another sheet opens at its default.
+    sheet_rect_of: Sheet = .none,
     /// The person menu and the new-profile and rename dialog.
     people: people_ui.State = .{},
 };
@@ -504,6 +508,10 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     }
 
     // 3. Secondary Sheets (Stages / Progress) and compact Settings popover
+    if (view.sheet_rect_of != view.sheet) {
+        view.sheet_rect = .{};
+        view.sheet_rect_of = view.sheet;
+    }
     var edit_key: ?EditKey = null;
     try sheets_ui.drawSheet(owner, &view.sheet, theme, .{
         .board_name = if (input.frame) |f| f.board_name else "",
@@ -522,6 +530,7 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
         .focus_tap_hold = &view.focus_tap_hold,
         .edit_key = &edit_key,
         .can_edit = input.editor_board and !input.fixture,
+        .sheet_rect = &view.sheet_rect,
     }, &pending);
     if (try sheets_ui.drawSettingsPopover(owner, &view.settings_open, &view.confirm_reset, theme, size.w - 16, topbar_h + 6, &pending))
         sheets_ui.openSheet(&view.sheet, &view.picks, .reset_keys);

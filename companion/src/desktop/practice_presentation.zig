@@ -88,9 +88,15 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
 
         const next_unlock: ?u8 = if (lm.unlocked_count < lm.unlock_len) lm.unlock_order[lm.unlocked_count] else null;
 
-        // Focus badge pill
-        label("Active focus:", .{ .x = pad_x, .y = head_y, .w = 96, .h = head_h }, 14, theme.muted, null);
-        const badge_rect: dvui.Rect = .{ .x = pad_x + 96, .y = head_y + 1, .w = 28, .h = 22 };
+        // Focus badge pill. A refresh lesson names the slipped letter it refreshes.
+        const refreshing = owner.lesson_refresh != null;
+        const head_w: f32 = if (refreshing) 66 else 96;
+        if (refreshing) {
+            label("Refresh:", .{ .x = pad_x, .y = head_y, .w = head_w, .h = head_h }, 14, refreshTint(theme), "practice.refresh.header");
+        } else {
+            label("Active focus:", .{ .x = pad_x, .y = head_y, .w = head_w, .h = head_h }, 14, theme.muted, null);
+        }
+        const badge_rect: dvui.Rect = .{ .x = pad_x + head_w, .y = head_y + 1, .w = 28, .h = 22 };
         const fbadge = dvui.box(@src(), .{}, .{
             .rect = badge_rect,
             .background = true,
@@ -130,7 +136,8 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
             "All letters unlocked";
         const ok_col = theme.success;
         const miss_col = theme.warning;
-        const segments = [_]struct { text: []const u8, color: dvui.Color }{
+        const Segment = struct { text: []const u8, color: dvui.Color };
+        const focus_segments = [_]Segment{
             .{ .text = "· ", .color = theme.muted },
             .{ .text = speed_txt, .color = if (kp.speedOk()) ok_col else miss_col },
             .{ .text = " · ", .color = theme.muted },
@@ -138,7 +145,23 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
             .{ .text = " · ", .color = theme.muted },
             .{ .text = tail_txt, .color = theme.text },
         };
-        var sx: f32 = pad_x + 132;
+        var refresh_segments: [6]Segment = undefined;
+        if (refreshing) {
+            const back = if (owner.newLetterFocus()) |usual|
+                try std.fmt.allocPrint(arena, "then back to {c}", .{if (usual < 128) std.ascii.toUpper(@intCast(usual)) else '?'})
+            else
+                "then back to new letters";
+            refresh_segments = .{
+                .{ .text = "· ", .color = theme.muted },
+                .{ .text = try slipReason(arena, owner.slipOf(fcp)), .color = theme.muted },
+                .{ .text = " · ", .color = theme.muted },
+                .{ .text = if (kp.window == 0) "No presses yet" else try std.fmt.allocPrint(arena, "Hits {d} of last {d}", .{ kp.hits, kp.window }), .color = theme.muted },
+                .{ .text = " · ", .color = theme.muted },
+                .{ .text = back, .color = theme.muted },
+            };
+        }
+        const segments: []const Segment = if (refreshing) &refresh_segments else &focus_segments;
+        var sx: f32 = pad_x + head_w + 36;
         const right_edge = bounds.w - 200;
         for (segments, 0..) |seg, si| {
             if (sx >= right_edge) break;
@@ -202,8 +225,11 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
         }
 
         const is_unlocked = i < unlocked_len;
-        const is_focus = focus_cp != null and focus_cp.? == ch;
         const is_mastered = is_unlocked and lm.isGreen(ch);
+        // The letter a refresh lesson brings back stays green, ringed in amber.
+        const is_refresh = owner.lesson_refresh != null and owner.lesson_refresh.? == ch;
+        const is_focus = focus_cp != null and focus_cp.? == ch and !is_refresh;
+        const slip: ?key_progress.Slip = if (is_mastered) owner.slipOf(ch) else null;
 
         const fill: dvui.Color = if (is_focus)
             ui.mix(theme.panel, theme.warning, 0.24)
@@ -214,7 +240,7 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
         else
             ui.mix(theme.panel, theme.bg, 0.45);
 
-        const border: dvui.Color = if (is_focus)
+        const border: dvui.Color = if (is_focus or is_refresh)
             theme.warning
         else if (is_mastered)
             ui.mix(theme.panel, theme.success, 0.55)
@@ -239,10 +265,11 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
             .background = true,
             .color_fill = .{ .color = fill },
             .color_border = .{ .color = border },
-            .border = .all(if (is_focus) 1.5 else 1),
+            .border = .all(if (is_refresh) 2 else if (is_focus) 1.5 else 1),
             .corners = .all(5),
             .padding = .{},
             .margin = .{},
+            .tag = if (is_refresh) "practice.refresh.chip" else null,
         });
         const chip_phys = chip.data().borderRectScale().r;
         chip.deinit();
@@ -257,7 +284,7 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
         dvui.labelNoFmt(@src(), &upper, .{ .align_x = 0.5, .align_y = 0.5 }, .{
             .id_extra = 0x5200 + i,
             .rect = label_rect,
-            .font = dvui.Font.theme(.mono).withSize(@min(16.0, chip_w * 0.56)).withWeight(if (is_focus) .bold else .normal),
+            .font = dvui.Font.theme(.mono).withSize(@min(16.0, chip_w * 0.56)).withWeight(if (is_focus or is_refresh) .bold else .normal),
             .color_text = .{ .color = txt_col },
             .padding = .{},
             .margin = .{},
@@ -287,12 +314,13 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
             .role = try tap_hold_ui.roleOfChar(arena, profile, options.labels, ch),
         } else null else null;
         if (th) |th_card| tap_hold_ui.chipMarker(theme, chip_rect, th_card.summary, th_card.role, i);
+        if (slip != null) slipDot(theme, chip_rect, i);
 
         if (show_meter) {
             const kp = key_progress.of(chip_stat.?, owner.config.target_wpm);
             chipMeter(theme, chip_rect, kp, is_mastered, i);
             const forced = options.forced_tooltip != null and options.forced_tooltip.? == ch;
-            if (try keyTooltip(theme, chip_phys, ch, chip_stat.?, kp, th, forced, i)) open_details = true;
+            if (try keyTooltip(theme, chip_phys, ch, chip_stat.?, kp, th, slip, forced, i)) open_details = true;
         } else if (is_focus) {
             const bar_w = @min(10.0, chip_w * 0.5);
             const underline = dvui.box(@src(), .{}, .{
@@ -310,6 +338,39 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
         x += chip_w + gap;
     }
     return open_details;
+}
+
+/// The amber of refresh lessons and slipped letters, readable on the panel.
+pub fn refreshTint(theme: ui.Theme) dvui.Color {
+    return ui.mix(theme.warning, theme.text, 0.3);
+}
+
+/// Why a refresh lesson brings a letter back, in plain words.
+fn slipReason(arena: std.mem.Allocator, slip: ?key_progress.Slip) ![]const u8 {
+    const s = slip orelse return "practised again to keep it fresh";
+    if (s.slow) {
+        if (s.best_wpm) |best| return std.fmt.allocPrint(arena, "slower than its best lately: {d:.0} vs {d:.0} WPM", .{ s.wpm, best });
+        return std.fmt.allocPrint(arena, "slower lately: {d:.0} of {d:.0} WPM", .{ s.wpm, s.target_wpm });
+    }
+    return "more misses lately";
+}
+
+/// The amber dot on a green letter that slipped: outside its top-right
+/// corner, ringed in the panel colour.
+fn slipDot(theme: ui.Theme, chip: dvui.Rect, i: usize) void {
+    const d: f32 = 10;
+    const dot = dvui.box(@src(), .{}, .{
+        .id_extra = 0x5a00 + i,
+        .rect = .{ .x = chip.x + chip.w - d + 3, .y = chip.y - 3, .w = d, .h = d },
+        .background = true,
+        .color_fill = .{ .color = theme.warning },
+        .color_border = .{ .color = theme.panel },
+        .border = .all(2),
+        .corners = .all(d / 2),
+        .padding = .{},
+        .margin = .{},
+    });
+    dot.deinit();
 }
 
 /// The tap/hold window of a chip's key and what the key does while held.
@@ -384,6 +445,7 @@ fn keyTooltip(
     st: desktop.practice_model.KeyStat,
     kp: key_progress.KeyProgress,
     th: ?TapHoldCard,
+    slip: ?key_progress.Slip,
     forced: bool,
     i: usize,
 ) !bool {
@@ -397,7 +459,7 @@ fn keyTooltip(
         .border = .all(1),
         .corners = .all(8),
         .padding = .{ .x = 12, .y = 9, .w = 12, .h = 9 },
-        .min_size_content = .{ .w = if (th != null) 330 else 260 },
+        .min_size_content = .{ .w = if (th != null or slip != null) 330 else 260 },
     });
     defer tt.deinit();
     if (forced) tt.showing = true;
@@ -405,6 +467,11 @@ fn keyTooltip(
 
     const arena = dvui.currentWindow().arena();
     const up = std.ascii.toUpper(ch);
+    if (slip) |s| {
+        slipTooltip(theme, up, s) catch return false;
+        const card = th orelse return false;
+        return tap_hold_ui.tooltipSection(theme, ch, card.summary, card.role);
+    }
     const title = switch (kp.blocker) {
         .none => std.fmt.allocPrint(arena, "{c} · green: fast and accurate enough", .{up}),
         .presses => std.fmt.allocPrint(arena, "{c} · not green yet: {d} more presses to judge it", .{ up, model_min_samples -| kp.presses }),
@@ -435,6 +502,20 @@ fn keyTooltip(
     tooltipLine(foot, theme.muted, 11.5, .normal, 4);
     const card = th orelse return false;
     return tap_hold_ui.tooltipSection(theme, ch, card.summary, card.role);
+}
+
+/// The hover card of a green letter that slipped: its speed now against its
+/// best and the target, its recent hits, and what happens next.
+fn slipTooltip(theme: ui.Theme, up: u8, s: key_progress.Slip) !void {
+    const arena = dvui.currentWindow().arena();
+    tooltipLine(try std.fmt.allocPrint(arena, "{c} · green, slipped lately", .{up}), theme.text, 13.5, .bold, 0);
+    const best = if (s.best_wpm) |b| try std.fmt.allocPrint(arena, " (best {d:.0})", .{b}) else "";
+    const speed = try std.fmt.allocPrint(arena, "Speed now {d:.0} WPM{s} · target {d:.0}", .{ s.wpm, best, s.target_wpm });
+    tooltipLine(speed, if (s.slow) refreshTint(theme) else theme.muted, 12.5, .normal, 1);
+    const hits = try std.fmt.allocPrint(arena, "Hits      {d} of last {d} · needs {d}", .{ s.hits, s.window, s.hits_needed });
+    tooltipLine(hits, if (s.missing) refreshTint(theme) else theme.muted, 12.5, .normal, 2);
+    tooltipLine("Stays green and unlocked. It comes back as a refresh lesson;", refreshTint(theme), 11.5, .normal, 4);
+    tooltipLine(try std.fmt.allocPrint(arena, "words with {c} also turn up more often.", .{up}), refreshTint(theme), 11.5, .normal, 5);
 }
 
 const model_min_samples = desktop.practice_model.min_samples_for_mastery;
@@ -677,6 +758,8 @@ pub fn typingCard(
         " · Slow round: only clean presses count"
     else if (owner.lesson_bigram) |pair|
         try std.fmt.allocPrint(arena, " · Weak spot: {s}", .{&pair})
+    else if (owner.lesson_refresh) |ch|
+        try std.fmt.allocPrint(arena, " · Refresh lesson · every word has {c}", .{std.ascii.toUpper(ch)})
     else
         "";
     // Until the first keystroke the row shows how the last lesson went.

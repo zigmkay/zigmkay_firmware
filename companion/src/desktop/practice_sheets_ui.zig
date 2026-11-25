@@ -47,6 +47,9 @@ pub const SheetContext = struct {
     edit_key: ?*?tap_hold_ui.EditKey = null,
     /// Whether a suggestion may open the editor.
     can_edit: bool = false,
+    /// Where the open sheet sits and how large the user made it; kept while
+    /// it is open. Null keeps the default size every frame.
+    sheet_rect: ?*dvui.Rect = null,
 };
 
 /// Draws whichever secondary sheet is open, if any.
@@ -79,13 +82,15 @@ pub fn drawSettingsPopover(
 ) !bool {
     if (!open.*) return false;
     const pop_w: f32 = 324;
-    const pop_h: f32 = if (confirm_reset.*) 386 else 360;
+    // Sized from its content; it scrolls only when the window is too small.
+    const content_h = settingsHeight(confirm_reset.*);
     const screen = dvui.windowRect();
     const x = std.math.clamp(anchor_right - pop_w, 12.0, @max(12.0, screen.w - pop_w - 12.0));
-    const y = std.math.clamp(anchor_top, 12.0, @max(12.0, screen.h - pop_h - 12.0));
+    const y = std.math.clamp(anchor_top, 12.0, @max(12.0, screen.h - content_h - 12.0));
+    const pop_h = @max(160, @min(content_h, screen.h - y - 12.0));
+    var stored: dvui.Rect = .{ .x = x, .y = y, .w = pop_w, .h = pop_h };
 
-    var fw = dvui.floatingWindow(@src(), .{ .modal = false, .open_flag = open }, .{
-        .rect = .{ .x = x, .y = y, .w = pop_w, .h = pop_h },
+    var fw = dvui.floatingWindow(@src(), .{ .modal = false, .open_flag = open, .rect = &stored, .resize = .none }, .{
         .padding = .{},
         .background = true,
         .color_fill = .{ .color = theme.panel },
@@ -107,10 +112,29 @@ pub fn drawSettingsPopover(
         confirm_reset.* = false;
         return false;
     }
-    ui.divider(theme, .{ .x = 0, .y = 42, .w = pop_w, .h = 1 }, 0xa001);
+    ui.divider(theme, .{ .x = 0, .y = settings_head_h - 1, .w = pop_w, .h = 1 }, 0xa001);
+
+    const body_h = pop_h - settings_head_h - 1;
+    const scrolls = content_h > pop_h + 0.5;
+    var scroll: ?*dvui.ScrollAreaWidget = null;
+    if (scrolls) scroll = dvui.scrollArea(@src(), .{}, .{
+        .rect = .{ .x = 0, .y = settings_head_h, .w = pop_w, .h = body_h },
+        .background = false,
+        .padding = .{},
+        .margin = .{},
+    });
+    defer if (scroll) |s| s.deinit();
+    const body = dvui.box(@src(), .{}, .{
+        .rect = if (scrolls) null else .{ .x = 0, .y = settings_head_h, .w = pop_w, .h = body_h },
+        .min_size_content = .{ .w = pop_w - 12, .h = content_h - settings_head_h },
+        .padding = .{},
+        .margin = .{},
+        .tag = "practice.settings.body",
+    });
+    defer body.deinit();
 
     // 1. Target speed (WPM presets)
-    var cy: f32 = 52;
+    var cy: f32 = settings_top;
     const wpm_title = try std.fmt.allocPrint(arena, "Target speed: {d:.0} WPM", .{owner.config.target_wpm});
     presentation.label(wpm_title, .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
     cy += 23;
@@ -123,7 +147,7 @@ pub fn drawSettingsPopover(
             pending.* = .{ .set_target_wpm = preset };
         }
     }
-    cy += 38;
+    cy += settings_row_gap;
 
     // 2. Daily goal (minutes)
     presentation.label("Daily goal", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
@@ -137,7 +161,7 @@ pub fn drawSettingsPopover(
             pending.* = .{ .set_daily_goal = mins };
         }
     }
-    cy += 38;
+    cy += settings_row_gap;
 
     // 3. Guidance mode
     presentation.label("Keyboard guidance", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
@@ -154,7 +178,7 @@ pub fn drawSettingsPopover(
             pending.* = .{ .set_guidance = gm.m };
         }
     }
-    cy += 38;
+    cy += settings_row_gap;
 
     // 4. How typos are handled
     presentation.label("Typos", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
@@ -170,9 +194,26 @@ pub fn drawSettingsPopover(
             pending.* = .{ .set_error_mode = em.m };
         }
     }
-    cy += 38;
+    cy += settings_row_gap;
 
-    // 5. Reset single characters, then the whole profile (two-step confirmation)
+    // 5. Slipped green letters come back now and then
+    presentation.label("Refresh slipped letters", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 13, theme.muted, null);
+    cy += 23;
+    const refresh_modes = [_]struct { on: bool, lbl: []const u8, tag: []const u8 }{
+        .{ .on = true, .lbl = "On", .tag = "practice.settings.refresh.on" },
+        .{ .on = false, .lbl = "Off", .tag = "practice.settings.refresh.off" },
+    };
+    for (refresh_modes, 0..) |mode, i| {
+        const active = owner.config.refresh_slipped == mode.on;
+        if (pillButton(theme, mode.lbl, .{ .x = pad + @as(f32, @floatFromInt(i)) * (emw + 4), .y = cy, .w = emw, .h = 28 }, active, 0xa500 + i) and pending.* == null) {
+            pending.* = .{ .set_refresh_slipped = mode.on };
+        }
+    }
+    cy += 32;
+    presentation.label("Slipped green letters get refresh lessons.", .{ .x = pad, .y = cy, .w = inner_w, .h = 18 }, 12, theme.muted, "practice.settings.refresh.hint");
+    cy += settings_hint_gap;
+
+    // 6. Reset single characters, then the whole profile (two-step confirmation)
     ui.divider(theme, .{ .x = pad, .y = cy - 6, .w = inner_w, .h = 1 }, 0xa002);
     var reset_keys = false;
     if (ui.button(theme, "Reset characters…", "practice.settings.reset_keys", .{ .x = pad, .y = cy + 4, .w = inner_w, .h = 30 })) {
@@ -200,6 +241,22 @@ pub fn drawSettingsPopover(
     return reset_keys;
 }
 
+const settings_head_h: f32 = 43;
+/// Where the first setting starts below the header.
+const settings_top: f32 = 9;
+const settings_row_gap: f32 = 38;
+const settings_hint_gap: f32 = 30;
+const settings_bottom_pad: f32 = 16;
+
+/// The settings popover's height for its content: five settings of a title
+/// and a row of choices, the refresh hint, Reset characters, and the reset
+/// button or its confirmation.
+pub fn settingsHeight(confirming: bool) f32 {
+    const rows = 5 * (23 + settings_row_gap) - settings_row_gap + 32 + settings_hint_gap;
+    const reset: f32 = if (confirming) 54 else 34;
+    return settings_head_h + settings_top + rows + 40 + reset + settings_bottom_pad;
+}
+
 fn drawStagesSheet(
     owner: *control.Controller,
     sheet: *Sheet,
@@ -225,8 +282,9 @@ fn drawStagesSheet(
     const content_h = grid_top + grid_h + 16 + footer_h;
     const h: f32 = @min(content_h, screen.h - 40);
 
-    var fw = dvui.floatingWindow(@src(), .{ .modal = true }, .{
-        .rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h },
+    // Sized from its cards and kept centred, so it never shows a stale size.
+    var stored: dvui.Rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h };
+    var fw = dvui.floatingWindow(@src(), .{ .modal = true, .rect = &stored, .resize = .none }, .{
         .padding = .{},
         .background = true,
         .color_fill = .{ .color = theme.bg },
@@ -499,11 +557,15 @@ fn drawProgressSheet(
     pending: *?control.Intent,
 ) !void {
     const screen = dvui.windowRect();
-    const w: f32 = @min(@as(f32, 920), screen.w - 40);
-    const h: f32 = @min(@as(f32, 780), screen.h - 40);
+    const w0: f32 = @min(@as(f32, 920), screen.w - 40);
+    const h0: f32 = @min(@as(f32, 780), screen.h - 40);
 
-    var fw = dvui.floatingWindow(@src(), .{ .modal = true }, .{
-        .rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h },
+    // The sheet can be resized; everything below follows its size.
+    var fallback_rect: dvui.Rect = .{};
+    const stored = placeSheet(ctx.sheet_rect orelse &fallback_rect, .{ .w = w0, .h = h0 }, .{ .w = 520, .h = 360 });
+    const w = stored.w;
+    const h = stored.h;
+    var fw = dvui.floatingWindow(@src(), .{ .modal = true, .rect = stored }, .{
         .padding = .{},
         .background = true,
         .color_fill = .{ .color = theme.bg },
@@ -564,27 +626,30 @@ fn drawProgressSheet(
     const body_top: f32 = 118 - scroll_top;
     const body_w = w - pad * 2;
     const body_h = h - 118 - 22;
+    const view_h = h - scroll_top - 1;
     const tap_holds = tap_hold_ui.hasProgressData(owner);
     const th_h = if (tap_holds) tap_hold_ui.progressHeight(owner, body_w) else 0;
-    const content_h = h - scroll_top - 1 + if (tap_holds) th_h + 12 else 0;
     const kpi_h: f32 = 84;
     const recent_h = std.math.clamp((body_h - kpi_h) * 0.36, 128.0, 236.0);
     const lower_y = body_top + kpi_h + 14;
+    // The chart and weak keys fill what the sheet has left; the tap/hold
+    // section and the recent lessons follow and scroll into view.
     const lower_h = @max(180.0, body_h - kpi_h - 14 - recent_h - 12);
     const th_y = lower_y + lower_h + 12;
+    const recent_top = if (tap_holds) th_y + th_h + 12 else th_y;
+    const content_h = @max(view_h, recent_top + recent_h + 20);
     var fallback_scroll: dvui.ScrollInfo = .{};
     const scroll_info = ctx.progress_scroll orelse &fallback_scroll;
     // Asked from a hover card or a notice: show the tap/hold section. The
     // offset holds until the scroll area has measured the content.
     if (ctx.focus_tap_hold) |focus| if (focus.*) {
         if (tap_holds) {
-            const view_h = h - scroll_top - 1;
             scroll_info.viewport.y = @max(0, @min(th_y - 12, content_h - view_h));
             if (scroll_info.virtual_size.h >= content_h - 1) focus.* = false else dvui.refresh(null, @src(), null);
         } else focus.* = false;
     };
     const scroll = dvui.scrollArea(@src(), .{ .scroll_info = scroll_info }, .{
-        .rect = .{ .x = 0, .y = scroll_top, .w = w, .h = h - scroll_top - 1 },
+        .rect = .{ .x = 0, .y = scroll_top, .w = w, .h = view_h },
         .background = false,
         .padding = .{},
         .margin = .{},
@@ -1609,10 +1674,27 @@ fn snapshotLabels(owner: *const control.Controller, board: u64, layer: u8) []con
     return snapshot.layerLabels(layer) orelse snapshot.layerLabels(0) orelse &.{};
 }
 
-fn modalFrame(theme: ui.Theme, w: f32, h: f32, tag: []const u8) *dvui.FloatingWindowWidget {
+/// Where a resizable sheet goes this frame: centred at `initial` size when it
+/// opens, then where the user moved and resized it, kept between `min` and
+/// the window, which it stays inside. dvui writes the user's changes back
+/// into `r`; the sheet lays out at its size, so its body always fills it.
+fn placeSheet(r: *dvui.Rect, initial: dvui.Size, min: dvui.Size) *dvui.Rect {
+    if (r.w <= 0 or r.h <= 0) {
+        const s = dvui.windowRect();
+        r.* = .{ .x = (s.w - initial.w) * 0.5, .y = (s.h - initial.h) * 0.5, .w = initial.w, .h = initial.h };
+    }
     const screen = dvui.windowRect();
-    return dvui.floatingWindow(@src(), .{ .modal = true }, .{
-        .rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h },
+    const max_w = @max(40, screen.w - 16);
+    const max_h = @max(40, screen.h - 16);
+    r.w = std.math.clamp(r.w, @min(min.w, max_w), max_w);
+    r.h = std.math.clamp(r.h, @min(min.h, max_h), max_h);
+    r.x = std.math.clamp(r.x, 8, @max(8, screen.w - r.w - 8));
+    r.y = std.math.clamp(r.y, 8, @max(8, screen.h - r.h - 8));
+    return r;
+}
+
+fn modalFrame(theme: ui.Theme, stored: *dvui.Rect, tag: []const u8) *dvui.FloatingWindowWidget {
+    return dvui.floatingWindow(@src(), .{ .modal = true, .rect = stored }, .{
         .padding = .{},
         .background = true,
         .color_fill = .{ .color = theme.bg },
@@ -1672,9 +1754,13 @@ fn drawLayoutChangesSheet(
     const picks = ctx.picks;
 
     const screen = dvui.windowRect();
-    const w: f32 = @min(@as(f32, 1000), screen.w - 40);
-    const h: f32 = @min(@as(f32, 600), screen.h - 40);
-    var fw = modalFrame(theme, w, h, "practice.sheet.layout_changes");
+    const w0: f32 = @min(@as(f32, 1000), screen.w - 40);
+    const h0: f32 = @min(@as(f32, 600), screen.h - 40);
+    var fallback_rect: dvui.Rect = .{};
+    const stored = placeSheet(ctx.sheet_rect orelse &fallback_rect, .{ .w = w0, .h = h0 }, .{ .w = 640, .h = 360 });
+    const w = stored.w;
+    const h = stored.h;
+    var fw = modalFrame(theme, stored, "practice.sheet.layout_changes");
     defer fw.deinit();
 
     const arena = dvui.currentWindow().arena();
@@ -1875,9 +1961,13 @@ fn drawResetKeysSheet(
 ) !void {
     const picks = ctx.picks;
     const screen = dvui.windowRect();
-    const w: f32 = @min(@as(f32, 1000), screen.w - 40);
-    const h: f32 = @min(@as(f32, 600), screen.h - 40);
-    var fw = modalFrame(theme, w, h, "practice.sheet.reset_keys");
+    const w0: f32 = @min(@as(f32, 1000), screen.w - 40);
+    const h0: f32 = @min(@as(f32, 600), screen.h - 40);
+    var fallback_rect: dvui.Rect = .{};
+    const stored = placeSheet(ctx.sheet_rect orelse &fallback_rect, .{ .w = w0, .h = h0 }, .{ .w = 640, .h = 360 });
+    const w = stored.w;
+    const h = stored.h;
+    var fw = modalFrame(theme, stored, "practice.sheet.reset_keys");
     defer fw.deinit();
     const arena = dvui.currentWindow().arena();
     if (sheetHeader(theme, w, "Reset characters", "Selected characters start over: speed, accuracy and transitions. Unlocked letters stay unlocked.", "practice.reset_keys.close")) {
