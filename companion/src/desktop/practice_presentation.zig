@@ -1344,14 +1344,24 @@ pub const TestField = struct {
 /// The rows of text the field shows on a roomy window.
 pub const test_field_rows: f32 = 6;
 const field_font_size: f32 = 18;
-const field_line_h: f32 = 26;
 const field_head_h: f32 = 42;
 const field_foot_h: f32 = 30;
 const field_text_pad: f32 = 6;
 
+fn fieldFont() dvui.Font {
+    return dvui.Font.theme(.mono).withSize(field_font_size);
+}
+
+/// A row of the field: the font's ascender to descender, so that rows hold
+/// their descenders at any content scale (a fixed 26 was less than the 29 of
+/// the mono font at 18).
+fn fieldLineHeight(font: dvui.Font) f32 {
+    return @round(font.textHeight());
+}
+
 /// The field's height for `rows` rows of text.
 pub fn testFieldHeight(rows: f32) f32 {
-    return field_head_h + rows * field_line_h + field_text_pad * 2 + 2 + field_foot_h;
+    return field_head_h + rows * fieldLineHeight(fieldFont()) + field_text_pad * 2 + 2 + field_foot_h;
 }
 
 /// A key cap such as Esc in running text; returns its width.
@@ -1474,6 +1484,8 @@ pub fn testLayoutScratchpad(
     }
 
     // The text.
+    const font = fieldFont();
+    const field_line_h = fieldLineHeight(font);
     const box_y = field_head_h;
     const box_h = @max(field_line_h + field_text_pad * 2, bounds.h - box_y - field_foot_h);
     const box_rect: dvui.Rect = .{ .x = pad_x, .y = box_y, .w = @max(0, bounds.w - pad_x * 2), .h = box_h };
@@ -1489,7 +1501,6 @@ pub fn testLayoutScratchpad(
         .tag = "practice.test_keys.input",
     });
 
-    const font = dvui.Font.theme(.mono).withSize(field_font_size);
     const cell_w = font.textSize("M").w + 0.5;
     const text_x: f32 = 14;
     const bar_w: f32 = 10;
@@ -1556,13 +1567,7 @@ pub fn testLayoutScratchpad(
     var caret: ?dvui.Rect = null;
     if (text.len == 0) {
         const placeholder = "Type anything here to test your layout…";
-        dvui.labelNoFmt(@src(), placeholder, .{ .align_x = 0, .align_y = 0.5, .ellipsize = true }, .{
-            .rect = .{ .x = text_x, .y = field_text_pad, .w = @max(0, box_rect.w - text_x * 2), .h = field_line_h },
-            .font = font,
-            .color_text = .{ .color = theme.muted },
-            .padding = .{},
-            .margin = .{},
-        });
+        renderUncroppedLine(parent, .{ .x = text_x, .y = field_text_pad, .w = @max(0, box_rect.w - text_x * 2), .h = field_line_h }, font, placeholder, theme.muted);
         caret = .{ .x = text_x, .y = field_text_pad, .w = 0, .h = field_line_h };
     } else {
         var rows = scratchpad.Rows.init(text, columns);
@@ -1669,10 +1674,40 @@ fn renderUncroppedGlyph(
     const visual_h = text_size.h * 1.14;
     const gx = cell.x + (cell.w - text_size.w) * 0.5;
     const gy = cell.y + (cell.h - visual_h) * 0.5;
-    const rs = parent.screenRectScale(.{ .x = gx, .y = gy, .w = text_size.w, .h = visual_h });
+    const rs = parent.screenRectScale(.{ .x = gx, .y = gy, .w = text_size.w, .h = @max(visual_h, cell.y + cell.h - gy) });
     dvui.renderText(.{
         .font = font,
         .text = text,
+        .rs = rs,
+        .color = color,
+    }) catch {};
+}
+
+/// Renders `text` left-aligned in `line`, placed as `renderUncroppedGlyph`
+/// places a row's glyphs and cut with an ellipsis to the line's width. A
+/// `LabelWidget` would clip it to its tight text box, which loses descenders
+/// at larger content scales.
+fn renderUncroppedLine(
+    parent: dvui.Widget,
+    line: dvui.Rect,
+    font: dvui.Font,
+    text: []const u8,
+    color: dvui.Color,
+) void {
+    var shown = text;
+    var text_size = font.textSize(text);
+    if (text_size.w > line.w) {
+        const ellipsis = "…";
+        var end: usize = 0;
+        _ = font.textSizeEx(text, .{ .max_width = @max(0, line.w - font.textSize(ellipsis).w), .end_idx = &end });
+        shown = std.fmt.allocPrint(dvui.currentWindow().arena(), "{s}{s}", .{ text[0..end], ellipsis }) catch text[0..end];
+        text_size = font.textSize(shown);
+    }
+    const top = line.y + (line.h - text_size.h * 1.14) * 0.5;
+    const rs = parent.screenRectScale(.{ .x = line.x, .y = top, .w = line.w, .h = line.y + line.h - top });
+    dvui.renderText(.{
+        .font = font,
+        .text = shown,
         .rs = rs,
         .color = color,
     }) catch {};
