@@ -50,11 +50,13 @@ pub const Mismatch = enum { unsupported_version, dimensions, unknown_keymap, key
 pub const BootloaderStatus = enum { idle, sent };
 
 /// What one received report produced: a command to send, a validated key
-/// event for history consumers, or neither.
+/// event for history consumers, a companion signal, a tap/hold decision, or
+/// nothing.
 pub const Outcome = struct {
     send: ?protocol.Command = null,
     key: ?protocol.KeyEvent = null,
     signal: ?protocol.SignalEvent = null,
+    decision: ?protocol.TapHoldDecision = null,
 };
 
 pub const timeout_ms = 500;
@@ -243,6 +245,12 @@ pub const Session = struct {
                 if (signal.sequence != self.expected_sequence) return self.sequenceGap(signal.sequence, now);
                 self.expected_sequence +%= 1;
                 return .{ .signal = signal.event };
+            },
+            .decision => |decision| {
+                if (self.phase != .live) return .{};
+                if (decision.sequence != self.expected_sequence) return self.sequenceGap(decision.sequence, now);
+                self.expected_sequence +%= 1;
+                return .{ .decision = decision.event };
             },
         }
     }

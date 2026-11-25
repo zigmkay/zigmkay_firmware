@@ -151,3 +151,31 @@ test "companion session ignores ordinary keys and signals while disconnected" {
     session.processor_event(.{ .OnHoldEnterAfter = .{ .hold = .{ .hold_layer = 1 } } });
     try std.testing.expectEqual(null, session.next_report());
 }
+
+test "companion session encodes tap/hold decisions in sequence with keys" {
+    var session = companion.Session.init(info);
+    session.tap_hold_decision(.{ .key_index = 4, .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 50, .tapping_term_ms = 200 });
+    _ = session.receive(&command(.connect));
+    _ = take(&session);
+    _ = take(&session);
+
+    session.key_event(true, 12, 0, .{});
+    session.tap_hold_decision(.{
+        .key_index = 12,
+        .outcome = .hold,
+        .reason = .permissive_hold,
+        .elapsed_ms = 0x0123,
+        .other_key = 20,
+        .tapping_term_ms = 0x0201,
+        .layer = 3,
+        .combo = true,
+    });
+    session.tap_hold_decision(.{ .key_index = 5, .outcome = .retro_tap, .reason = .released_after_term, .elapsed_ms = 0xFFFF, .tapping_term_ms = 250 });
+
+    const decision = @backingInt(companion.MessageId.decision);
+    try std.testing.expectEqual(@backingInt(companion.MessageId.key), take(&session).?[0]);
+    try std.testing.expectEqualSlices(u8, &.{ decision, 2, 12, 2, 3, 0x23, 0x01, 20, 0x01, 0x02, 3, 1, 0 }, take(&session).?[0..13]);
+    try std.testing.expectEqualSlices(u8, &.{ decision, 3, 5, 3, 5, 0xFF, 0xFF, companion.no_other_key, 250, 0, 0, 0 }, take(&session).?[0..12]);
+    try std.testing.expectEqual(null, session.next_report());
+    try std.testing.expectEqual(2, companion.protocol_version);
+}

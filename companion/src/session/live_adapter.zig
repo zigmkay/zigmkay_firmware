@@ -99,6 +99,9 @@ pub fn Driver(comptime Transport: type) type {
         /// Companion key signals received during the last poll, oldest first.
         signal_events: [report_budget]protocol.SignalEvent = undefined,
         signal_event_count: usize = 0,
+        /// Tap/hold decisions received during the last poll, oldest first.
+        decision_events: [report_budget]protocol.TapHoldDecision = undefined,
+        decision_event_count: usize = 0,
         recording: ?*capture.Recorder = null,
 
         pub fn init(transport: Transport, expected: protocol.Identity, seed: u32, path: ?[]const u8) !Self {
@@ -177,6 +180,7 @@ pub fn Driver(comptime Transport: type) type {
         pub fn poll(self: *Self, now: u64) void {
             self.key_event_count = 0;
             self.signal_event_count = 0;
+            self.decision_event_count = 0;
             if (!self.connected) {
                 if (now < self.retry_at) return;
                 const found = self.transport.discover(self.path) catch |err| {
@@ -249,6 +253,10 @@ pub fn Driver(comptime Transport: type) type {
             if (outcome.signal) |event| {
                 self.signal_events[self.signal_event_count] = event;
                 self.signal_event_count += 1;
+            }
+            if (outcome.decision) |event| {
+                self.decision_events[self.decision_event_count] = event;
+                self.decision_event_count += 1;
             }
             if (outcome.send) |command| return self.send(command, now);
             return true;
@@ -382,6 +390,21 @@ test "a discovered keyboard is connected, synchronised and cleanly disconnected"
     try std.testing.expectEqual(@as(?protocol.Command, .disconnect), driver.transport.last());
     try std.testing.expect(driver.transport.closed and !driver.connected);
     try std.testing.expectEqual(companion.Phase.disconnected, driver.session.phase);
+}
+
+test "tap/hold decisions of one poll are collected oldest first" {
+    var driver = try Driver(Fake).init(.{}, fixture(), 100, null);
+    try attach(&driver, fixture(), false);
+    const tap = protocol.TapHoldDecision{ .key_index = 1, .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 60, .tapping_term_ms = 200 };
+    const hold = protocol.TapHoldDecision{ .key_index = 2, .outcome = .hold, .reason = .permissive_hold, .elapsed_ms = 90, .other_key = 3, .tapping_term_ms = 200 };
+    try driver.transport.queue(.{ .decision = .{ .sequence = 1, .event = tap } }, fixture().dimensions);
+    try driver.transport.queue(.{ .decision = .{ .sequence = 2, .event = hold } }, fixture().dimensions);
+    driver.poll(2);
+    try std.testing.expectEqual(@as(usize, 2), driver.decision_event_count);
+    try std.testing.expectEqualDeep(tap, driver.decision_events[0]);
+    try std.testing.expectEqualDeep(hold, driver.decision_events[1]);
+    driver.poll(3);
+    try std.testing.expectEqual(@as(usize, 0), driver.decision_event_count);
 }
 
 test "unplug closes without a command and reconnect uses a fresh token" {
