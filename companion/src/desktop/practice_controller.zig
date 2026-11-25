@@ -37,6 +37,9 @@ pub const Config = struct {
     stage6_source: generator.Stage6Source = .english_prose,
     zig_lesson_index: usize = 0,
     weak_spot_active: bool = false,
+    /// Slipped green letters come back as refresh lessons, and words with
+    /// weak letters come more often. Off draws words by frequency alone.
+    refresh_slipped: bool = true,
 
     pub fn validate(self: Config) !void {
         if (self.target_wpm < 10.0 or self.target_wpm > 200.0) return error.InvalidTargetWpm;
@@ -70,6 +73,8 @@ pub const LessonSummary = struct {
     slow_round: bool = false,
     /// The letter pair a weak-spot lesson was built around.
     weak_spot: ?[2]u8 = null,
+    /// The slipped green letter a refresh lesson was built around.
+    refresh: ?u8 = null,
     /// Every key typed in the lesson, for the keyboard heatmap.
     keys: [max_lesson_keys]LessonKey = undefined,
     key_len: usize = 0,
@@ -375,11 +380,19 @@ pub const PendingRun = struct {
     tap_holds: LessonTapHolds = .{},
     top_accidental_hold: ?[2]u32 = null,
     top_accidental_tap: ?[2]u32 = null,
+    refresh_key: ?u32 = null,
 };
 
 /// Every this many lessons of Stages 1 and 2 one is built around the
 /// slowest letter pair, without a stop or a button.
 pub const weak_spot_every: u8 = 5;
+
+/// At most every this many lessons of Stages 1 and 2 one is built around the
+/// weakest slipped green letter.
+pub const refresh_every: u8 = 3;
+
+/// A slipped letter counts at least this weak when words are chosen.
+pub const slipped_weakness: f32 = 0.5;
 
 pub const max_key_reset: usize = model.max_tracked_keys;
 
@@ -417,6 +430,8 @@ pub const Intent = union(enum) {
     /// Changes which letters come first; unlocked letters stay unlocked.
     set_letter_order: LetterOrder,
     set_daily_goal: u16,
+    /// Turns refresh lessons and the weighting of weak letters on or off.
+    set_refresh_slipped: bool,
     set_stage5_filter: struct { filter: generator.Stage5Filter, layer: ?usize = null },
     set_stage6_source: struct { source: generator.Stage6Source, zig_lesson: usize = 0 },
     reset_progress,
@@ -478,6 +493,12 @@ pub const Controller = struct {
     lessons_since_weak_spot: u8 = 0,
     /// The letter pair the current lesson is built around, if any.
     lesson_bigram: ?[2]u8 = null,
+    /// Lessons finished since the last refresh lesson.
+    lessons_since_refresh: u8 = 0,
+    /// The slipped green letter the current lesson refreshes, if any.
+    lesson_refresh: ?u8 = null,
+    /// The next lesson keeps a letter the user picked; no refresh.
+    refresh_hold_next: bool = false,
     /// Tap/hold decisions of the current lesson.
     lesson_tap_holds: LessonTapHolds = .{},
     last_term_hold: ?TermHold = null,
@@ -546,7 +567,9 @@ pub const Controller = struct {
                 .letter_order = st.letter_order,
                 .rounds_since_unlock = st.rounds_since_unlock,
                 .total_rounds = st.total_rounds,
+                .refresh_slipped = st.refresh_slipped,
             };
+            self.config.refresh_slipped = st.refresh_slipped;
             self.config.stage = Stage.fromNumber(st.active_stage);
             self.config.target_wpm = target_wpm;
             self.config.guidance = st.guidance_mode;
@@ -566,7 +589,7 @@ pub const Controller = struct {
             storage.hydrateBoards(st, &self.boards);
             self.learning.config.target_wpm = target_wpm;
         } else {
-            self.persisted = .{ .letter_order = self.config.letter_order };
+            self.persisted = .{ .letter_order = self.config.letter_order, .refresh_slipped = self.config.refresh_slipped };
             var order_buf: [26]u8 = undefined;
             const order = self.letterOrder(&order_buf);
             self.learning = model.LearningModel.init(order, self.firstCount(order.len), .{
@@ -577,6 +600,8 @@ pub const Controller = struct {
         }
         // The keyboard is named by `adoptBoard`.
         self.board_hash = null;
+        self.lessons_since_refresh = 0;
+        self.lesson_refresh = null;
         self.adoptCurrent();
         return self.review_len;
     }
@@ -755,6 +780,17 @@ pub const Controller = struct {
                 self.config.daily_goal_minutes = clamped;
                 self.persisted.daily_goal_minutes = clamped;
                 self.needs_persist = true;
+                break :blk;
+            },
+            .set_refresh_slipped => |on| blk: {
+                if (self.config.refresh_slipped == on) break :blk;
+                self.config.refresh_slipped = on;
+                self.persisted.refresh_slipped = on;
+                self.needs_persist = true;
+                // A refresh lesson that has not started yet goes with it.
+                if (!on and self.lesson_refresh != null and self.active and self.session.state == .ready) {
+                    break :blk try self.start();
+                }
                 break :blk;
             },
             .set_stage5_filter => |sf| blk: {
@@ -949,13 +985,73 @@ pub const Controller = struct {
         self.dismissStuck(cp);
         if (isUnlockedLetter(&self.learning, cp)) self.learning.focus_cp = cp;
         self.slow_round_next = slow;
+        self.refresh_hold_next = true;
         try self.start();
     }
 
-    /// The letter the next lesson is built around. Stage 1 stays on the first
-    /// letters, so it focuses on the weakest of them when the learning focus
-    /// lies beyond.
+    /// The letter the current lesson is built around: the letter a refresh
+    /// lesson refreshes, or else `newLetterFocus`.
     pub fn lessonFocus(self: *const Controller) ?u21 {
+        if (self.lesson_refresh) |ch| return ch;
+        return self.newLetterFocus();
+    }
+
+    /// How a green letter slipped lately, when the setting is on and the
+    /// letter is unlocked. It stays green and unlocked either way.
+    pub fn slipOf(self: *const Controller, cp: u21) ?key_progress.Slip {
+        if (!self.config.refresh_slipped or cp > 'z' or cp < 'a') return null;
+        if (!self.learning.isUnlocked(@intCast(cp))) return null;
+        const st = self.learning.getStat(cp) orelse return null;
+        return key_progress.slipOf(st, self.learning.config.target_wpm);
+    }
+
+    /// The weakest slipped letter when the next lesson is due to refresh it:
+    /// at most every `refresh_every` lessons of Stages 1 and 2, never in a
+    /// weak-spot, slow or user-picked lesson.
+    fn refreshLetter(self: *const Controller) ?u8 {
+        const stage = self.config.stage;
+        if (!self.config.refresh_slipped) return null;
+        if (stage != .home_row and stage != .all_letters) return null;
+        if (self.config.weak_spot_active or self.slow_round_next or self.refresh_hold_next or self.lesson_bigram != null) return null;
+        if (self.lessons_since_refresh + 1 < refresh_every) return null;
+        const letters = if (stage == .home_row) self.learning.firstLetters() else self.learning.activeLetters();
+        const usual = self.newLetterFocus();
+        var pick: ?u8 = null;
+        var pick_conf: f32 = 2;
+        for (letters) |ch| {
+            if (usual != null and usual.? == ch) continue;
+            const slip = self.slipOf(ch) orelse continue;
+            if (slip.confidence < pick_conf) {
+                pick = ch;
+                pick_conf = slip.confidence;
+            }
+        }
+        return pick;
+    }
+
+    /// How weak each unlocked letter is for the choice of words (0 to 1):
+    /// what it lacks of full confidence, and at least `slipped_weakness` for
+    /// a slipped letter. The focus letter counts nothing; it is in every word
+    /// already. False when the setting is off.
+    pub fn letterWeakness(self: *const Controller, focus: ?u21, out: *[26]f32) bool {
+        out.* = @splat(0);
+        if (!self.config.refresh_slipped) return false;
+        const target = self.learning.config.target_wpm;
+        for (self.learning.activeLetters()) |ch| {
+            if (ch < 'a' or ch > 'z') continue;
+            if (focus != null and focus.? == ch) continue;
+            const st = self.learning.getStat(ch) orelse model.KeyStat{ .cp = ch };
+            var weakness = 1 - std.math.clamp(st.confidence(target), 0, 1);
+            if (self.slipOf(ch) != null) weakness = @max(weakness, slipped_weakness);
+            out[ch - 'a'] = weakness;
+        }
+        return true;
+    }
+
+    /// The letter lessons are built around outside refresh lessons. Stage 1
+    /// stays on the first letters, so it focuses on the weakest of them when
+    /// the learning focus lies beyond.
+    pub fn newLetterFocus(self: *const Controller) ?u21 {
         const focus = self.learning.focus_cp;
         if (self.config.stage != .home_row) return focus;
         const first = self.learning.firstLetters();
@@ -1017,6 +1113,7 @@ pub const Controller = struct {
         self.persisted.target_wpm = config.target_wpm;
         self.persisted.guidance_mode = config.guidance;
         self.persisted.daily_goal_minutes = config.daily_goal_minutes;
+        self.persisted.refresh_slipped = config.refresh_slipped;
         if (config.mode == .tutor) {
             self.active = false;
         }
@@ -1030,6 +1127,8 @@ pub const Controller = struct {
         var buffer: [8192]u8 = undefined;
         self.seed +%= 0x9e3779b97f4a7c15;
         self.lesson_bigram = self.weakSpotPair();
+        self.lesson_refresh = self.refreshLetter();
+        self.refresh_hold_next = false;
         var text = try self.reference(&buffer);
         if (self.config.stage != .free_text and self.session.reference_len > 0) {
             var retries: usize = 0;
@@ -1075,6 +1174,9 @@ pub const Controller = struct {
 
     fn reference(self: *const Controller, buffer: []u8) ![]const u8 {
         const profile_ptr: ?*const layout_profile.LayoutProfile = if (self.profile_bound) &self.profile else null;
+        const focus = self.lessonFocus();
+        var weakness: [26]f32 = undefined;
+        const weighted = self.letterWeakness(focus, &weakness);
         return generator.generateDrill(buffer, .{
             .language = self.learning.config.language,
             .stage = self.config.stage,
@@ -1082,7 +1184,8 @@ pub const Controller = struct {
             .word_count = if (self.config.weak_spot_active) generator.default_weak_spot_words else generator.default_round_words,
             .bigram = self.lesson_bigram,
             .unlocked_mask = self.learning.unlockedMask(),
-            .focus_cp = self.lessonFocus(),
+            .focus_cp = focus,
+            .letter_weakness = if (weighted) &weakness else null,
             .profile = profile_ptr,
             .learning = &self.learning,
             // Rotate through the punctuation and digit groups round by round.
@@ -1371,6 +1474,12 @@ pub const Controller = struct {
         } else {
             self.lessons_since_weak_spot +|= 1;
         }
+        rd.refresh = self.lesson_refresh;
+        if (self.lesson_refresh != null) {
+            self.lessons_since_refresh = 0;
+        } else {
+            self.lessons_since_refresh +|= 1;
+        }
         for (collector.buckets[0..collector.bucket_len]) |b| {
             if (b.cp == ' ' or rd.key_len >= max_lesson_keys) continue;
             rd.keys[rd.key_len] = .{
@@ -1405,6 +1514,7 @@ pub const Controller = struct {
         for (wk_slice, 0..) |wk, i| pr.weak_keys[i] = wk.cp;
         for (wb_slice, 0..) |wb, i| pr.weak_bigrams[i] = .{ wb.prev, wb.cur };
         if (self.lesson_bigram) |pair| pr.weak_spot = .{ pair[0], pair[1] };
+        if (self.lesson_refresh) |ch| pr.refresh_key = ch;
         pr.tap_holds = self.lesson_tap_holds;
         for (th_keys) |key| {
             if (key.accidental_holds > 0 and (pr.top_accidental_hold == null or key.accidental_holds > pr.top_accidental_hold.?[1]))
@@ -1461,6 +1571,7 @@ pub const Controller = struct {
                 .near_holds = pr.tap_holds.near_holds,
                 .top_accidental_hold = pr.top_accidental_hold,
                 .top_accidental_tap = pr.top_accidental_tap,
+                .refresh_key = pr.refresh_key,
             })
         else {};
         if (appended) |_| self.pending_run = null else |_| {}
@@ -1473,6 +1584,7 @@ pub const Controller = struct {
         self.persisted.error_mode = storageErrorMode(self.config.error_mode);
         self.persisted.letter_order = self.config.letter_order;
         self.persisted.daily_goal_minutes = self.config.daily_goal_minutes;
+        self.persisted.refresh_slipped = self.config.refresh_slipped;
 
         const state = try storage.buildProfileState(
             arena.allocator(),
@@ -2170,4 +2282,115 @@ test "Test layout keeps its last four decisions for display and counts none" {
     try t.expectEqual(@as(usize, 5), kept[3].decision.key_index);
     try t.expectEqual(@as(u64, 5), kept[3].at_us);
     try t.expectEqual(@as(usize, 0), owner.learning.tap_hold_len);
+}
+
+/// Types the loaded lesson to its end, `slow` at 12 WPM and the rest at 60.
+fn typeLesson(owner: *Controller, now: *u64, slow: u21) !void {
+    const generation = owner.generation;
+    while (owner.generation == generation) {
+        const s = &owner.session;
+        now.* += if (s.reference[s.len] == slow) 1_000_000 else 200_000;
+        var bytes: [4]u8 = undefined;
+        const n = try std.unicode.utf8Encode(s.reference[s.len], &bytes);
+        try owner.insertOs(true, bytes[0..n], now.*, false);
+    }
+}
+
+test "a slipped green letter comes back as a refresh lesson at most every third lesson" {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    var profile: layout_profile.LayoutProfile = .{ .unlock_len = 8, .zone1_len = 6, .profile_hash = @splat(0x52) };
+    @memcpy(profile.unlock_order[0..8], "esartldi");
+    _ = owner.bindProfile(profile, null);
+    const letters = owner.learning.activeLetters();
+    const usual = letters[letters.len - 1];
+    const slipped = letters[1];
+    for (letters) |ch| {
+        const st = owner.learning.getOrAddStat(ch).?;
+        st.* = .{ .cp = ch, .ema_ms = 300, .samples = 80, .acc_initialized = true, .mastered = true, .best_ms = 280 };
+        st.recordOutcomes(0x3fff_ffff, 30);
+    }
+    // The usual focus is not green yet; the slipped letter got slow: 12 WPM
+    // against a best of 30.
+    owner.learning.getOrAddStat(usual).?.* = .{ .cp = usual, .ema_ms = 900, .samples = 12, .acc_initialized = true };
+    owner.learning.getOrAddStat(slipped).?.ema_ms = 1000;
+    owner.learning.getOrAddStat(slipped).?.best_ms = 400;
+    owner.learning.focus_cp = usual;
+    try t.expectEqual(@as(?u21, usual), owner.newLetterFocus());
+    try t.expect(owner.slipOf(slipped).?.slow);
+    // Stays green and keeps the unlock going.
+    try t.expect(owner.learning.isGreen(slipped));
+
+    var now: u64 = 1_000_000;
+    try owner.start();
+    try t.expect(owner.lesson_refresh == null);
+    try typeLesson(owner, &now, slipped);
+    try t.expect(owner.lesson_refresh == null);
+    try typeLesson(owner, &now, slipped);
+    // The third lesson refreshes the slipped letter in every word.
+    try t.expectEqual(@as(?u8, slipped), owner.lesson_refresh);
+    try t.expectEqual(@as(?u21, slipped), owner.lessonFocus());
+    const back_to = owner.newLetterFocus().?;
+    try t.expect(back_to != slipped);
+    var words = std.mem.splitScalar(u21, owner.session.reference[0..owner.session.reference_len], ' ');
+    while (words.next()) |w| try t.expect(std.mem.indexOfScalar(u21, w, slipped) != null);
+    try typeLesson(owner, &now, slipped);
+    try t.expectEqual(@as(?u8, slipped), owner.last_lesson.?.refresh);
+    try t.expectEqual(@as(?u32, slipped), owner.pending_run.?.refresh_key);
+    // Then back to the new-letter focus.
+    try t.expect(owner.lesson_refresh == null);
+    try t.expectEqual(owner.newLetterFocus(), owner.lessonFocus());
+
+    // A letter the user asks to practise is not replaced by a refresh.
+    owner.lessons_since_refresh = refresh_every - 1;
+    try owner.dispatch(owner.action(.{ .practise_key = .{ .cp = usual, .slow = false } }), now);
+    try t.expect(owner.lesson_refresh == null);
+
+    // Off: no refresh lesson, no slipped letters, no weighting; saved and loaded.
+    try owner.dispatch(owner.action(.{ .set_refresh_slipped = false }), now);
+    owner.lessons_since_refresh = refresh_every;
+    try owner.start();
+    try t.expect(owner.lesson_refresh == null);
+    try t.expect(owner.slipOf(slipped) == null);
+    var weakness: [26]f32 = undefined;
+    try t.expect(!owner.letterWeakness(usual, &weakness));
+    try owner.persistPending(t.allocator, t.io, tmp.dir, "board", "en-US");
+    var loaded = try storage.loadState(t.allocator, t.io, tmp.dir, profile.profile_hash);
+    defer loaded.deinit();
+    try t.expect(!loaded.state.refresh_slipped);
+    const next = try t.allocator.create(Controller);
+    defer t.allocator.destroy(next);
+    next.* = .init(@splat(1));
+    _ = next.bindProfile(profile, loaded.state);
+    try t.expect(!next.config.refresh_slipped);
+    // The best speed and the mastery point are kept.
+    try t.expectEqual(owner.learning.getStat(slipped).?.best_ms, next.learning.getStat(slipped).?.best_ms);
+}
+
+test "weak letters other than the focus weigh in the choice of words" {
+    const t = std.testing;
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    var profile: layout_profile.LayoutProfile = .{ .unlock_len = 8, .zone1_len = 6, .profile_hash = @splat(0x53) };
+    @memcpy(profile.unlock_order[0..8], "esartldi");
+    _ = owner.bindProfile(profile, null);
+    const letters = owner.learning.activeLetters();
+    for (letters) |ch| {
+        const st = owner.learning.getOrAddStat(ch).?;
+        st.* = .{ .cp = ch, .ema_ms = 300, .samples = 80, .acc_initialized = true, .mastered = true };
+        st.recordOutcomes(0x3fff_ffff, 30);
+    }
+    owner.learning.getOrAddStat(letters[0]).?.ema_ms = 1000; // slipped
+    owner.learning.getOrAddStat(letters[2]).?.* = .{ .cp = letters[2], .ema_ms = 600, .samples = 10, .acc_initialized = true }; // not green
+    var weakness: [26]f32 = undefined;
+    try t.expect(owner.letterWeakness(letters[3], &weakness));
+    try t.expect(weakness[letters[0] - 'a'] >= slipped_weakness);
+    try t.expect(weakness[letters[2] - 'a'] > 0.6);
+    try t.expectEqual(@as(f32, 0), weakness[letters[3] - 'a']);
+    try t.expectEqual(@as(f32, 0), weakness[letters[1] - 'a']);
 }

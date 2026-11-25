@@ -44,6 +44,12 @@ pub const KeyStat = struct {
     /// The key once reached full confidence. It stays green and unlocked
     /// from then on, whatever its later presses look like.
     mastered: bool = false,
+    /// The fastest smoothed latency the key reached once it had enough
+    /// samples to judge; 0 is not known yet (saves from before it existed).
+    best_ms: f32 = 0.0,
+    /// `samples` when the key was mastered; 0 for keys mastered before it
+    /// was recorded.
+    mastered_samples: u32 = 0,
 
     pub fn confidence(self: KeyStat, target_wpm: f32) f32 {
         return computeConfidence(self.ema_ms, self.ema_acc, self.samples, target_wpm);
@@ -73,6 +79,25 @@ pub const KeyStat = struct {
         return 12_000.0 / self.ema_ms;
     }
 
+    /// The fastest speed the key reached, or null when it is not known.
+    pub fn bestWpm(self: KeyStat) ?f32 {
+        if (self.best_ms <= 0.0) return null;
+        return 12_000.0 / self.best_ms;
+    }
+
+    /// Marks the key mastered the first time it is fully confident.
+    pub fn noteMastery(self: *KeyStat, target_wpm: f32) void {
+        if (self.mastered or self.confidence(target_wpm) < 1.0) return;
+        self.mastered = true;
+        self.mastered_samples = self.samples;
+    }
+
+    /// Remembers the smoothed latency when it is the fastest so far.
+    pub fn noteBest(self: *KeyStat) void {
+        if (self.samples < min_samples_for_mastery or self.ema_ms <= 0.0) return;
+        if (self.best_ms <= 0.0 or self.ema_ms < self.best_ms) self.best_ms = self.ema_ms;
+    }
+
     pub fn reset(self: *KeyStat) void {
         self.ema_ms = 0.0;
         self.ema_acc = 0.0;
@@ -81,6 +106,8 @@ pub const KeyStat = struct {
         self.recent_hits = 0;
         self.recent_len = 0;
         self.mastered = false;
+        self.best_ms = 0.0;
+        self.mastered_samples = 0;
     }
 };
 
@@ -835,8 +862,9 @@ pub const LearningModel = struct {
                     st.ema_ms = st.ema_ms * (1.0 - ema_ms_alpha) + med_ms * ema_ms_alpha;
                 }
                 st.samples += @intCast(b.dt_len);
+                st.noteBest();
             }
-            if (st.confidence(self.config.target_wpm) >= 1.0) st.mastered = true;
+            st.noteMastery(self.config.target_wpm);
         }
 
         // 2. Update bounded bigram bottleneck tracker.

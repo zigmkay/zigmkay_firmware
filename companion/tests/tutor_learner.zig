@@ -518,3 +518,147 @@ fn tapHolds(entry: catalog.Entry, profile: *const lp.LayoutProfile) !void {
     defer runs.deinit();
     try t.expectEqual(lesson.decisions, runs.runs[0].tap_hold_decisions);
 }
+
+test "a letter that slows down after it turned green comes back as refresh lessons and unlocking goes on" {
+    const t = std.testing;
+    var layouts: usize = 0;
+    for (catalog.entries) |entry| {
+        if (catalog.defaultData(entry.selector) == null) continue;
+        layouts += 1;
+        refreshSlipped(entry) catch |err| {
+            std.debug.print("tutor learner refresh failed on {s}: {t}\n", .{ entry.selector, err });
+            return err;
+        };
+    }
+    try t.expect(layouts > 0);
+}
+
+/// The fluent typist types one first letter slowly once it is green.
+fn refreshSlipped(entry: catalog.Entry) !void {
+    const t = std.testing;
+    const profile = try deriveDefault(entry);
+    const owner = try t.allocator.create(control.Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = control.Controller.init(@splat(1));
+    _ = owner.bindProfile(profile, null);
+    owner.utc_now_sec = 20_000 * 86_400;
+    const slow = owner.learning.firstLetters()[1];
+    _ = try owner.dispatch(owner.action(.{ .set_stage = .all_letters }), 0);
+
+    var now: u64 = 1_000_000;
+    var refreshes: usize = 0;
+    var last_refresh: ?usize = null;
+    var full_unlock: ?usize = null;
+    for (0..100) |round| {
+        try owner.start();
+        if (owner.lesson_refresh) |ch| {
+            if (ch != slow) return error.RefreshedAnotherLetter;
+            if (last_refresh) |last| if (round - last < control.refresh_every) return error.RefreshTooOften;
+            last_refresh = round;
+            refreshes += 1;
+            const reference = owner.session.reference[0..owner.session.reference_len];
+            var it = std.mem.splitScalar(u21, reference, ' ');
+            while (it.next()) |word| if (std.mem.indexOfScalar(u21, word, slow) == null) return error.RefreshWordWithoutLetter;
+        }
+        const slowed = owner.learning.isGreen(slow);
+        const session = &owner.session;
+        const generation = owner.generation;
+        var presses: usize = 0;
+        while (owner.generation == generation) : (presses += 1) {
+            if (presses > session.reference_len * 2) return error.RoundCannotBeFinished;
+            const wanted = session.reference[desktop.practice_view.focus(session)];
+            var bytes: [4]u8 = undefined;
+            const len = try std.unicode.utf8Encode(wanted, &bytes);
+            now += if (slowed and wanted == slow) 1_200_000 else typists[0].interval_us;
+            try owner.insertOs(true, bytes[0..len], now, false);
+        }
+        now += 2_000_000;
+        // Sticky mastery: it stays green and unlocked.
+        if (slowed and (!owner.learning.isGreen(slow) or !owner.learning.isUnlocked(slow))) return error.SlippedLetterLocked;
+        if (full_unlock == null and owner.learning.unlocked_count == owner.learning.unlock_len) full_unlock = round + 1;
+    }
+    if (refreshes == 0) return error.NoRefreshLesson;
+    if (full_unlock == null) return error.UnlockingStopped;
+    std.debug.print("tutor learner: {s: <28} slow {c}: {d} refresh lessons in 100, all unlocked after {?d}\n", .{ entry.selector, slow, refreshes, full_unlock });
+}
+
+test "words with weak letters turn up more often, and every word keeps the focus" {
+    const t = std.testing;
+    var layouts: usize = 0;
+    var plain_total: usize = 0;
+    var weighted_total: usize = 0;
+    for (catalog.entries) |entry| {
+        if (catalog.defaultData(entry.selector) == null) continue;
+        layouts += 1;
+        const share = weakLetterShare(entry) catch |err| {
+            std.debug.print("tutor learner weighting failed on {s}: {t}\n", .{ entry.selector, err });
+            return err;
+        };
+        plain_total += share[0];
+        weighted_total += share[1];
+    }
+    try t.expect(layouts > 0);
+    try t.expect(weighted_total * 10 > plain_total * 13);
+}
+
+/// Words per thousand that contain a slipped letter, without and with the
+/// weighting, over the same 40 seeds.
+fn weakLetterShare(entry: catalog.Entry) ![2]usize {
+    const t = std.testing;
+    const profile = try deriveDefault(entry);
+    const owner = try t.allocator.create(control.Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = control.Controller.init(@splat(1));
+    _ = owner.bindProfile(profile, null);
+    _ = try owner.dispatch(owner.action(.{ .set_stage = .all_letters }), 0);
+    const lm = &owner.learning;
+    lm.unlocked_count = @min(14, lm.unlock_len);
+    const active = lm.activeLetters();
+    const focus = active[active.len - 1];
+    for (active) |ch| {
+        const st = lm.getOrAddStat(ch).?;
+        st.* = .{ .cp = ch, .ema_ms = 300, .samples = 90, .acc_initialized = true, .mastered = true, .best_ms = 280 };
+        st.recordOutcomes(0x3fff_ffff, 30);
+    }
+    lm.getOrAddStat(focus).?.* = .{ .cp = focus, .ema_ms = 700, .samples = 14, .acc_initialized = true };
+    lm.focus_cp = focus;
+    const weak = active[2];
+    lm.getOrAddStat(weak).?.ema_ms = 1000;
+    if (owner.slipOf(weak) == null) return error.LetterDidNotSlip;
+
+    const hands = desktop.practice_letter_order.handsOf(&profile);
+    var per_mille: [2]usize = undefined;
+    for ([_]bool{ false, true }, 0..) |on, i| {
+        _ = try owner.dispatch(owner.action(.{ .set_refresh_slipped = on }), 0);
+        owner.seed = 0x5eed;
+        var words: usize = 0;
+        var with_weak: usize = 0;
+        var left: usize = 0;
+        var right: usize = 0;
+        for (0..40) |_| {
+            owner.lessons_since_refresh = 0;
+            try owner.start();
+            if (owner.lesson_refresh != null or owner.lesson_bigram != null) return error.UnexpectedSpecialLesson;
+            if (owner.lessonFocus() != focus) return error.FocusMoved;
+            var it = std.mem.splitScalar(u21, owner.session.reference[0..owner.session.reference_len], ' ');
+            while (it.next()) |word| {
+                if (word.len == 0) continue;
+                words += 1;
+                if (std.mem.indexOfScalar(u21, word, focus) == null) return error.WordWithoutFocus;
+                if (std.mem.indexOfScalar(u21, word, weak) != null) with_weak += 1;
+                for (word) |cp| if (cp >= 'a' and cp <= 'z') switch (hands[cp - 'a']) {
+                    .left => left += 1,
+                    .right => right += 1,
+                    .neutral => {},
+                };
+            }
+        }
+        if (@max(left, right) * 100 > (left + right) * max_hand_share_percent) return error.OneHandTypesMost;
+        per_mille[i] = with_weak * 1000 / @max(words, 1);
+    }
+    std.debug.print("tutor learner: {s: <28} words with slipped {c} (focus {c}): {d}.{d}% -> {d}.{d}%\n", .{
+        entry.selector, weak, focus, per_mille[0] / 10, per_mille[0] % 10, per_mille[1] / 10, per_mille[1] % 10,
+    });
+    if (per_mille[1] < per_mille[0]) return error.WeightingMadeWeakLetterRarer;
+    return per_mille;
+}

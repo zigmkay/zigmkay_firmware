@@ -79,6 +79,55 @@ pub fn of(st: model.KeyStat, target_wpm: f32) KeyProgress {
     return p;
 }
 
+/// A green letter slipped when it is clearly below the bar again: slower
+/// than this share of the target speed...
+pub const slip_speed_fraction: f32 = 0.8;
+/// ...or fewer first-try hits than this in a full window of recent presses.
+pub const slip_hits: u8 = 26;
+/// Presses a letter needs after it was mastered before it can slip, so one
+/// bad lesson right after mastering does not count.
+pub const slip_min_presses: u32 = model.accuracy_window;
+
+/// What a slipped green letter lost lately. It stays green and unlocked.
+pub const Slip = struct {
+    /// Slower than `slip_speed_fraction` of the target.
+    slow: bool,
+    /// Fewer than `slip_hits` hits in its last presses.
+    missing: bool,
+    wpm: f32,
+    /// The fastest it was, when known and faster than now.
+    best_wpm: ?f32,
+    target_wpm: f32,
+    hits: u8,
+    window: u8,
+    hits_needed: u8,
+    /// Its current confidence; the lowest slipped the furthest.
+    confidence: f32,
+};
+
+/// Whether a mastered letter slipped, and how. Unlocking never looks at
+/// this; a slipped letter only comes back for a refresh.
+pub fn slipOf(st: model.KeyStat, target_wpm: f32) ?Slip {
+    if (!st.mastered or st.ema_ms <= 0 or target_wpm <= 0) return null;
+    if (st.samples < st.mastered_samples +| slip_min_presses) return null;
+    const p = of(st, target_wpm);
+    const slow = p.wpm < slip_speed_fraction * target_wpm;
+    const missing = st.recent_len >= model.accuracy_window and p.hits < slip_hits;
+    if (!slow and !missing) return null;
+    const best = st.bestWpm();
+    return .{
+        .slow = slow,
+        .missing = missing,
+        .wpm = p.wpm,
+        .best_wpm = if (best) |b| (if (b > p.wpm + 0.5) b else null) else null,
+        .target_wpm = target_wpm,
+        .hits = p.hits,
+        .window = p.window,
+        .hits_needed = p.hits_needed,
+        .confidence = st.confidence(target_wpm),
+    };
+}
+
 fn windowMask(len: u8) u32 {
     if (len >= 32) return std.math.maxInt(u32);
     return (@as(u32, 1) << @as(u5, @intCast(len))) - 1;
@@ -145,4 +194,36 @@ test "an old save without a press window shows its smoothed accuracy on the 30-p
     try t.expectEqual(@as(u8, 30), p.window);
     try t.expectEqual(@as(u8, 26), p.hits);
     try t.expectEqual(Blocker.hits, p.blocker);
+}
+
+test "a mastered letter slips when it is clearly slower or misses more, once it had enough presses" {
+    const t = std.testing;
+    // Mastered at 30 presses; 31 WPM at best (387 ms), now 15 WPM (800 ms).
+    var st = model.KeyStat{ .cp = 'k', .ema_ms = 800, .samples = 70, .acc_initialized = true, .mastered = true, .mastered_samples = 30, .best_ms = 387 };
+    st.recordOutcomes(0x3fff_ffff, 30);
+    const slow = slipOf(st, 20).?;
+    try t.expect(slow.slow and !slow.missing);
+    try t.expectApproxEqAbs(@as(f32, 15), slow.wpm, 0.01);
+    try t.expectApproxEqAbs(@as(f32, 31), slow.best_wpm.?, 0.1);
+
+    // Just above 80 % of the target and 26 hits: not slipped.
+    st.ema_ms = 740;
+    st.recordOutcomes(0b1111, 4);
+    st.recordOutcomes(0, 4);
+    try t.expectEqual(@as(u8, 26), of(st, 20).hits);
+    try t.expect(slipOf(st, 20) == null);
+
+    // A fifth miss in the window slips it.
+    st.recordOutcomes(0, 1);
+    const missing = slipOf(st, 20).?;
+    try t.expect(missing.missing and !missing.slow);
+    try t.expectEqual(@as(u8, 25), missing.hits);
+
+    // Right after mastering, one bad lesson does not count yet.
+    st.mastered_samples = 60;
+    try t.expect(slipOf(st, 20) == null);
+    // A letter that was never mastered does not slip; it is simply not green.
+    st.mastered_samples = 0;
+    st.mastered = false;
+    try t.expect(slipOf(st, 20) == null);
 }

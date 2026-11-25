@@ -45,6 +45,10 @@ pub const PersistedKeyStat = struct {
     recent_hits: u32 = 0,
     recent_len: u8 = 0,
     mastered: bool = false,
+    /// The fastest smoothed latency; saves without it do not know it (0).
+    best_ms: f32 = 0.0,
+    /// Presses when the key was mastered; saves without it count as long ago.
+    mastered_samples: u32 = 0,
 };
 
 /// Tap/hold decisions of the key that types `cp` on tap; see
@@ -143,6 +147,9 @@ pub const ProfileState = struct {
     /// Tap/hold decisions per tap character, from a connected Zigmkay
     /// keyboard. Saves without it load with none.
     tap_hold_stats: []const PersistedTapHoldStat = &.{},
+    /// Whether green letters that slipped come back as refresh lessons and
+    /// weak letters turn up more often in words. Saves without it have it on.
+    refresh_slipped: bool = true,
 };
 
 pub const LoadedState = struct {
@@ -182,6 +189,8 @@ pub const RunRecord = struct {
     top_accidental_hold: ?[2]u32 = null,
     /// The key with the most accidental taps of the lesson.
     top_accidental_tap: ?[2]u32 = null,
+    /// The slipped green letter a refresh lesson was built around.
+    refresh_key: ?u32 = null,
 };
 
 pub const LoadedRuns = struct {
@@ -472,6 +481,8 @@ pub fn hydrateLearningModel(
             .recent_hits = ks.recent_hits & ((@as(u32, 1) << model.accuracy_window) - 1),
             .recent_len = @min(ks.recent_len, model.accuracy_window),
             .mastered = ks.mastered,
+            .best_ms = if (std.math.isFinite(ks.best_ms) and ks.best_ms > 0) ks.best_ms else 0,
+            .mastered_samples = ks.mastered_samples,
         };
         // Saves before schema 3 did not record it: a key green now was mastered.
         if (slot.confidence(state.target_wpm) >= 1.0) slot.mastered = true;
@@ -615,6 +626,8 @@ pub fn buildProfileState(
             .recent_hits = s.recent_hits,
             .recent_len = s.recent_len,
             .mastered = s.mastered,
+            .best_ms = s.best_ms,
+            .mastered_samples = s.mastered_samples,
         };
     }
 

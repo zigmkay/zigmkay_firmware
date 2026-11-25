@@ -100,6 +100,10 @@ pub const DrillRequest = struct {
     /// A weak-spot lesson: every word contains this letter pair when enough do.
     bigram: ?[2]u8 = null,
     focus_cp: ?u21 = null,
+    /// How weak each letter a-z is (0 to 1). Words with weak letters besides
+    /// the focus come more often in Stages 1 and 2; null draws by frequency
+    /// alone.
+    letter_weakness: ?*const [26]f32 = null,
     profile: ?*const layout_profile.LayoutProfile = null,
     learning: ?*const model.LearningModel = null,
     punct_group: usize = 0,
@@ -323,10 +327,13 @@ fn generateWordRound(buffer: []u8, req: DrillRequest) ![]const u8 {
     if (pool_len == 0) pool_len = collectWords(list, mask, focus, null, &pool);
 
     // Weight 1/sqrt(rank): common words come often, rarer ones still appear.
+    // Words that also practise weak letters weigh more.
     var cumulative: [max_word_pool]f32 = undefined;
     var total: f32 = 0;
     for (cumulative[0..pool_len], 0..) |*c, i| {
-        total += 1.0 / @sqrt(@as(f32, @floatFromInt(i + 3)));
+        var weight = 1.0 / @sqrt(@as(f32, @floatFromInt(i + 3)));
+        if (req.letter_weakness) |weakness| weight *= weaknessBoost(list.items[pool[i]].mask, focus, weakness);
+        total += weight;
         c.* = total;
     }
 
@@ -387,6 +394,27 @@ fn generateWordRound(buffer: []u8, req: DrillRequest) ![]const u8 {
         letters += word.len;
     }
     return writer.buffered();
+}
+
+/// How much weak letters count towards a word's weight.
+pub const weakness_gain: f32 = 2.0;
+/// A word with weak letters comes at most this many times as often.
+pub const max_weakness_boost: f32 = 4.0;
+
+/// `1 + weakness_gain * (sum of the weakness of the word's letters other
+/// than the focus)`, capped at `max_weakness_boost`.
+pub fn weaknessBoost(word_mask: u32, focus: ?u8, weakness: *const [26]f32) f32 {
+    var sum: f32 = 0;
+    var bits = word_mask & 0x03ff_ffff;
+    if (focus) |f| if (f >= 'a' and f <= 'z') {
+        bits &= ~(@as(u32, 1) << @intCast(f - 'a'));
+    };
+    while (bits != 0) {
+        const i = @ctz(bits);
+        bits &= bits - 1;
+        sum += std.math.clamp(weakness[i], 0, 1);
+    }
+    return @min(max_weakness_boost, 1 + weakness_gain * sum);
 }
 
 /// How many letters of `word` lie in `hand_mask`.
@@ -1308,6 +1336,46 @@ test "lessons of real words contain the focus letter in every word and stop near
     const weak = try generateDrill(&buf1, .{ .stage = .all_letters, .seed = 3, .unlocked_mask = maskFromSlice("esartldingo"), .focus_cp = 'g', .bigram = "in".* });
     var pairs = std.mem.splitScalar(u8, weak, ' ');
     while (pairs.next()) |w| try t.expect(std.mem.indexOf(u8, w, "in") != null);
+}
+
+test "words with weak letters come more often and every word keeps the focus letter" {
+    const t = std.testing;
+    const mask = maskFromSlice("esrtnohadickl");
+    var weakness: [26]f32 = @splat(0);
+    weakness['k' - 'a'] = 0.6;
+    var buf1: [1024]u8 = undefined;
+    var buf2: [1024]u8 = undefined;
+    var with_k: [2]usize = .{ 0, 0 };
+    var words: [2]usize = .{ 0, 0 };
+    for (0..40) |seed| for (0..2) |weighted| {
+        const req: DrillRequest = .{
+            .stage = .all_letters,
+            .seed = seed + 1,
+            .unlocked_mask = mask,
+            .focus_cp = 'h',
+            .letter_weakness = if (weighted == 1) &weakness else null,
+        };
+        const text = try generateDrill(&buf1, req);
+        try t.expectEqualStrings(text, try generateDrill(&buf2, req));
+        var it = std.mem.splitScalar(u8, text, ' ');
+        while (it.next()) |w| {
+            try t.expect(std.mem.indexOfScalar(u8, w, 'h') != null);
+            try t.expect(wordFitsMask(w, mask));
+            words[weighted] += 1;
+            if (std.mem.indexOfScalar(u8, w, 'k') != null) with_k[weighted] += 1;
+        }
+    };
+    const plain_share = @as(f32, @floatFromInt(with_k[0])) / @as(f32, @floatFromInt(words[0]));
+    const weighted_share = @as(f32, @floatFromInt(with_k[1])) / @as(f32, @floatFromInt(words[1]));
+    try t.expect(weighted_share > plain_share * 1.5);
+
+    // The focus letter's own weakness adds nothing.
+    var only_h: [26]f32 = @splat(0);
+    only_h['h' - 'a'] = 1;
+    try t.expectEqual(@as(f32, 1), weaknessBoost(maskFromSlice("hat"), 'h', &only_h));
+    // A word with several weak letters is capped.
+    const all_weak: [26]f32 = @splat(1);
+    try t.expectEqual(max_weakness_boost, weaknessBoost(maskFromSlice("kid"), null, &all_weak));
 }
 
 test "trigram pseudowords enforce reproducibility, 100% unlocked subset, focus share, no triples, and profanity filter" {
