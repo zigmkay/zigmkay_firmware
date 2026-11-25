@@ -204,17 +204,11 @@ fn menu(state: *State, theme: ui.Theme, chip_data: *dvui.WidgetData, entries: []
         return null;
     }
     var stored = rect;
-    const popup = dvui.floatingWindow(@src(), .{ .rect = &stored, .resize = .none }, .{
-        .rect = rect,
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = theme.panel },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(10),
-        .tag = "practice.person.menu",
-    });
+    var frame = ui.frameOptions(theme.panel, 10, "practice.person.menu");
+    frame.rect = rect;
+    const popup = dvui.floatingWindow(@src(), .{ .rect = &stored, .resize = .none }, frame);
     defer popup.deinit();
+    defer ui.frameBorder(theme, rect.w, rect.h, 10);
 
     var action: ?Action = null;
     var y: f32 = pad;
@@ -374,16 +368,9 @@ pub fn dialog(state: *State, theme: ui.Theme, entries: []const Entry) ?Action {
     const h = @min(dialog_head_h + dialog_body_h + dialog_foot_h, screen.h - 24);
     var stored: dvui.Rect = .{ .x = (screen.w - w) / 2, .y = @max(12, (screen.h - h) / 2 - 40), .w = w, .h = h };
     var open = true;
-    var fw = dvui.floatingWindow(@src(), .{ .modal = true, .rect = &stored, .resize = .none, .open_flag = &open }, .{
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = theme.bg },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(14),
-        .tag = "practice.person.dialog",
-    });
+    var fw = dvui.floatingWindow(@src(), .{ .modal = true, .rect = &stored, .resize = .none, .open_flag = &open }, ui.frameOptions(theme.bg, 14, "practice.person.dialog"));
     defer fw.deinit();
+    defer ui.frameBorder(theme, w, h, 14);
 
     const renamed = for (entries) |*e| {
         if (e.id == state.dialog_person) break e;

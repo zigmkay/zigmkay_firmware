@@ -643,6 +643,37 @@ pub fn sheet(src: std.builtin.SourceLocation, t: Theme, w: f32, h: f32, tag: []c
     });
 }
 
+/// Options of a floating window whose children are placed from its top left
+/// corner across its whole rect. dvui gives a floating window's box a margin
+/// of 2 inside it plus the border, which would move every child 3 units in
+/// and push the right and bottom ones past the frame. End the frame with
+/// `frameBorder`, which draws the border over the children.
+pub fn frameOptions(fill: dvui.Color, corner: f32, tag: []const u8) dvui.Options {
+    return .{
+        .padding = .{},
+        .margin = .{},
+        .border = .{},
+        .background = true,
+        .color_fill = .{ .color = fill },
+        .corners = .all(corner),
+        .tag = tag,
+    };
+}
+
+/// The 1-unit border of a `frameOptions` window of `w` × `h`, drawn over its
+/// children so that nothing reaching the edge covers it.
+pub fn frameBorder(t: Theme, w: f32, h: f32, corner: f32) void {
+    const edge = dvui.box(@src(), .{}, .{
+        .rect = .{ .w = w, .h = h },
+        .border = .all(1),
+        .color_border = .{ .color = t.border },
+        .corners = .all(corner),
+        .padding = .{},
+        .margin = .{},
+    });
+    edge.deinit();
+}
+
 /// A filled line, such as a divider between sheet sections.
 pub fn divider(t: Theme, r: dvui.Rect, id: usize) void {
     const line = dvui.box(@src(), .{}, .{

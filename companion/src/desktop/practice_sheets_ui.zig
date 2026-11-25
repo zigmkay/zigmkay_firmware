@@ -90,16 +90,9 @@ pub fn drawSettingsPopover(
     const pop_h = @max(160, @min(content_h, screen.h - y - 12.0));
     var stored: dvui.Rect = .{ .x = x, .y = y, .w = pop_w, .h = pop_h };
 
-    var fw = dvui.floatingWindow(@src(), .{ .modal = false, .open_flag = open, .rect = &stored, .resize = .none }, .{
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = theme.panel },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(10),
-        .tag = "practice.settings.popover",
-    });
+    var fw = dvui.floatingWindow(@src(), .{ .modal = false, .open_flag = open, .rect = &stored, .resize = .none }, ui.frameOptions(theme.panel, 10, "practice.settings.popover"));
     defer fw.deinit();
+    defer ui.frameBorder(theme, pop_w, pop_h, 10);
 
     const arena = dvui.currentWindow().arena();
     const pad: f32 = 16;
@@ -117,8 +110,9 @@ pub fn drawSettingsPopover(
     const body_h = pop_h - settings_head_h - 1;
     const scrolls = content_h > pop_h + 0.5;
     var scroll: ?*dvui.ScrollAreaWidget = null;
+    // Inside the border and above the rounded bottom corners.
     if (scrolls) scroll = dvui.scrollArea(@src(), .{}, .{
-        .rect = .{ .x = 0, .y = settings_head_h, .w = pop_w, .h = body_h },
+        .rect = .{ .x = 0, .y = settings_head_h, .w = pop_w - 1, .h = body_h - 10 },
         .background = false,
         .padding = .{},
         .margin = .{},
@@ -126,7 +120,7 @@ pub fn drawSettingsPopover(
     defer if (scroll) |s| s.deinit();
     const body = dvui.box(@src(), .{}, .{
         .rect = if (scrolls) null else .{ .x = 0, .y = settings_head_h, .w = pop_w, .h = body_h },
-        .min_size_content = .{ .w = pop_w - 12, .h = content_h - settings_head_h },
+        .min_size_content = .{ .w = pop_w - 13, .h = content_h - settings_head_h },
         .padding = .{},
         .margin = .{},
         .tag = "practice.settings.body",
@@ -284,16 +278,9 @@ fn drawStagesSheet(
 
     // Sized from its cards and kept centred, so it never shows a stale size.
     var stored: dvui.Rect = .{ .x = (screen.w - w) * 0.5, .y = (screen.h - h) * 0.5, .w = w, .h = h };
-    var fw = dvui.floatingWindow(@src(), .{ .modal = true, .rect = &stored, .resize = .none }, .{
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = theme.bg },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(14),
-        .tag = "practice.sheet.stages",
-    });
+    var fw = dvui.floatingWindow(@src(), .{ .modal = true, .rect = &stored, .resize = .none }, ui.frameOptions(theme.bg, 14, "practice.sheet.stages"));
     defer fw.deinit();
+    defer ui.frameBorder(theme, w, h, 14);
 
     // Elevated header strip matching Mockup 3 surface hierarchy
     const header_bg = dvui.box(@src(), .{}, .{
@@ -565,16 +552,9 @@ fn drawProgressSheet(
     const stored = placeSheet(ctx.sheet_rect orelse &fallback_rect, .{ .w = w0, .h = h0 }, .{ .w = 520, .h = 360 });
     const w = stored.w;
     const h = stored.h;
-    var fw = dvui.floatingWindow(@src(), .{ .modal = true, .rect = stored }, .{
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = theme.bg },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(14),
-        .tag = "practice.sheet.progress",
-    });
+    var fw = modalFrame(theme, stored, "practice.sheet.progress");
     defer fw.deinit();
+    defer ui.frameBorder(theme, w, h, sheet_corner);
 
     // Elevated header strip matching Mockup 3 surface hierarchy
     const header_bg = dvui.box(@src(), .{}, .{
@@ -626,7 +606,8 @@ fn drawProgressSheet(
     const body_top: f32 = 118 - scroll_top;
     const body_w = w - pad * 2;
     const body_h = h - 118 - 22;
-    const view_h = h - scroll_top - 1;
+    // The body ends above the rounded bottom corners.
+    const view_h = h - scroll_top - sheet_corner;
     const tap_holds = tap_hold_ui.hasProgressData(owner);
     const th_h = if (tap_holds) tap_hold_ui.progressHeight(owner, body_w) else 0;
     const kpi_h: f32 = 84;
@@ -649,14 +630,14 @@ fn drawProgressSheet(
         } else focus.* = false;
     };
     const scroll = dvui.scrollArea(@src(), .{ .scroll_info = scroll_info }, .{
-        .rect = .{ .x = 0, .y = scroll_top, .w = w, .h = view_h },
+        .rect = .{ .x = 0, .y = scroll_top, .w = w - 1, .h = view_h },
         .background = false,
         .padding = .{},
         .margin = .{},
     });
     defer scroll.deinit();
     const content = dvui.box(@src(), .{}, .{
-        .min_size_content = .{ .w = w - 12, .h = content_h },
+        .min_size_content = .{ .w = w - 13, .h = content_h },
         .padding = .{},
         .margin = .{},
     });
@@ -1693,16 +1674,13 @@ fn placeSheet(r: *dvui.Rect, initial: dvui.Size, min: dvui.Size) *dvui.Rect {
     return r;
 }
 
+/// The corner radius of the resizable sheets.
+const sheet_corner: f32 = 14;
+
+/// A resizable modal sheet; its children are placed from its top left corner
+/// across `stored`. End it with `ui.frameBorder`.
 fn modalFrame(theme: ui.Theme, stored: *dvui.Rect, tag: []const u8) *dvui.FloatingWindowWidget {
-    return dvui.floatingWindow(@src(), .{ .modal = true, .rect = stored }, .{
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = theme.bg },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(14),
-        .tag = tag,
-    });
+    return dvui.floatingWindow(@src(), .{ .modal = true, .rect = stored }, ui.frameOptions(theme.bg, sheet_corner, tag));
 }
 
 fn sheetHeader(theme: ui.Theme, w: f32, title: []const u8, subtitle: []const u8, close_tag: []const u8) bool {
@@ -1762,6 +1740,7 @@ fn drawLayoutChangesSheet(
     const h = stored.h;
     var fw = modalFrame(theme, stored, "practice.sheet.layout_changes");
     defer fw.deinit();
+    defer ui.frameBorder(theme, w, h, sheet_corner);
 
     const arena = dvui.currentWindow().arena();
     const board_name = if (ctx.board_name.len > 0) ctx.board_name else "this keyboard";
@@ -1969,6 +1948,7 @@ fn drawResetKeysSheet(
     const h = stored.h;
     var fw = modalFrame(theme, stored, "practice.sheet.reset_keys");
     defer fw.deinit();
+    defer ui.frameBorder(theme, w, h, sheet_corner);
     const arena = dvui.currentWindow().arena();
     if (sheetHeader(theme, w, "Reset characters", "Selected characters start over: speed, accuracy and transitions. Unlocked letters stay unlocked.", "practice.reset_keys.close")) {
         sheet.* = .none;
