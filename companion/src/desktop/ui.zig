@@ -607,23 +607,6 @@ pub fn panel(t: Theme, which: geometry.Panel) *dvui.BoxWidget {
     return dvui.box(@src(), .{}, opts);
 }
 
-pub fn drawer(src: std.builtin.SourceLocation, t: Theme, bounds: dvui.Rect, modal: bool) *dvui.FloatingWindowWidget {
-    return dvui.floatingWindow(src, .{ .modal = modal }, .{
-        .rect = bounds,
-        .padding = .all(18),
-        .background = true,
-        .color_fill = .{ .color = t.panel },
-    });
-}
-
-/// A modal drawer centered in the window, at most `width` wide and 960 high.
-pub fn editDrawer(src: std.builtin.SourceLocation, t: Theme, width: f32) *dvui.FloatingWindowWidget {
-    const screen = dvui.windowRect();
-    const w = @min(width, screen.w - 48);
-    const h = @min(@as(f32, 960), screen.h - 48);
-    return drawer(src, t, .{ .x = (screen.w - w) / 2, .y = (screen.h - h) / 2, .w = w, .h = h }, true);
-}
-
 /// A floating window of `w` × `h` made with `frameOptions`, plus `padding`
 /// when it has any. `deinit` draws its border over the children and then
 /// ends the window.
