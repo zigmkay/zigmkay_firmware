@@ -33,9 +33,11 @@ pub const KeyProgress = struct {
         return self.presses >= model.min_samples_for_mastery;
     }
 
+    /// How far the hits are toward what green needs: 1 once enough of the
+    /// last presses were right.
     pub fn hitFraction(self: KeyProgress) f32 {
-        if (self.window == 0) return 0;
-        return @as(f32, @floatFromInt(self.hits)) / @as(f32, @floatFromInt(self.window));
+        if (self.window == 0 or self.hits_needed == 0) return 0;
+        return @min(1.0, @as(f32, @floatFromInt(self.hits)) / @as(f32, @floatFromInt(self.hits_needed)));
     }
 };
 

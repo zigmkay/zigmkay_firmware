@@ -45,8 +45,9 @@ you have unlocked.
   right away.
 
 Two hairline bars under each practised chip show what the key still needs:
-speed toward the target on the left, first-try hits in its last 30 presses on
-the right, with a tick at the 28 it needs. Hover a chip for the numbers; the
+speed toward the target on the left, first-try hits toward the 28 of its last
+30 presses it needs on the right. A bar is full once that part is enough, so
+a key turns green when both are full. Hover a chip for the numbers; the
 header names them for the focus key.
 
 When a letter has gone **four lessons without progress**, a calm note appears
@@ -64,8 +65,8 @@ The text card shows a clean three-line monospace window with live **WPM**,
 **accuracy**, elapsed time, and your **daily goal** bar:
 
 - **Forgiving (default):** a wrong key leaves the cursor where it is and marks
-  the position quietly: a thin red line under the cursor and the wrong key
-  beside it. Type the right key, or simply keep typing: once your next three
+  the position quietly with a thin red line under the cursor; the wrong key
+  itself is not shown. Type the right key, or simply keep typing: once your next three
   keys match the text after a skipped or wrong letter, the Tutor moves past it.
   However many keys it took, a position counts as one mistake, and accuracy
   counts positions. **Backspace** only takes back wrong keys, never accepted

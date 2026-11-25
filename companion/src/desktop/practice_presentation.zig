@@ -410,19 +410,9 @@ fn chipMeter(theme: ui.Theme, chip: dvui.Rect, kp: key_progress.KeyProgress, mas
     fillRect(.{ .x = x0, .y = y, .w = half_w * kp.speed_fraction, .h = h }, speed_col, 0x5700 + i * 8 + 1);
     const hx = x0 + half_w + 2;
     fillRect(.{ .x = hx, .y = y, .w = half_w, .h = h }, track, 0x5700 + i * 8 + 2);
+    // Both bars are full exactly when the key has what green needs, so no
+    // threshold mark is drawn.
     fillRect(.{ .x = hx, .y = y, .w = half_w * kp.hitFraction(), .h = h }, hits_col, 0x5700 + i * 8 + 3);
-    if (kp.window > 0 and !mastered) {
-        const gate_x = hx + half_w * (@as(f32, @floatFromInt(kp.hits_needed)) / @as(f32, @floatFromInt(kp.window)));
-        const tick = dvui.box(@src(), .{}, .{
-            .id_extra = 0x5700 + i * 8 + 4,
-            .rect = .{ .x = @min(gate_x, hx + half_w - 1), .y = y - 1, .w = 1, .h = h + 2 },
-            .background = true,
-            .color_fill = .{ .color = ui.mix(theme.panel, theme.text, 0.7) },
-            .padding = .{},
-            .margin = .{},
-        });
-        tick.deinit();
-    }
 }
 
 fn tooltipLine(text: []const u8, color: dvui.Color, size: f32, weight: dvui.Font.Weight, id: usize) void {
@@ -1041,7 +1031,7 @@ fn drawThreeLineTextStage(
                 });
                 cell_box.deinit();
             }
-            if (quiet_typo) quietTypoMark(theme, char_rect, s.last_wrong_cp, idx);
+            if (quiet_typo) quietTypoMark(theme, char_rect, idx);
 
             var gbuf: [4]u8 = undefined;
             const cp = s.reference[idx];
@@ -1082,7 +1072,9 @@ fn drawThreeLineTextStage(
 }
 
 /// A thin red line under the cursor and the wrong key, small, beside it.
-fn quietTypoMark(theme: ui.Theme, cell: dvui.Rect, wrong: ?u21, idx: usize) void {
+/// A wrong key only underlines the position; the wrong character itself is not
+/// shown, because there is no place for it that does not cover the text.
+fn quietTypoMark(theme: ui.Theme, cell: dvui.Rect, idx: usize) void {
     const line = dvui.box(@src(), .{}, .{
         .id_extra = 0x7800 + idx,
         .rect = .{ .x = cell.x + 2, .y = cell.y + cell.h - 2, .w = @max(2, cell.w - 4), .h = 3 },
@@ -1094,18 +1086,6 @@ fn quietTypoMark(theme: ui.Theme, cell: dvui.Rect, wrong: ?u21, idx: usize) void
         .tag = "practice.typo",
     });
     line.deinit();
-    const cp = wrong orelse return;
-    var buf: [4]u8 = undefined;
-    const text = view.glyph(cp, true, &buf);
-    if (text.len == 0) return;
-    dvui.labelNoFmt(@src(), text, .{ .align_x = 0, .align_y = 0 }, .{
-        .id_extra = 0x7900 + idx,
-        .rect = .{ .x = cell.x + cell.w - 1, .y = cell.y - 6, .w = 18, .h = 18 },
-        .font = dvui.Font.theme(.mono).withSize(13),
-        .color_text = .{ .color = ui.mix(theme.bg, theme.danger, 0.8) },
-        .padding = .{},
-        .margin = .{},
-    });
 }
 
 /// Notices of the last lesson in the top right corner of `area`. They fade
