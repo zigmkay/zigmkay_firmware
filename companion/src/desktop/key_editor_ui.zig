@@ -32,6 +32,9 @@ pub const View = struct {
     diagnostic: [128]u8 = @splat(0),
     pending: bool = false,
     close_requested: bool = false,
+    /// Focuses the tapping term field the next time it is drawn (the Tutor's
+    /// tapping term suggestion opens the key this way).
+    focus_term: bool = false,
 };
 
 pub const Frame = struct {
@@ -905,6 +908,10 @@ fn timing(self: *Context, action: ?p.Action, y: f32, inner: f32) void {
         .tag = "key.editor.tapping_term",
         .padding = number_padding,
     }).changed) self.session.mutate(.{ .tapping_term = term });
+    if (self.view.focus_term) if (dvui.tagGet("key.editor.tapping_term")) |field| {
+        dvui.focusWidget(field.id, null, null);
+        self.view.focus_term = false;
+    };
     ui.label(self.muted, "ms", .{ .x = margin + 92, .y = y + 26, .w = 30, .h = 18 }, 13);
     var retro = value.tap_hold.retro_tapping;
     if (dvui.checkbox(@src(), &retro, "Send the tap if released alone", .{

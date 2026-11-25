@@ -10,6 +10,7 @@ const geometry = @import("physical-ui");
 const keyboard_view = @import("practice_keyboard_ui.zig");
 const presentation = @import("practice_presentation.zig");
 const sheets_ui = @import("practice_sheets_ui.zig");
+const tap_hold_ui = @import("practice_tap_hold_ui.zig");
 
 const control = desktop.practice_controller;
 const storage = desktop.practice_storage;
@@ -18,6 +19,7 @@ pub const Sheet = sheets_ui.Sheet;
 pub const Picks = sheets_ui.Picks;
 pub const BoardInfo = sheets_ui.BoardInfo;
 pub const BoardLookup = sheets_ui.BoardLookup;
+pub const EditKey = tap_hold_ui.EditKey;
 
 pub const Frame = struct {
     /// Live frames must come from the coherent identity-checked session adapter.
@@ -37,6 +39,8 @@ pub const Frame = struct {
     /// Why typed text may not match the keys shown. Practice always types on
     /// the connected keyboard, never on an unflashed editor layout.
     layout_notice: LayoutNotice = .none,
+    /// Whether the keyboard reports its tap/hold decisions (Test layout).
+    tap_hold_support: control.TapHoldSupport = .unknown,
 };
 
 pub const LayoutNotice = enum {
@@ -67,6 +71,9 @@ pub const Input = struct {
     runs: []const storage.RunRecord = &.{},
     /// Finds a keyboard of the catalog by id, for where a key used to be.
     board_lookup: ?BoardLookup = null,
+    /// The practised keyboard is the one the editor shows, so a key can be
+    /// opened there.
+    editor_board: bool = false,
 };
 
 pub const View = struct {
@@ -86,11 +93,19 @@ pub const View = struct {
     last_pressed_error_key: ?usize = null,
     last_error_flash_us: u64 = 0,
     same_hand_shift_until_us: u64 = 0,
+    /// Where the Progress sheet is scrolled.
+    progress_scroll: dvui.ScrollInfo = .{},
+    /// The Progress sheet scrolls to its tap/hold section once it can.
+    focus_tap_hold: bool = false,
+    /// Shows this key's hover card without the pointer (gallery fixtures).
+    forced_tooltip: ?u21 = null,
 };
 
 pub const DrawResult = struct {
     leave: bool = false,
     action: ?control.Action = null,
+    /// The Progress sheet asked to open this key in the editor.
+    edit_key: ?EditKey = null,
 };
 
 fn running(owner: *const control.Controller) bool {
@@ -358,6 +373,7 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     }
 
     // 3. Secondary Sheets (Stages / Progress) and compact Settings popover
+    var edit_key: ?EditKey = null;
     try sheets_ui.drawSheet(owner, &view.sheet, theme, .{
         .board_name = if (input.frame) |f| f.board_name else "",
         .profile_name = if (input.frame) |f| f.profile else "",
@@ -368,6 +384,10 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
         .geometry = if (input.frame) |f| f.geometry else &.{},
         .board_lookup = input.board_lookup,
         .picks = &view.picks,
+        .progress_scroll = &view.progress_scroll,
+        .focus_tap_hold = &view.focus_tap_hold,
+        .edit_key = &edit_key,
+        .can_edit = input.editor_board and !input.fixture,
     }, &pending);
     if (try sheets_ui.drawSettingsPopover(owner, &view.settings_open, &view.confirm_reset, theme, size.w - 16, topbar_h + 6, &pending))
         sheets_ui.openSheet(&view.sheet, &view.picks, .reset_keys);
@@ -376,7 +396,15 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     return .{
         .leave = leave,
         .action = if (pending) |intent| owner.action(intent) else null,
+        .edit_key = edit_key,
     };
+}
+
+/// Opens the Progress sheet scrolled to its tap/hold section.
+fn openTapHoldDetails(view: *View) void {
+    view.sheet = .progress;
+    view.settings_open = false;
+    view.focus_tap_hold = true;
 }
 
 /// Unified Editor-style top bar:
@@ -586,7 +614,11 @@ fn drawTutorWorkspace(
 
     // 1. Key-Confidence Strip (top)
     const conf_h: f32 = 84;
-    try presentation.confidenceStrip(owner, theme, .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = conf_h });
+    const labels = if (input.frame) |f| f.labels else null;
+    if (try presentation.confidenceStrip(owner, theme, .{ .x = bounds.x, .y = bounds.y, .w = bounds.w, .h = conf_h }, .{
+        .labels = labels,
+        .forced_tooltip = view.forced_tooltip,
+    })) openTapHoldDetails(view);
 
     // The layout-change question sits between the strip and the card, so it
     // shows with any guidance, and only before a lesson starts.
@@ -664,9 +696,11 @@ fn drawTutorWorkspace(
         const kb_y = rem_y + card_h + gap;
         const kb_h = @max(110.0, bounds.y + bounds.h - kb_y);
         try drawKeyboardArea(owner, view, theme, .{ .x = bounds.x, .y = kb_y, .w = bounds.w, .h = kb_h }, focus, resolved_hint, input);
-        try presentation.lessonNotices(owner, theme, .{ .x = bounds.x, .y = kb_y, .w = bounds.w, .h = kb_h }, input.now_us);
+        if (try presentation.lessonNotices(owner, theme, .{ .x = bounds.x, .y = kb_y, .w = bounds.w, .h = kb_h }, input.now_us, labels))
+            openTapHoldDetails(view);
     } else {
-        try presentation.lessonNotices(owner, theme, .{ .x = bounds.x, .y = rem_y, .w = bounds.w, .h = card_h }, input.now_us);
+        if (try presentation.lessonNotices(owner, theme, .{ .x = bounds.x, .y = rem_y, .w = bounds.w, .h = card_h }, input.now_us, labels))
+            openTapHoldDetails(view);
     }
 }
 
@@ -678,10 +712,16 @@ fn drawTestKeysWorkspace(
     input: Input,
 ) !void {
     const gap: f32 = 12;
-    const bar_h: f32 = 54;
     const layer = if (input.frame) |f| f.layer else owner.test_keys.highest_layer;
     const layer_name = if (input.frame) |f| f.layer_name else "";
     const mods = if (input.frame) |f| f.modifiers.toByte() else owner.test_keys.modifiers;
+    // A second row shows the keyboard's tap/hold decisions when the layout
+    // has keys that tap and hold.
+    const tap_holds: ?presentation.TelemetryTapHolds = if (tap_hold_ui.layoutHasTapHolds(owner)) .{
+        .labels = if (input.frame) |f| f.labels else null,
+        .support = if (input.frame) |f| f.tap_hold_support else .unknown,
+    } else null;
+    const bar_h: f32 = presentation.telemetry_row_h + if (tap_holds != null) tap_hold_ui.test_row_h - 4 else 0;
 
     try presentation.testKeysTelemetryBar(
         owner,
@@ -690,6 +730,7 @@ fn drawTestKeysWorkspace(
         layer,
         layer_name,
         mods,
+        tap_holds,
     );
 
     const rem_y = bounds.y + bar_h + gap;
@@ -799,8 +840,22 @@ fn drawKeyboardArea(
         .guide => "Layout guide",
     };
     const heat = try lessonHeat(arena, owner, labels.key_count, layer);
+    // Tap/hold marks: the last lesson's mistaken holds and taps beside the
+    // heatmap, or the keys of Test layout's newest hold.
+    const marks: []const keyboard_view.KeyMark = if (is_test_keys) marks: {
+        if (tap_hold_ui.testMarksRefresh(owner, input.now_us)) |wait| dvui.timer(dvui.parentGet().data().id, @intCast(@max(@as(u64, 1), wait)));
+        break :marks try tap_hold_ui.testMarks(arena, owner, theme, labels, input.now_us);
+    } else if (heat.len > 0) try tap_hold_ui.lessonMarks(arena, owner, theme, labels.key_count) else &.{};
+    var mark_holds = false;
+    var mark_taps = false;
+    if (marks.len > 0 and !is_test_keys) if (owner.last_lesson) |lesson| for (lesson.tapHoldKeySlice()) |key| {
+        if (key.accidental_holds > 0) mark_holds = true else if (key.accidental_taps > 0) mark_taps = true;
+    };
     const src_caption = if (heat.len > 0)
-        "Last lesson: green clean · amber slow · red missed · clears on your first key"
+        try std.fmt.allocPrint(arena, "Last lesson: green clean · amber slow · red missed{s}{s} · clears on your first key", .{
+            if (mark_holds) " · teal dashed became a hold" else "",
+            if (mark_taps) " · amber dashed came as a tap" else "",
+        })
     else
         try std.fmt.allocPrint(arena, "{s} · {s}", .{ source_title, frame.profile });
     const dim_locked = !is_test_keys and (owner.config.stage == .home_row or owner.config.stage == .all_letters);
@@ -829,8 +884,10 @@ fn drawKeyboardArea(
             null,
         .error_flash_key = flash_key,
         .heat = heat,
+        .marks = marks,
         .source_caption = src_caption,
         .layer_name = frame.layer_name,
+        .wide_caption = mark_holds or mark_taps,
     });
 }
 

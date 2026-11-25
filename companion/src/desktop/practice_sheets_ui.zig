@@ -13,6 +13,7 @@ const lp = desktop.practice_layout_profile;
 const model = desktop.practice_model;
 const presentation = @import("practice_presentation.zig");
 const key_change = @import("practice_key_change_ui.zig");
+const tap_hold_ui = @import("practice_tap_hold_ui.zig");
 const layout = @import("layout-model");
 
 /// A keyboard of the board catalog, for showing where a key used to be.
@@ -36,6 +37,14 @@ pub const SheetContext = struct {
     geometry: []const layout.physical_layout.Key = &.{},
     board_lookup: ?BoardLookup = null,
     picks: *Picks,
+    /// Where the Progress sheet is scrolled.
+    progress_scroll: ?*dvui.ScrollInfo = null,
+    /// Set to scroll the Progress sheet to its tap/hold section; cleared once done.
+    focus_tap_hold: ?*bool = null,
+    /// Receives the key a tapping term suggestion asks the editor to open.
+    edit_key: ?*?tap_hold_ui.EditKey = null,
+    /// Whether a suggestion may open the editor.
+    can_edit: bool = false,
 };
 
 /// Draws whichever secondary sheet is open, if any.
@@ -542,13 +551,47 @@ fn drawProgressSheet(
         return;
     }
 
+    // The body scrolls below the header once the tap/hold section makes it
+    // taller than the sheet.
+    const scroll_top: f32 = 101;
     const pad: f32 = 24;
-    const body_top: f32 = 118;
+    const body_top: f32 = 118 - scroll_top;
     const body_w = w - pad * 2;
-    const body_h = h - body_top - 22;
+    const body_h = h - 118 - 22;
+    const tap_holds = tap_hold_ui.hasProgressData(owner);
+    const th_h = if (tap_holds) tap_hold_ui.progressHeight(owner, body_w) else 0;
+    const content_h = h - scroll_top - 1 + if (tap_holds) th_h + 12 else 0;
+    const kpi_h: f32 = 84;
+    const recent_h = std.math.clamp((body_h - kpi_h) * 0.36, 128.0, 236.0);
+    const lower_y = body_top + kpi_h + 14;
+    const lower_h = @max(180.0, body_h - kpi_h - 14 - recent_h - 12);
+    const th_y = lower_y + lower_h + 12;
+    var fallback_scroll: dvui.ScrollInfo = .{};
+    const scroll_info = ctx.progress_scroll orelse &fallback_scroll;
+    // Asked from a hover card or a notice: show the tap/hold section. The
+    // offset holds until the scroll area has measured the content.
+    if (ctx.focus_tap_hold) |focus| if (focus.*) {
+        if (tap_holds) {
+            const view_h = h - scroll_top - 1;
+            scroll_info.viewport.y = @max(0, @min(th_y - 12, content_h - view_h));
+            if (scroll_info.virtual_size.h >= content_h - 1) focus.* = false else dvui.refresh(null, @src(), null);
+        } else focus.* = false;
+    };
+    const scroll = dvui.scrollArea(@src(), .{ .scroll_info = scroll_info }, .{
+        .rect = .{ .x = 0, .y = scroll_top, .w = w, .h = h - scroll_top - 1 },
+        .background = false,
+        .padding = .{},
+        .margin = .{},
+    });
+    defer scroll.deinit();
+    const content = dvui.box(@src(), .{}, .{
+        .min_size_content = .{ .w = w - 12, .h = content_h },
+        .padding = .{},
+        .margin = .{},
+    });
+    defer content.deinit();
 
     // 1. Three elevated KPI cards across top
-    const kpi_h: f32 = 84;
     const kpi_gap: f32 = 12;
     const kpi_w = (body_w - kpi_gap * 2) / 3.0;
 
@@ -575,9 +618,6 @@ fn drawProgressSheet(
 
     // 2. Lower 2-column grid: WPM Trend Chart (left) + Weakest Keys & Transitions + Weak-spot CTA (right),
     // then the recent lessons with what each one changed.
-    const recent_h = std.math.clamp((body_h - kpi_h) * 0.36, 128.0, 236.0);
-    const lower_y = body_top + kpi_h + 14;
-    const lower_h = @max(180.0, body_h - kpi_h - 14 - recent_h - 12);
     const stacked = body_w < 640;
     const left_w = if (stacked) body_w else body_w * 0.56;
     const right_w = if (stacked) body_w else body_w - left_w - 14;
@@ -587,13 +627,21 @@ fn drawProgressSheet(
 
     try drawWpmTrendPanel(owner, theme, .{ .x = pad, .y = lower_y, .w = left_w, .h = chart_h }, ctx.runs);
     try drawWeakSpotsPanel(owner, sheet, ctx.picks, theme, .{ .x = if (stacked) pad else pad + left_w + 14, .y = weak_y, .w = right_w, .h = weak_h }, pending);
-    try drawRecentLessons(owner, theme, .{ .x = pad, .y = lower_y + lower_h + 12, .w = body_w, .h = recent_h }, ctx.runs);
+    var recent_y = lower_y + lower_h + 12;
+    if (tap_holds) {
+        const asked = try tap_hold_ui.progressSection(owner, theme, .{ .x = pad, .y = th_y, .w = body_w, .h = th_h }, ctx.labels, ctx.geometry, ctx.can_edit);
+        if (asked) |key| if (ctx.edit_key) |out| {
+            out.* = key;
+        };
+        recent_y += th_h + 12;
+    }
+    try drawRecentLessons(owner, theme, .{ .x = pad, .y = recent_y, .w = body_w, .h = recent_h }, ctx.runs, ctx.labels);
 }
 
 /// The last lessons, newest first: speed and its change, accuracy, and what
 /// each lesson brought: a new letter, keys that turned green, a weak-spot pair
 /// and the keys that were weakest after it.
-fn drawRecentLessons(owner: *const control.Controller, theme: ui.Theme, rect: dvui.Rect, runs: []const storage.RunRecord) !void {
+fn drawRecentLessons(owner: *const control.Controller, theme: ui.Theme, rect: dvui.Rect, runs: []const storage.RunRecord, labels: ?*const desktop.label_cache.LabelCache) !void {
     const panel = dvui.box(@src(), .{}, .{
         .rect = rect,
         .background = true,
@@ -653,6 +701,9 @@ fn drawRecentLessons(owner: *const control.Controller, theme: ui.Theme, rect: dv
         if (run.weak_spot) |pair| if (pair[0] < 128 and pair[1] < 128) {
             px = lessonPill(theme, try std.fmt.allocPrint(arena, "Weak spot: {c}{c}", .{ @as(u8, @intCast(pair[0])), @as(u8, @intCast(pair[1])) }), theme.warning, px, y + 6, limit, nextSlot(&slot));
         };
+        const tags = try tap_hold_ui.lessonTags(arena, run, if (owner.profile_bound) &owner.profile else null, labels);
+        if (tags.hold) |tag| px = lessonPill(theme, tag, tap_hold_ui.holdColor(theme), px, y + 6, limit, nextSlot(&slot));
+        if (tags.tap) |tag| px = lessonPill(theme, tag, theme.warning, px, y + 6, limit, nextSlot(&slot));
         if (run.top_weak_keys.len > 0) {
             var names: std.ArrayList(u8) = .empty;
             try names.appendSlice(arena, "Weakest:");

@@ -177,6 +177,11 @@ pub const RunRecord = struct {
     accidental_holds: u16 = 0,
     accidental_taps: u16 = 0,
     near_holds: u16 = 0,
+    /// The key with the most accidental holds of the lesson: its tap
+    /// character and how often.
+    top_accidental_hold: ?[2]u32 = null,
+    /// The key with the most accidental taps of the lesson.
+    top_accidental_tap: ?[2]u32 = null,
 };
 
 pub const LoadedRuns = struct {

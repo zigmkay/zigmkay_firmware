@@ -6,4 +6,5 @@ test {
     _ = @import("practice_keyboard_ui.zig");
     _ = @import("practice_sheets_ui.zig");
     _ = @import("practice_key_change_ui.zig");
+    _ = @import("practice_tap_hold_ui.zig");
 }

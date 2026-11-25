@@ -259,8 +259,8 @@ zig build test-practice -Donly=practice
 ```
 
 Run the full desktop test suite and headless SDL GUI fixtures (including
-`--offline-practice-frames 3` and the 19-scene
-Dark/Light `--offline-tutor-frames 76` gallery):
+`--offline-practice-frames 3` and the 22-scene
+Dark/Light `--offline-tutor-frames 88` gallery):
 
 ```sh
 zig build test-desktop -Ddesktop
@@ -283,11 +283,11 @@ changes, so they never show an older version:
 zig build doc-screenshots -Ddesktop
 ```
 
-To render native GPU screenshots of the same 19-scene Dark/Light gallery into
+To render native GPU screenshots of the same 22-scene Dark/Light gallery into
 `companion/.zig-cache/typing-practice-gallery/`:
 
 ```sh
-zig build -Ddesktop && ./zig-out/bin/zigmkay-companion --native-tutor-frames 76
+zig build -Ddesktop && ./zig-out/bin/zigmkay-companion --native-tutor-frames 88
 ```
 
 ## Manual hardware checklist

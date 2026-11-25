@@ -29,6 +29,9 @@ frame: desktop.live_keyboard.Frame = .{},
 last_status: ?Status = null,
 /// Tap/hold decisions waiting for the Tutor, which takes them every frame.
 tap_holds: desktop.live_keyboard.TapHoldQueue = .{},
+/// The session token of the connection that sent a tap/hold decision; 0
+/// before any.
+decisions_token: u32 = 0,
 
 /// The captions and board of a project prepared for binding. After `rebind`
 /// or `swap` it holds those of the previous binding, which the caller
@@ -56,6 +59,7 @@ pub fn poll(self: *LiveKeyboard) !?bool {
     const driver = if (self.driver) |*value| value else return null;
     driver.poll(driver.transport.now());
     self.tap_holds.add(driver.decision_events[0..driver.decision_event_count]);
+    if (driver.decision_event_count > 0) self.decisions_token = driver.session.token;
     self.frame = try self.presenter.select(&self.captions.labels, self.identity, &driver.session, &self.pressed);
     const current = self.status();
     if (self.last_status == null or self.last_status.? != current) {
@@ -84,6 +88,16 @@ pub fn statusOf(driver: ?*const Driver, frame: desktop.live_keyboard.Frame) Stat
 /// Whether the frame shows verified labels of the running keyboard.
 pub fn verified(self: *const LiveKeyboard) bool {
     return self.frame.labels != null and !self.frame.stale;
+}
+
+/// Whether the verified keyboard reports its tap/hold decisions: it sent
+/// one in this connection, or its hello speaks a protocol version that does.
+pub fn tapHoldSupport(self: *const LiveKeyboard) desktop.practice_controller.TapHoldSupport {
+    const driver = if (self.driver) |*value| value else return .unknown;
+    if (!self.verified()) return .unknown;
+    if (driver.session.token != 0 and self.decisions_token == driver.session.token) return .reporting;
+    const hello = driver.session.observed orelse return .unknown;
+    return if (hello.version >= 2) .reporting else .old_firmware;
 }
 
 /// The token of a connected session with coherent state.

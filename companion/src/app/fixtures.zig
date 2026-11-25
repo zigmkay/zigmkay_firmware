@@ -21,6 +21,8 @@ pub const State = struct {
     build_checked: bool = false,
     /// The layout notice the tutor gallery shows; fixtures have no keyboard.
     layout_notice: @import("practice-ui").LayoutNotice = .none,
+    /// Whether the gallery's pretend keyboard reports tap/hold decisions.
+    tap_hold_support: desktop.practice_controller.TapHoldSupport = .unknown,
 };
 
 /// Scripts that replace the project or the onboarding stage before a frame.
@@ -33,7 +35,7 @@ pub fn beforeFrame(app: *App) !void {
     if (app.mode.isTutorGallery()) try showTutor(app);
 }
 
-/// The tutor gallery renders 19 scenes for 4 frames each (2 Dark + 2 Light):
+/// The tutor gallery renders 22 scenes for 4 frames each (2 Dark + 2 Light):
 /// 0: Active Stage 2 · All letters (with populated confidences & focus key)
 /// 1: Stage 3 · Shift & capitals (opposite-hand Shift hold + tap bridge)
 /// 2: Stage 5 · Layers & combos (layer auto-preview / 2-key combo arc)
@@ -49,10 +51,13 @@ pub fn beforeFrame(app: *App) !void {
 /// 12: Stage 6 · Free text
 /// 13: Paused round with the Resume banner
 /// 14: Narrow viewport responsive audit (960x640, Stage 2 active)
-/// 15: Question about practised characters a keyboard switch moved
-/// 16: Layout changes sheet comparing a layer character on both keyboards
-/// 17: Layout changes sheet with a combo letter marked for reset
-/// 18: Reset characters sheet asking for confirmation
+/// 15: Test layout with the keyboard's latest tap/hold decisions (a roll made A Shift)
+/// 16: Next lesson after one where A became Shift: notice, chip marker, hover card, heatmap
+/// 17: Progress sheet scrolled to its Tap/hold keys section
+/// 18: Question about practised characters a keyboard switch moved
+/// 19: Layout changes sheet comparing a layer character on both keyboards
+/// 20: Layout changes sheet with a combo letter marked for reset
+/// 21: Reset characters sheet asking for confirmation
 fn showTutor(app: *App) !void {
     app.view.toolbar.light = app.count % 4 >= 2;
     const is_scene_start = (app.count == 1) or (app.count >= 4 and app.count % 4 == 0);
@@ -65,6 +70,10 @@ fn showTutor(app: *App) !void {
     app.tutor.view.settings_open = false;
     app.tutor.view.confirm_reset = false;
     app.fixture.layout_notice = .none;
+    app.fixture.tap_hold_support = .unknown;
+    app.tutor.view.forced_tooltip = null;
+    app.tutor.view.focus_tap_hold = false;
+    app.tutor.view.progress_scroll = .{};
     // Notices belong to the scene that finishes a lesson.
     practice.event_len = 0;
 
@@ -141,8 +150,8 @@ fn showTutor(app: *App) !void {
             practice.persisted.daily_active_seconds = 420;
             app.tutor.view.sheet = .progress;
         },
-        15, 16, 17, 18 => {
-            if (scene == 15) try seedMovedKeys(app);
+        18, 19, 20, 21 => {
+            if (scene == 18) try seedMovedKeys(app);
             try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
             try practice.start();
             const view = &app.tutor.view;
@@ -157,13 +166,13 @@ fn showTutor(app: *App) !void {
             }
             if (len == 0) return error.FixtureHasNoMovedKeys;
             switch (scene) {
-                16, 17 => {
+                19, 20 => {
                     view.sheet = .layout_changes;
                     view.picks = .{};
-                    view.picks.selected = groups[if (scene == 17) len - 1 else 0];
-                    if (scene == 17) view.picks.set(groups[len - 1], true);
+                    view.picks.selected = groups[if (scene == 20) len - 1 else 0];
+                    if (scene == 20) view.picks.set(groups[len - 1], true);
                 },
-                18 => {
+                21 => {
                     view.sheet = .reset_keys;
                     view.picks = .{};
                     for (groups[0..len]) |group| view.picks.set(group, true);
@@ -171,6 +180,61 @@ fn showTutor(app: *App) !void {
                     view.picks.confirm = true;
                 },
                 else => {},
+            }
+        },
+        15 => {
+            try practice.choose(.{ .mode = .test_keys }, now);
+            practice.test_keys.clearScratchpad();
+            practice.test_keys.setLastText("N");
+            practice.test_keys.appendScratchpad("Testing my layout an");
+            app.fixture.tap_hold_support = .reporting;
+            const p = &practice.profile;
+            const space = p.space_key orelse keyOf(p, ' ') orelse 0;
+            const decisions = [_]desktop.practice_tap_hold.Decision{
+                .{ .key_index = keyOf(p, 't') orelse 0, .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 96, .tapping_term_ms = 200 },
+                .{ .key_index = keyOf(p, 's') orelse 0, .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 171, .tapping_term_ms = 200 },
+                .{ .key_index = space, .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 74, .tapping_term_ms = 200 },
+                .{ .key_index = keyOf(p, 'a') orelse 0, .outcome = .hold, .reason = .permissive_hold, .elapsed_ms = 143, .other_key = keyOf(p, 'n'), .tapping_term_ms = 200 },
+            };
+            practice.test_keys.tap_hold_len = 0;
+            for (decisions) |decision| _ = practice.observeTestTapHold(decision, now);
+        },
+        16 => {
+            seedTapHoldStats(practice);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
+            try typeSessionPrefix(&practice.session, practice.session.reference_len, now, false);
+            try practice.finish(now);
+            // The next lesson should not start on A, whose guidance would
+            // cover its heatmap mark.
+            var retries: usize = 0;
+            while (practice.session.reference[0] == 'a' and retries < 8) : (retries += 1) try practice.start();
+            if (practice.last_lesson) |*lesson| {
+                lesson.wpm = 26.0;
+                lesson.prev_wpm = 24.6;
+                lesson.wpm_delta = 1.4;
+                lesson.accuracy = 96.8;
+                lesson.tap_hold_keys[0] = .{ .cp = 'a', .accidental_holds = 3, .rolls = 3 };
+                lesson.tap_hold_key_len = 1;
+                lesson.tap_holds = .{ .decisions = 41, .accidental_holds = 3, .near_holds = 2 };
+            }
+            practice.event_len = 0;
+            practice.events[0] = .{ .tap_hold = .{ .cp = 'a', .count = 3, .hold = true, .reason = .permissive_hold } };
+            practice.events[1] = .{ .green = 't' };
+            practice.event_len = 2;
+            practice.events_at_us = now;
+            app.tutor.view.forced_tooltip = 'a';
+        },
+        17 => {
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
+            app.tutor.view.sheet = .progress;
+            app.tutor.view.focus_tap_hold = true;
+            if (app.tutor.loaded_runs) |loaded| {
+                const runs: []desktop.practice_storage.RunRecord = @constCast(loaded.runs);
+                runs[runs.len - 1].top_accidental_hold = .{ 'a', 2 };
+                runs[runs.len - 3].top_accidental_hold = .{ 'a', 1 };
+                runs[runs.len - 3].top_accidental_tap = .{ 'o', 1 };
             }
         },
         6, 9 => {
@@ -182,6 +246,47 @@ fn showTutor(app: *App) !void {
         },
         else => {},
     }
+}
+
+/// The key that types `cp` on tap in the bound profile.
+fn keyOf(profile: *const desktop.practice_layout_profile.LayoutProfile, cp: u21) ?usize {
+    for (profile.base_taps[0..profile.key_count], 0..) |tap, index| if (tap == cp) return index;
+    return null;
+}
+
+/// Tap/hold windows as a Zigmkay keyboard reports them over many lessons:
+/// A (home-row Shift) rolls into the next key, S (Alt) is held past the
+/// term often enough for a suggestion, O (Shift) sometimes taps when a
+/// capital needs it, Space and E are clean.
+fn seedTapHoldStats(practice: *desktop.practice_controller.Controller) void {
+    const lm = &practice.learning;
+    lm.tap_hold_len = 0;
+    const tap: desktop.practice_model.TapHoldSample = .{ .class = .wanted_tap, .reason = .released_within_term, .elapsed_ms = 92, .tapping_term_ms = 200 };
+    var near = tap;
+    near.class = .near_hold;
+    near.elapsed_ms = 164;
+    const roll: desktop.practice_model.TapHoldSample = .{ .class = .accidental_hold, .reason = .permissive_hold, .elapsed_ms = 138, .tapping_term_ms = 200, .other_cp = 'n' };
+    const held: desktop.practice_model.TapHoldSample = .{ .class = .accidental_hold, .reason = .term_elapsed, .elapsed_ms = 214, .tapping_term_ms = 200 };
+    const plan = [_]struct { cp: u21, sample: desktop.practice_model.TapHoldSample, count: usize }{
+        .{ .cp = 'a', .sample = tap, .count = 58 },
+        .{ .cp = 'a', .sample = near, .count = 2 },
+        .{ .cp = 'a', .sample = roll, .count = 1 },
+        .{ .cp = 'a', .sample = tap, .count = 6 },
+        .{ .cp = 'a', .sample = near, .count = 3 },
+        .{ .cp = 'a', .sample = roll, .count = 2 },
+        .{ .cp = 'a', .sample = tap, .count = 8 },
+        .{ .cp = 's', .sample = tap, .count = 52 },
+        .{ .cp = 's', .sample = near, .count = 2 },
+        .{ .cp = 's', .sample = held, .count = 1 },
+        .{ .cp = 's', .sample = tap, .count = 5 },
+        .{ .cp = ' ', .sample = tap, .count = 70 },
+        .{ .cp = ' ', .sample = near, .count = 1 },
+        .{ .cp = 'e', .sample = tap, .count = 44 },
+        .{ .cp = 'o', .sample = tap, .count = 6 },
+        .{ .cp = 'o', .sample = .{ .class = .wanted_hold, .reason = .permissive_hold, .elapsed_ms = 120, .tapping_term_ms = 200 }, .count = 2 },
+        .{ .cp = 'o', .sample = .{ .class = .accidental_tap, .reason = .released_within_term, .elapsed_ms = 88, .tapping_term_ms = 200 }, .count = 2 },
+    };
+    for (plan) |step| for (0..step.count) |_| lm.recordTapHold(step.cp, step.sample);
 }
 
 fn seedTutorGalleryState(app: *App) !void {

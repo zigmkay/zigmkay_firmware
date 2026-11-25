@@ -74,6 +74,9 @@ pub const LessonSummary = struct {
     key_len: usize = 0,
     /// Tap/hold decisions of the lesson; all zero without a Zigmkay keyboard.
     tap_holds: LessonTapHolds = .{},
+    /// The keys whose hold or tap came by mistake in the lesson.
+    tap_hold_keys: [max_lesson_tap_hold_keys]LessonTapHoldKey = undefined,
+    tap_hold_key_len: usize = 0,
 
     pub fn changeSlice(self: *const LessonSummary) []const KeyChange {
         return self.changes[0..self.change_len];
@@ -82,10 +85,103 @@ pub const LessonSummary = struct {
     pub fn keySlice(self: *const LessonSummary) []const LessonKey {
         return self.keys[0..self.key_len];
     }
+
+    pub fn tapHoldKeySlice(self: *const LessonSummary) []const LessonTapHoldKey {
+        return self.tap_hold_keys[0..self.tap_hold_key_len];
+    }
+
+    /// The lesson's accidental decisions of the key that types `cp` on tap.
+    pub fn tapHoldKey(self: *const LessonSummary, cp: u21) ?LessonTapHoldKey {
+        for (self.tapHoldKeySlice()) |key| if (key.cp == cp) return key;
+        return null;
+    }
 };
 
 pub const max_round_changes: usize = 8;
 pub const max_lesson_keys: usize = 40;
+pub const max_lesson_tap_hold_keys: usize = 8;
+
+/// One key's accidental tap/hold decisions in a lesson.
+pub const LessonTapHoldKey = struct {
+    /// The character the key types on tap.
+    cp: u21,
+    accidental_holds: u16 = 0,
+    accidental_taps: u16 = 0,
+    /// Accidental holds a roll into the next key decided (permissive hold).
+    rolls: u16 = 0,
+    /// Accidental holds the tapping term decided: the key was held too long.
+    term: u16 = 0,
+
+    /// Why the holds came, when that is clear: a roll or the term.
+    pub fn holdReason(self: LessonTapHoldKey) ?model.TapHoldReason {
+        if (self.rolls == 0 and self.term == 0) return null;
+        return if (self.rolls >= self.term) .permissive_hold else .term_elapsed;
+    }
+
+    fn add(self: *LessonTapHoldKey, sample: model.TapHoldSample) void {
+        switch (sample.class) {
+            .accidental_hold => {
+                self.accidental_holds +|= 1;
+                switch (sample.reason) {
+                    .permissive_hold => self.rolls +|= 1,
+                    .term_elapsed => self.term +|= 1,
+                    else => {},
+                }
+            },
+            .accidental_tap => self.accidental_taps +|= 1,
+            .wanted_tap, .wanted_hold, .near_hold => {},
+        }
+    }
+};
+
+/// The lesson notice about a key whose hold or tap kept coming by mistake.
+pub const TapHoldNotice = struct {
+    cp: u21,
+    count: u16,
+    /// The key held when its character was wanted; otherwise it tapped when
+    /// its hold was wanted.
+    hold: bool,
+    reason: ?model.TapHoldReason = null,
+};
+
+/// A key gets the tap/hold notice at most once in this many lessons.
+pub const tap_hold_notice_every: u32 = 5;
+/// The confidence strip marks a key with this many accidental holds (or
+/// taps) in its window.
+pub const tap_hold_marker_at: u8 = 2;
+/// A tapping term suggestion needs this many decisions of the key.
+pub const tap_hold_suggest_after: u32 = 50;
+
+/// A longer tapping term for a key that is held past it by mistake: 15 %
+/// more, at least 20 ms, rounded up to 10 ms.
+pub fn suggestedTerm(term_ms: u16) u16 {
+    const more = @max(@as(u32, 20), (@as(u32, term_ms) * 15 + 99) / 100);
+    const raw = @as(u32, term_ms) + more;
+    return @intCast(@min(@as(u32, 10_000), (raw + 9) / 10 * 10));
+}
+
+/// Whether a key's window asks for a longer tapping term: enough decisions,
+/// and the accidental holds come from holding past the term.
+pub fn suggestsTerm(summary: model.TapHoldSummary) bool {
+    return summary.total >= tap_hold_suggest_after and summary.accidental_holds > 0 and
+        summary.tapping_term_ms > 0 and summary.dominant_reason == .term_elapsed;
+}
+
+/// A tap/hold decision of Test layout, kept only for display.
+pub const TestTapHold = struct {
+    decision: tap_hold.Decision,
+    /// When it arrived, for the keyboard marks that fade out.
+    at_us: u64,
+};
+
+/// Whether the connected keyboard reports tap/hold decisions.
+pub const TapHoldSupport = enum {
+    /// No verified keyboard yet.
+    unknown,
+    /// Its firmware predates the decision report.
+    old_firmware,
+    reporting,
+};
 
 /// Classified tap/hold decisions of one lesson.
 pub const LessonTapHolds = struct {
@@ -125,6 +221,7 @@ pub const LessonEvent = union(enum) {
     green: u21,
     daily_goal,
     stage: Stage,
+    tap_hold: TapHoldNotice,
 };
 
 pub const max_lesson_events: usize = 4;
@@ -183,6 +280,27 @@ pub const TestKeysTelemetry = struct {
     modifiers: u8 = 0,
     pressed_count: usize = 0,
     active_combo_cp: ?u21 = null,
+    /// The latest tap/hold decisions, oldest first. Test layout is unscored:
+    /// they are shown and never counted.
+    tap_holds: [max_test_tap_holds]TestTapHold = undefined,
+    tap_hold_len: usize = 0,
+
+    pub const max_test_tap_holds = 4;
+
+    /// Keeps `decision` as the newest one; combos have no tap or hold.
+    pub fn addTapHold(self: *TestKeysTelemetry, decision: tap_hold.Decision, at_us: u64) void {
+        if (decision.combo) return;
+        if (self.tap_hold_len == max_test_tap_holds) {
+            std.mem.copyForwards(TestTapHold, self.tap_holds[0 .. max_test_tap_holds - 1], self.tap_holds[1..]);
+            self.tap_hold_len -= 1;
+        }
+        self.tap_holds[self.tap_hold_len] = .{ .decision = decision, .at_us = at_us };
+        self.tap_hold_len += 1;
+    }
+
+    pub fn tapHoldSlice(self: *const TestKeysTelemetry) []const TestTapHold {
+        return self.tap_holds[0..self.tap_hold_len];
+    }
 
     pub fn setLastText(self: *TestKeysTelemetry, text: []const u8) void {
         const kept = utf8Prefix(text, self.last_text.len);
@@ -271,6 +389,8 @@ pub const PendingRun = struct {
     newly_green: [max_round_changes]u32 = @splat(0),
     newly_green_len: usize = 0,
     tap_holds: LessonTapHolds = .{},
+    top_accidental_hold: ?[2]u32 = null,
+    top_accidental_tap: ?[2]u32 = null,
 };
 
 /// Every this many lessons of Stages 1 and 2 one is built around the
@@ -380,6 +500,13 @@ pub const Controller = struct {
     /// Text positions the latest tap decisions typed, newest last.
     tap_claims: [4]usize = undefined,
     tap_claim_len: usize = 0,
+    /// Keys with accidental decisions in the current lesson.
+    lesson_tap_hold_keys: [max_lesson_tap_hold_keys]LessonTapHoldKey = undefined,
+    lesson_tap_hold_key_len: usize = 0,
+    /// When each key last got the tap/hold notice, in `total_rounds`; this
+    /// session only.
+    tap_hold_noticed: [max_lesson_tap_hold_keys]struct { cp: u21, round: u32 } = undefined,
+    tap_hold_noticed_len: usize = 0,
 
     custom_text: [2048]u8 = @splat(0),
     custom_text_len: usize = 0,
@@ -937,6 +1064,7 @@ pub const Controller = struct {
         self.failure = null;
         self.round_recorded = false;
         self.lesson_tap_holds = .{};
+        self.lesson_tap_hold_key_len = 0;
         self.last_term_hold = null;
         self.tap_claim_len = 0;
         return;
@@ -1033,16 +1161,87 @@ pub const Controller = struct {
             if (held.class != .accidental_hold or !self.learning.amendRetroTap(held.cp)) return null;
             self.lesson_tap_holds.accidental_holds -|= 1;
             self.lesson_tap_holds.near_holds +|= 1;
+            for (self.lesson_tap_hold_keys[0..self.lesson_tap_hold_key_len]) |*key| if (key.cp == held.cp) {
+                key.accidental_holds -|= 1;
+                key.term -|= 1;
+            };
             return .near_hold;
         };
         const classified = tap_hold.classify(&self.profile, &self.session, decision, self.tap_claims[0..self.tap_claim_len]) orelse return null;
         if (classified.typed_at) |index| self.claimTap(index);
         self.learning.recordTapHold(classified.cp, classified.sample);
         self.lesson_tap_holds.count(classified.sample.class);
+        if (classified.sample.class == .accidental_hold or classified.sample.class == .accidental_tap) {
+            if (self.lessonTapHoldKey(classified.cp)) |key| key.add(classified.sample);
+        }
         if (decision.outcome == .hold and decision.reason == .term_elapsed) {
             self.last_term_hold = .{ .key_index = decision.key_index, .cp = classified.cp, .class = classified.sample.class };
         }
         return classified.sample.class;
+    }
+
+    fn lessonTapHoldKey(self: *Controller, cp: u21) ?*LessonTapHoldKey {
+        const keys = self.lesson_tap_hold_keys[0..self.lesson_tap_hold_key_len];
+        for (keys) |*key| if (key.cp == cp) return key;
+        if (self.lesson_tap_hold_key_len == max_lesson_tap_hold_keys) return null;
+        self.lesson_tap_hold_keys[self.lesson_tap_hold_key_len] = .{ .cp = cp };
+        self.lesson_tap_hold_key_len += 1;
+        return &self.lesson_tap_hold_keys[self.lesson_tap_hold_key_len - 1];
+    }
+
+    /// Keeps a Test layout decision for display. Test layout is unscored:
+    /// nothing reaches the statistics. Returns whether it was kept.
+    pub fn observeTestTapHold(self: *Controller, decision: tap_hold.Decision, now_us: u64) bool {
+        if (self.config.mode != .test_keys or decision.combo) return false;
+        self.test_keys.addTapHold(decision, now_us);
+        return true;
+    }
+
+    /// The lesson's key whose accidental decisions deserve a notice, if any:
+    /// most holds first, then most taps, skipping keys noticed in the last
+    /// `tap_hold_notice_every` lessons.
+    fn tapHoldNotice(self: *const Controller, keys: []const LessonTapHoldKey, round: u32) ?TapHoldNotice {
+        var best: ?TapHoldNotice = null;
+        for (keys) |key| {
+            if (self.noticedRecently(key.cp, round)) continue;
+            const candidate: TapHoldNotice = if (key.accidental_holds > 0)
+                .{ .cp = key.cp, .count = key.accidental_holds, .hold = true, .reason = key.holdReason() }
+            else if (key.accidental_taps > 0)
+                .{ .cp = key.cp, .count = key.accidental_taps, .hold = false, .reason = .released_within_term }
+            else
+                continue;
+            if (best) |b| {
+                if (b.hold and !candidate.hold) continue;
+                if (b.hold == candidate.hold and b.count >= candidate.count) continue;
+            }
+            best = candidate;
+        }
+        return best;
+    }
+
+    fn noticedRecently(self: *const Controller, cp: u21, round: u32) bool {
+        for (self.tap_hold_noticed[0..self.tap_hold_noticed_len]) |entry| {
+            if (entry.cp == cp) return round -| entry.round < tap_hold_notice_every;
+        }
+        return false;
+    }
+
+    fn rememberNotice(self: *Controller, cp: u21, round: u32) void {
+        for (self.tap_hold_noticed[0..self.tap_hold_noticed_len]) |*entry| if (entry.cp == cp) {
+            entry.round = round;
+            return;
+        };
+        if (self.tap_hold_noticed_len == self.tap_hold_noticed.len) {
+            // Forget the oldest notice.
+            var oldest: usize = 0;
+            for (self.tap_hold_noticed, 0..) |entry, i| {
+                if (entry.round < self.tap_hold_noticed[oldest].round) oldest = i;
+            }
+            self.tap_hold_noticed[oldest] = .{ .cp = cp, .round = round };
+            return;
+        }
+        self.tap_hold_noticed[self.tap_hold_noticed_len] = .{ .cp = cp, .round = round };
+        self.tap_hold_noticed_len += 1;
     }
 
     fn claimTap(self: *Controller, index: usize) void {
@@ -1107,6 +1306,14 @@ pub const Controller = struct {
         if (self.event_len >= max_lesson_events) return;
         self.events[self.event_len] = event;
         self.event_len += 1;
+    }
+
+    /// Puts `event` in front of the others; the last one makes room.
+    fn addEventFirst(self: *Controller, event: LessonEvent) void {
+        const kept = @min(self.event_len, max_lesson_events - 1);
+        std.mem.copyBackwards(LessonEvent, self.events[1 .. kept + 1], self.events[0..kept]);
+        self.events[0] = event;
+        self.event_len = kept + 1;
     }
 
     /// Notices of the last lesson that are still visible at `now`.
@@ -1175,6 +1382,9 @@ pub const Controller = struct {
         rd.slow_round = self.slow_round;
         rd.weak_spot = self.lesson_bigram;
         rd.tap_holds = self.lesson_tap_holds;
+        const th_keys = self.lesson_tap_hold_keys[0..self.lesson_tap_hold_key_len];
+        @memcpy(rd.tap_hold_keys[0..th_keys.len], th_keys);
+        rd.tap_hold_key_len = th_keys.len;
         if (self.lesson_bigram != null) {
             self.lessons_since_weak_spot = 0;
         } else {
@@ -1195,6 +1405,10 @@ pub const Controller = struct {
         for (changes.items[0..changes.len]) |change| {
             if (change.newly_green) self.addEvent(.{ .green = change.cp });
         }
+        if (self.tapHoldNotice(th_keys, self.learning.total_rounds)) |notice| {
+            self.addEventFirst(.{ .tap_hold = notice });
+            self.rememberNotice(notice.cp, self.learning.total_rounds);
+        }
 
         var pr: PendingRun = .{
             .utc_timestamp = self.utc_now_sec,
@@ -1211,6 +1425,12 @@ pub const Controller = struct {
         for (wb_slice, 0..) |wb, i| pr.weak_bigrams[i] = .{ wb.prev, wb.cur };
         if (self.lesson_bigram) |pair| pr.weak_spot = .{ pair[0], pair[1] };
         pr.tap_holds = self.lesson_tap_holds;
+        for (th_keys) |key| {
+            if (key.accidental_holds > 0 and (pr.top_accidental_hold == null or key.accidental_holds > pr.top_accidental_hold.?[1]))
+                pr.top_accidental_hold = .{ key.cp, key.accidental_holds };
+            if (key.accidental_taps > 0 and (pr.top_accidental_tap == null or key.accidental_taps > pr.top_accidental_tap.?[1]))
+                pr.top_accidental_tap = .{ key.cp, key.accidental_taps };
+        }
         for (changes.items[0..changes.len]) |change| {
             if (!change.newly_green) continue;
             pr.newly_green[pr.newly_green_len] = change.cp;
@@ -1258,6 +1478,8 @@ pub const Controller = struct {
                 .accidental_holds = pr.tap_holds.accidental_holds,
                 .accidental_taps = pr.tap_holds.accidental_taps,
                 .near_holds = pr.tap_holds.near_holds,
+                .top_accidental_hold = pr.top_accidental_hold,
+                .top_accidental_tap = pr.top_accidental_tap,
             })
         else {};
         if (appended) |_| self.pending_run = null else |_| {}
@@ -1863,6 +2085,11 @@ test "tap/hold decisions are classified during a lesson, counted for it and save
     }
     try t.expectEqual(LessonTapHolds{ .decisions = 3, .accidental_holds = 1, .near_holds = 1 }, owner.last_lesson.?.tap_holds);
     try t.expectEqual(LessonTapHolds{}, owner.lesson_tap_holds);
+    // The roll stays an accidental hold of f; the term hold became late.
+    try t.expectEqual(LessonTapHoldKey{ .cp = 'f', .accidental_holds = 1, .rolls = 1 }, owner.last_lesson.?.tapHoldKey('f').?);
+    try t.expectEqual(@as(?model.TapHoldReason, .permissive_hold), owner.last_lesson.?.tapHoldKey('f').?.holdReason());
+    // The notice comes first and names the key and the roll.
+    try t.expectEqual(LessonEvent{ .tap_hold = .{ .cp = 'f', .count = 1, .hold = true, .reason = .permissive_hold } }, owner.visibleEvents(now)[0]);
     const f = owner.tapHoldSummary('f').?;
     try t.expectEqual(@as(u8, 3), f.window);
     try t.expectEqual(@as(u8, 1), f.accidental_holds);
@@ -1876,10 +2103,86 @@ test "tap/hold decisions are classified during a lesson, counted for it and save
     try t.expectEqual(@as(u16, 3), runs.runs[0].tap_hold_decisions);
     try t.expectEqual(@as(u16, 1), runs.runs[0].accidental_holds);
     try t.expectEqual(@as(u16, 1), runs.runs[0].near_holds);
+    try t.expectEqual(@as(?[2]u32, .{ 'f', 1 }), runs.runs[0].top_accidental_hold);
+    try t.expectEqual(@as(?[2]u32, null), runs.runs[0].top_accidental_tap);
     var saved = try storage.loadState(t.allocator, t.io, tmp.dir, profile.profile_hash);
     defer saved.deinit();
     var reloaded = Controller.init(@splat(1));
     reloaded.config.letter_order = .home_row;
     _ = reloaded.bindProfile(profile, saved.state);
     try t.expectEqualDeep(f, reloaded.tapHoldSummary('f').?);
+}
+
+test "the tap/hold notice names a key at most once in five lessons" {
+    const t = std.testing;
+    var owner = Controller.init(@splat(1));
+    const roll: LessonTapHoldKey = .{ .cp = 'a', .accidental_holds = 3, .rolls = 3 };
+    const slow: LessonTapHoldKey = .{ .cp = 's', .accidental_holds = 1, .term = 1 };
+    const tapped: LessonTapHoldKey = .{ .cp = 'o', .accidental_taps = 4 };
+    // Holds come before taps, more before fewer.
+    const first = owner.tapHoldNotice(&.{ tapped, slow, roll }, 10).?;
+    try t.expectEqual(TapHoldNotice{ .cp = 'a', .count = 3, .hold = true, .reason = .permissive_hold }, first);
+    owner.rememberNotice('a', 10);
+    try t.expectEqual(@as(u21, 's'), owner.tapHoldNotice(&.{ roll, slow }, 14).?.cp);
+    try t.expectEqual(@as(?model.TapHoldReason, .term_elapsed), owner.tapHoldNotice(&.{slow}, 14).?.reason);
+    try t.expectEqual(@as(?TapHoldNotice, null), owner.tapHoldNotice(&.{roll}, 14));
+    try t.expectEqual(@as(u21, 'a'), owner.tapHoldNotice(&.{roll}, 15).?.cp);
+    try t.expectEqual(TapHoldNotice{ .cp = 'o', .count = 4, .hold = false, .reason = .released_within_term }, owner.tapHoldNotice(&.{tapped}, 11).?);
+
+    // It goes in front of the other notices.
+    owner.addEvent(.{ .green = 'c' });
+    owner.addEvent(.daily_goal);
+    owner.addEventFirst(.{ .tap_hold = first });
+    try t.expectEqual(@as(usize, 3), owner.event_len);
+    try t.expectEqual(LessonEvent{ .tap_hold = first }, owner.events[0]);
+    try t.expectEqual(LessonEvent{ .green = 'c' }, owner.events[1]);
+}
+
+test "a longer tapping term is suggested only when holding past it is the cause" {
+    const t = std.testing;
+    try t.expectEqual(@as(u16, 230), suggestedTerm(200));
+    try t.expectEqual(@as(u16, 140), suggestedTerm(120));
+    try t.expectEqual(@as(u16, 290), suggestedTerm(250));
+    var s: model.TapHoldSummary = .{
+        .cp = 's',
+        .window = 30,
+        .accidental_holds = 2,
+        .accidental_taps = 0,
+        .near_holds = 4,
+        .wanted_holds = 0,
+        .dominant_reason = .term_elapsed,
+        .typical_ms = 160,
+        .overlap_ms = 0,
+        .tapping_term_ms = 200,
+        .last_overlap_cp = null,
+        .total = 50,
+    };
+    try t.expect(suggestsTerm(s));
+    s.total = 49;
+    try t.expect(!suggestsTerm(s));
+    s.total = 80;
+    s.dominant_reason = .permissive_hold;
+    try t.expect(!suggestsTerm(s));
+}
+
+test "Test layout keeps its last four decisions for display and counts none" {
+    const t = std.testing;
+    var owner = Controller.init(@splat(1));
+    const decision: tap_hold.Decision = .{ .key_index = 3, .outcome = .hold, .reason = .permissive_hold, .elapsed_ms = 143, .other_key = 4, .tapping_term_ms = 200 };
+    try t.expect(!owner.observeTestTapHold(decision, 1));
+    owner.config.mode = .test_keys;
+    for (0..6) |i| {
+        var d = decision;
+        d.key_index = i;
+        try t.expect(owner.observeTestTapHold(d, i));
+    }
+    var combo = decision;
+    combo.combo = true;
+    try t.expect(!owner.observeTestTapHold(combo, 9));
+    const kept = owner.test_keys.tapHoldSlice();
+    try t.expectEqual(@as(usize, 4), kept.len);
+    try t.expectEqual(@as(usize, 2), kept[0].decision.key_index);
+    try t.expectEqual(@as(usize, 5), kept[3].decision.key_index);
+    try t.expectEqual(@as(u64, 5), kept[3].at_us);
+    try t.expectEqual(@as(usize, 0), owner.learning.tap_hold_len);
 }

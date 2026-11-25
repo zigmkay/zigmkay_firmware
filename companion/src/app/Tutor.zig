@@ -73,12 +73,16 @@ pub const Frame = struct {
     live: bool,
     metadata: []desktop.practice.KeyMetadata,
     keyboard: tutor.Frame,
+    /// The practised keyboard is the one the editor shows.
+    editor_board: bool = false,
 };
 
 /// What the tutor screen asked for this frame.
 pub const Outcome = struct {
     leave: bool = false,
     action: ?desktop.practice_controller.Action = null,
+    /// Opens this key in the editor with its tapping term focused.
+    edit_key: ?tutor.EditKey = null,
 };
 
 pub fn deinit(self: *Tutor) void {
@@ -240,16 +244,22 @@ pub fn observe(app: *App, now_us: u64) !void {
         self.snapshot = try Snapshot.init(app, selected, live);
     }
     practice.observe(if (self.snapshot) |*value| value.control else try app.model.id());
-    routeTapHolds(app);
+    routeTapHolds(app, now_us);
     flushPersistence(app, now_us);
 }
 
 /// Hands the keyboard's tap/hold decisions to a lesson typed on that very
 /// keyboard and layout; the controller ignores them outside a lesson. Others
-/// are dropped, so none of them is counted against a later lesson.
-fn routeTapHolds(app: *App) void {
+/// are dropped, so none of them is counted against a later lesson. Test
+/// layout only shows the latest ones and never counts them.
+fn routeTapHolds(app: *App, now_us: u64) void {
     const self = &app.tutor;
     defer app.live.tap_holds.clear();
+    if (self.controller.config.mode == .test_keys) {
+        if (!app.live.verified()) return;
+        for (app.live.tap_holds.slice()) |decision| _ = self.controller.observeTestTapHold(decision, now_us);
+        return;
+    }
     const snapshot = if (self.snapshot) |*value| value else return;
     if (!snapshot.live or !app.live.verified() or !sameLayout(&snapshot.model, &app.live.model)) return;
     for (app.live.tap_holds.slice()) |decision| _ = self.controller.observeTapHold(decision);
@@ -331,7 +341,7 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
     else if (!live)
         .unverified
     else if (sameLayout(&app.live.model, &app.model)) .none else .editor_changed;
-    return .{ .labels = labels, .live = live, .metadata = metadata, .keyboard = .{
+    return .{ .labels = labels, .live = live, .metadata = metadata, .editor_board = std.mem.eql(u8, active_board.entry.selector, board.entry.selector), .keyboard = .{
         .source = if (live) .live else .guide,
         .labels = labels,
         .geometry = geometry,
@@ -344,6 +354,7 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
         .modifiers = modifiers,
         .pressed = pressed,
         .layout_notice = layout_notice,
+        .tap_hold_support = if (app.frame_limit != null) app.fixture.tap_hold_support else app.live.tapHoldSupport(),
     } };
 }
 
@@ -399,6 +410,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
         .event_times = app.events.times[0..app.events.time_count],
         .runs = if (self.loaded_runs) |r| r.runs else &.{},
         .board_lookup = boardLookup,
+        .editor_board = frame.editor_board,
     };
     const rect = app.window.data().rect;
     const bounds: dvui.Rect = .{ .x = 0, .y = 0, .w = @max(300, rect.w), .h = @max(300, rect.h) };
@@ -408,6 +420,7 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
     };
     outcome.leave = drawn.leave;
     outcome.action = drawn.action;
+    outcome.edit_key = drawn.edit_key;
     return outcome;
 }
 
@@ -415,7 +428,20 @@ pub fn draw(app: *App, frame: Frame, now_us: u64) Outcome {
 pub fn finishFrame(app: *App, outcome: Outcome, now_us: u64) void {
     const self = &app.tutor;
     const practice = &self.controller;
-    if (outcome.leave) {
+    if (outcome.edit_key) |key| {
+        // A tapping term suggestion: back to the editor on that key's hold,
+        // with the tapping term field focused. Nothing changes until the
+        // user edits and flashes.
+        practice.pause(now_us);
+        app.practicing = false;
+        self.view.sheet = .none;
+        const layers = app.model.document().layers.len;
+        app.model.layer = @min(key.layer, layers - 1);
+        app.model.select(key.key_index, false);
+        app.view.key_editor.open = .hold;
+        app.view.key_editor.layer = app.model.layer;
+        app.view.key_editor.focus_term = true;
+    } else if (outcome.leave) {
         practice.pause(now_us);
         app.practicing = false;
     } else if (outcome.action) |action| {

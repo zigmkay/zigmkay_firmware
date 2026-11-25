@@ -13,6 +13,7 @@ const lp = desktop.practice_layout_profile;
 const keyboard_view = @import("practice_keyboard_ui.zig");
 const key_change = @import("practice_key_change_ui.zig");
 const key_progress = desktop.practice_key_progress;
+const tap_hold_ui = @import("practice_tap_hold_ui.zig");
 
 pub const Scroll = struct { position: f32 = 0, at: ?u64 = null };
 
@@ -44,9 +45,17 @@ pub fn caption(text: []const u8, bounds: dvui.Rect, size: f32, color: dvui.Color
     });
 }
 
+pub const StripOptions = struct {
+    /// Keycap labels, for what a tap/hold key does while held.
+    labels: ?*const desktop.label_cache.LabelCache = null,
+    /// Shows this chip's hover card without the pointer (gallery fixtures).
+    forced_tooltip: ?u21 = null,
+};
+
 /// Key-confidence strip (adaptive per-key progression): header row + single-row chip strip grouped
-/// into Home row | Unlocked | Locked.
-pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds: dvui.Rect) !void {
+/// into Home row | Unlocked | Locked. Returns whether a hover card asked for
+/// the tap/hold details of the Progress sheet.
+pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds: dvui.Rect, options: StripOptions) !bool {
     const card = dvui.box(@src(), .{}, .{
         .rect = bounds,
         .background = true,
@@ -159,7 +168,9 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
 
     // Single-row chip strip grouped: First letters | Unlocked | Locked
     const order = lm.unlock_order[0..lm.unlock_len];
-    if (order.len == 0) return;
+    if (order.len == 0) return false;
+    var open_details = false;
+    const profile: ?*const lp.LayoutProfile = if (owner.profile_bound) &owner.profile else null;
 
     const home_len = @min(lm.firstLetters().len, order.len);
     const unlocked_len = @min(lm.unlocked_count, order.len);
@@ -268,10 +279,19 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
             dot.deinit();
         }
 
+        // A key that keeps holding or tapping by mistake gets a small marker.
+        const th_summary: ?desktop.practice_model.TapHoldSummary = if (is_unlocked) owner.tapHoldSummary(ch) else null;
+        const th: ?TapHoldCard = if (th_summary) |s| if (s.window > 0) .{
+            .summary = s,
+            .role = try tap_hold_ui.roleOfChar(arena, profile, options.labels, ch),
+        } else null else null;
+        if (th) |th_card| tap_hold_ui.chipMarker(theme, chip_rect, th_card.summary, th_card.role, i);
+
         if (show_meter) {
             const kp = key_progress.of(chip_stat.?, owner.config.target_wpm);
             chipMeter(theme, chip_rect, kp, is_mastered, i);
-            keyTooltip(theme, chip_phys, ch, chip_stat.?, kp, i);
+            const forced = options.forced_tooltip != null and options.forced_tooltip.? == ch;
+            if (try keyTooltip(theme, chip_phys, ch, chip_stat.?, kp, th, forced, i)) open_details = true;
         } else if (is_focus) {
             const bar_w = @min(10.0, chip_w * 0.5);
             const underline = dvui.box(@src(), .{}, .{
@@ -288,7 +308,14 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
 
         x += chip_w + gap;
     }
+    return open_details;
 }
+
+/// The tap/hold window of a chip's key and what the key does while held.
+const TapHoldCard = struct {
+    summary: desktop.practice_model.TapHoldSummary,
+    role: tap_hold_ui.Role,
+};
 
 fn fillRect(rect: dvui.Rect, color: dvui.Color, id: usize) void {
     if (rect.w <= 0 or rect.h <= 0) return;
@@ -346,17 +373,22 @@ fn tooltipLine(text: []const u8, color: dvui.Color, size: f32, weight: dvui.Font
     });
 }
 
-/// Hover card for a chip: what the key still needs, in plain numbers.
+/// Hover card for a chip: what the key still needs, in plain numbers, and
+/// for a tap/hold key how its taps and holds go. Returns whether "Details in
+/// Progress" was clicked.
 fn keyTooltip(
     theme: ui.Theme,
     active: dvui.Rect.Physical,
     ch: u8,
     st: desktop.practice_model.KeyStat,
     kp: key_progress.KeyProgress,
+    th: ?TapHoldCard,
+    forced: bool,
     i: usize,
-) void {
+) !bool {
     var tt: dvui.FloatingTooltipWidget = undefined;
-    tt.init(@src(), .{ .active_rect = active, .position = .vertical }, .{
+    // The tap/hold card has a link, so it stays open under the pointer.
+    tt.init(@src(), .{ .active_rect = active, .position = .vertical, .interactive = th != null }, .{
         .id_extra = 0x5800 + i,
         .background = true,
         .color_fill = .{ .color = theme.panel },
@@ -364,10 +396,11 @@ fn keyTooltip(
         .border = .all(1),
         .corners = .all(8),
         .padding = .{ .x = 12, .y = 9, .w = 12, .h = 9 },
-        .min_size_content = .{ .w = 260 },
+        .min_size_content = .{ .w = if (th != null) 330 else 260 },
     });
     defer tt.deinit();
-    if (!tt.shown()) return;
+    if (forced) tt.showing = true;
+    if (!tt.shown()) return false;
 
     const arena = dvui.currentWindow().arena();
     const up = std.ascii.toUpper(ch);
@@ -381,24 +414,26 @@ fn keyTooltip(
             kp.window,
         }),
         .speed => std.fmt.allocPrint(arena, "{c} · not green yet: {d:.0} of {d:.0} WPM", .{ up, kp.wpm, kp.target_wpm }),
-    } catch return;
+    } catch return false;
     tooltipLine(title, theme.text, 13.5, .bold, 0);
 
-    const speed = std.fmt.allocPrint(arena, "Speed     {d:.0} / {d:.0} WPM{s}", .{ kp.wpm, kp.target_wpm, if (kp.speedOk()) "  ✓" else "" }) catch return;
+    const speed = std.fmt.allocPrint(arena, "Speed     {d:.0} / {d:.0} WPM{s}", .{ kp.wpm, kp.target_wpm, if (kp.speedOk()) "  ✓" else "" }) catch return false;
     tooltipLine(speed, if (kp.speedOk()) theme.success else theme.muted, 12.5, .normal, 1);
     const hits = if (kp.window == 0)
         "Hits      no presses yet"
     else
-        std.fmt.allocPrint(arena, "Hits      {d} of last {d} · needs {d}{s}", .{ kp.hits, kp.window, kp.hits_needed, if (kp.hitsOk()) "  ✓" else "" }) catch return;
+        std.fmt.allocPrint(arena, "Hits      {d} of last {d} · needs {d}{s}", .{ kp.hits, kp.window, kp.hits_needed, if (kp.hitsOk()) "  ✓" else "" }) catch return false;
     tooltipLine(hits, if (kp.window > 0 and kp.hitsOk()) theme.success else theme.muted, 12.5, .normal, 2);
-    const presses = std.fmt.allocPrint(arena, "Presses   {d} · needs {d}{s}", .{ kp.presses, model_min_samples, if (kp.pressesOk()) "  ✓" else "" }) catch return;
+    const presses = std.fmt.allocPrint(arena, "Presses   {d} · needs {d}{s}", .{ kp.presses, model_min_samples, if (kp.pressesOk()) "  ✓" else "" }) catch return false;
     tooltipLine(presses, if (kp.pressesOk()) theme.success else theme.muted, 12.5, .normal, 3);
 
     const foot = if (key_progress.oldestMissLeavesIn(st)) |n|
-        std.fmt.allocPrint(arena, "A miss counts for {d} presses; the oldest one stops counting in {d}.", .{ desktop.practice_model.accuracy_window, n }) catch return
+        std.fmt.allocPrint(arena, "A miss counts for {d} presses; the oldest one stops counting in {d}.", .{ desktop.practice_model.accuracy_window, n }) catch return false
     else
         "Every press of the last 30 was right on the first try.";
     tooltipLine(foot, theme.muted, 11.5, .normal, 4);
+    const card = th orelse return false;
+    return tap_hold_ui.tooltipSection(theme, ch, card.summary, card.role);
 }
 
 const model_min_samples = desktop.practice_model.min_samples_for_mastery;
@@ -990,10 +1025,17 @@ fn quietTypoMark(theme: ui.Theme, cell: dvui.Rect, wrong: ?u21, idx: usize) void
 }
 
 /// Notices of the last lesson in the top right corner of `area`. They fade
-/// out on their own after `control.notice_us` and never take input.
-pub fn lessonNotices(owner: *const control.Controller, theme: ui.Theme, area: dvui.Rect, now_us: u64) !void {
+/// out on their own after `control.notice_us`. Only the tap/hold notice takes
+/// a click: it returns true to open its section of the Progress sheet.
+pub fn lessonNotices(
+    owner: *const control.Controller,
+    theme: ui.Theme,
+    area: dvui.Rect,
+    now_us: u64,
+    labels: ?*const desktop.label_cache.LabelCache,
+) !bool {
     const events = owner.visibleEvents(now_us);
-    if (events.len == 0) return;
+    if (events.len == 0) return false;
     const arena = dvui.currentWindow().arena();
     const age = now_us -| owner.events_at_us;
     const fade_us: u64 = 600_000;
@@ -1001,6 +1043,8 @@ pub fn lessonNotices(owner: *const control.Controller, theme: ui.Theme, area: dv
     const alpha: f32 = if (left < fade_us) @as(f32, @floatFromInt(left)) / @as(f32, @floatFromInt(fade_us)) else 1.0;
     var y = area.y + 14;
     var last_id: ?dvui.Id = null;
+    var open_details = false;
+    const profile: ?*const lp.LayoutProfile = if (owner.profile_bound) &owner.profile else null;
     for (events, 0..) |event, i| {
         const text = switch (event) {
             .new_letter => |ch| try std.fmt.allocPrint(arena, "New letter: {c}", .{std.ascii.toUpper(ch)}),
@@ -1010,10 +1054,14 @@ pub fn lessonNotices(owner: *const control.Controller, theme: ui.Theme, area: dv
                 "A key is green now",
             .daily_goal => "Daily goal reached",
             .stage => |stage| try std.fmt.allocPrint(arena, "On to {s}", .{stage.title()}),
+            .tap_hold => |notice| try tap_hold_ui.noticeText(arena, notice, try tap_hold_ui.roleOfChar(arena, profile, labels, notice.cp)),
         };
-        const w = ui.editorFont(text, 14.5).textSize(text).w + 52;
+        const w = @min(area.w - 32, ui.editorFont(text, 14.5).textSize(text).w + 52);
         const rect: dvui.Rect = .{ .x = area.x + area.w - 16 - w, .y = y, .w = w, .h = 38 };
-        const color = theme.success;
+        const color = switch (event) {
+            .tap_hold => |notice| if (notice.hold) tap_hold_ui.holdColor(theme) else theme.warning,
+            else => theme.success,
+        };
         const box = dvui.box(@src(), .{}, .{
             .id_extra = 0x7a00 + i,
             .rect = rect,
@@ -1027,10 +1075,30 @@ pub fn lessonNotices(owner: *const control.Controller, theme: ui.Theme, area: dv
             .tag = if (i == 0) "practice.notice" else null,
         });
         last_id = box.data().id;
+        if (event == .tap_hold) {
+            // The whole notice is a link to the Progress sheet section.
+            var click: dvui.ButtonWidget = undefined;
+            click.init(@src(), .{}, .{
+                .id_extra = 0x7a40 + i,
+                .rect = .{ .x = 0, .y = 0, .w = rect.w, .h = rect.h },
+                .background = false,
+                .padding = .{},
+                .margin = .{},
+                .tag = "practice.notice.tap_hold",
+            });
+            click.processEvents();
+            if (click.hovered()) dvui.cursorSet(.hand);
+            if (click.clicked()) open_details = true;
+            click.deinit();
+        }
         box.deinit();
         const mark = switch (event) {
             .new_letter, .stage => "+",
             .green, .daily_goal => "✓",
+            .tap_hold => |notice| blk: {
+                const role = try tap_hold_ui.roleOfChar(arena, profile, labels, notice.cp);
+                break :blk if (notice.hold and role.glyph.len > 0 and role.glyph.len <= 3) role.glyph else "!";
+            },
         };
         caption(mark, .{ .x = rect.x + 8, .y = rect.y, .w = 22, .h = rect.h }, 16, color.opacity(alpha), null);
         label(text, .{ .x = rect.x + 34, .y = rect.y, .w = w - 40, .h = rect.h }, 14.5, theme.text.opacity(alpha), null);
@@ -1041,9 +1109,19 @@ pub fn lessonNotices(owner: *const control.Controller, theme: ui.Theme, area: dv
         const wait = if (left > fade_us) left - fade_us else @min(left, 50_000);
         dvui.timer(id, @intCast(@max(@as(u64, 1), wait)));
     }
+    return open_details;
 }
 
 /// Clean live telemetry bar for Test layout mode (no scoring, no lessons).
+/// Height of the telemetry bar's first row.
+pub const telemetry_row_h: f32 = 54;
+
+/// The tap/hold row of the telemetry bar, shown when `tap_holds` is set.
+pub const TelemetryTapHolds = struct {
+    labels: ?*const desktop.label_cache.LabelCache,
+    support: control.TapHoldSupport,
+};
+
 pub fn testKeysTelemetryBar(
     owner: *const control.Controller,
     theme: ui.Theme,
@@ -1051,6 +1129,7 @@ pub fn testKeysTelemetryBar(
     layer: usize,
     layer_name: []const u8,
     modifiers: u8,
+    tap_holds: ?TelemetryTapHolds,
 ) !void {
     const bar = dvui.box(@src(), .{}, .{
         .rect = bounds,
@@ -1068,7 +1147,13 @@ pub fn testKeysTelemetryBar(
     const arena = dvui.currentWindow().arena();
     const lc = ui.layerColor(theme, layer);
     const pill_h: f32 = 32;
-    const y: f32 = (bounds.h - pill_h) * 0.5;
+    const y: f32 = (telemetry_row_h - pill_h) * 0.5;
+    if (tap_holds) |row| try tap_hold_ui.testRow(owner, theme, .{
+        .x = 14,
+        .y = telemetry_row_h - 4,
+        .w = @max(0, bounds.w - 28),
+        .h = tap_hold_ui.test_row_h,
+    }, row.labels, row.support);
 
     // Layer badge (avoid redundant "Layer 0 · Layer 1" when the keymap already names it "Layer ...")
     const ltext = if (layer_name.len > 0)

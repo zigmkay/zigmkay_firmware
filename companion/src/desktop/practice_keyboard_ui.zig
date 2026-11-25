@@ -36,8 +36,12 @@ pub const Params = struct {
     error_flash_key: ?usize = null,
     /// How each key went in the last lesson, until the next one starts.
     heat: []const HeatKey = &.{},
+    /// Outlined keys with a small badge: tap/hold decisions (all modes).
+    marks: []const KeyMark = &.{},
     source_caption: []const u8 = "",
     layer_name: []const u8 = "",
+    /// The caption carries a longer legend; the right-hand legend gives way.
+    wide_caption: bool = false,
 };
 
 pub const Heat = enum { clean, slow, missed };
@@ -46,6 +50,24 @@ pub const HeatKey = struct {
     key_index: usize,
     heat: Heat,
 };
+
+/// A key outlined in `color` with a badge such as "HOLD ⇧" at its corner.
+pub const KeyMark = struct {
+    key_index: usize,
+    color: dvui.Color,
+    badge: []const u8 = "",
+    /// A dashed outline: something the last lesson recorded. Solid ones
+    /// show what just happened.
+    dashed: bool = false,
+    /// Fades the mark out; 1 is fully visible.
+    alpha: f32 = 1,
+};
+
+/// The keyboard's hold color: Shift and layer holds on the keycaps and the
+/// tap/hold feedback.
+pub fn holdColor(t: ui.Theme) dvui.Color {
+    return ui.mix(ui.layerColor(t, 5), t.accent, 0.35);
+}
 
 /// Theme-derived semantic colors (100% ui.Theme & ui.layer_palette; no hardcoded hex).
 const Palette = struct {
@@ -58,7 +80,7 @@ const Palette = struct {
     fn fromTheme(t: ui.Theme) Palette {
         return .{
             .tap = t.warning,
-            .hold = ui.mix(ui.layerColor(t, 5), t.accent, 0.35),
+            .hold = holdColor(t),
             .combo = ui.layerColor(t, 4),
             .err = t.danger,
             .ok = t.success,
@@ -190,6 +212,9 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, params: Params) !void {
         const heat: ?Heat = if (is_tutor) for (params.heat) |h| {
             if (h.key_index == idx) break h.heat;
         } else null else null;
+        const mark: ?KeyMark = for (params.marks) |m| {
+            if (m.key_index == idx) break m;
+        } else null;
         const is_active_key = item.target or item.hold or is_combo or item.pressed or is_anchor_ring;
         const locked = is_tutor and params.dim_locked and !is_active_key and isKeyLocked(params.labels, idx, params.unlocked_mask, space_key);
         const finger: lp.Finger = if (params.profile) |p| p.fingerFor(idx) else .unknown;
@@ -209,7 +234,20 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, params: Params) !void {
             .is_index_home = is_index_home,
             .is_error_flash = is_error_flash,
             .heat = heat,
+            .mark = mark,
         });
+    }
+
+    // Badges go on top of every keycap, so a neighbour never covers them.
+    for (plan) |item| {
+        const idx: usize = item.placed.key_index;
+        const mark = for (params.marks) |m| {
+            if (m.key_index == idx) break m;
+        } else continue;
+        if (mark.badge.len == 0) continue;
+        const rect = ui.rect(item.placed.rect);
+        const turn: ui.Turn = .{ .radians = item.placed.rotation, .pivot = rect.center() };
+        drawBadge(theme, turn.point(.{ .x = rect.x + rect.w, .y = rect.y }), mark, item.placed.id);
     }
 
     // Draw vector guidance overlays on top of keycaps.
@@ -260,6 +298,7 @@ const KeyState = struct {
     is_index_home: bool,
     is_error_flash: bool,
     heat: ?Heat = null,
+    mark: ?KeyMark = null,
 };
 
 /// During Stage 1 (Home row) and Stage 2 (All letters), only unlocked `a..z`
@@ -340,6 +379,20 @@ fn drawKeycap(
         thickness = 2.0;
     }
 
+    // A dashed mark replaces the border with dashes drawn after the face.
+    var dashes: ?dvui.Color = null;
+    if (ks.mark) |mark| {
+        const color = ui.mix(border, mark.color, mark.alpha);
+        fill = ui.mix(fill, mark.color, 0.2 * mark.alpha);
+        thickness = 2.5;
+        if (mark.dashed) {
+            dashes = color;
+            border = fill;
+        } else {
+            border = color;
+        }
+    }
+
     if (ks.is_anchor_ring and !is_tap and !is_hold and !ks.is_combo) {
         const fc = if (ks.finger != .unknown) fingerColor(theme, ks.finger) else theme.accent;
         fill = ui.mix(theme.keycap, fc, 0.14);
@@ -391,6 +444,7 @@ fn drawKeycap(
         .divider = divider,
         .thickness = thickness,
     });
+    if (dashes) |color| drawDashedOutline(rect, turn, color, 2.2);
 
     // 2. Finger-zone accent strip at very bottom of unlocked keycaps in Tutor mode
     const has_finger_strip = ks.show_finger_zones and !ks.locked and ks.finger != .unknown;
@@ -490,6 +544,82 @@ fn formatHoldCue(
         }
     }
     return if (is_one_shot) "1-SHOT" else "HOLD";
+}
+
+/// Dashes along the straight edges of a (possibly turned) keycap.
+pub fn drawDashedOutline(rect: dvui.Rect, turn: ui.Turn, color: dvui.Color, thickness: f32) void {
+    const parent = dvui.parentGet();
+    const corner = @max(4.0, rect.w * 0.12);
+    const inset = thickness / 2;
+    const left = rect.x + inset;
+    const right = rect.x + rect.w - inset;
+    const top = rect.y + inset;
+    const bottom = rect.y + rect.h - inset;
+    const edges = [_][2]dvui.Point{
+        .{ .{ .x = left + corner, .y = top }, .{ .x = right - corner, .y = top } },
+        .{ .{ .x = right, .y = top + corner }, .{ .x = right, .y = bottom - corner } },
+        .{ .{ .x = right - corner, .y = bottom }, .{ .x = left + corner, .y = bottom } },
+        .{ .{ .x = left, .y = bottom - corner }, .{ .x = left, .y = top + corner } },
+    };
+    const dash = @max(3.0, rect.w / 9);
+    for (edges) |edge| {
+        const dx = edge[1].x - edge[0].x;
+        const dy = edge[1].y - edge[0].y;
+        const length = @sqrt(dx * dx + dy * dy);
+        if (length < 1) continue;
+        const count: usize = @intFromFloat(@max(1, @floor((length + dash) / (dash * 2))));
+        const used = @as(f32, @floatFromInt(count)) * dash * 2 - dash;
+        const start = (length - used) / 2;
+        for (0..count) |i| {
+            const a = (start + @as(f32, @floatFromInt(i)) * dash * 2) / length;
+            const b = @min(1.0, a + dash / length);
+            const p0 = turn.point(.{ .x = edge[0].x + dx * a, .y = edge[0].y + dy * a });
+            const p1 = turn.point(.{ .x = edge[0].x + dx * b, .y = edge[0].y + dy * b });
+            var seg: dvui.Path.Builder = .init(dvui.currentWindow().lifo());
+            defer seg.deinit();
+            seg.addPoint(parent.screenRectScale(.{ .x = p0.x, .y = p0.y }).r.topLeft());
+            seg.addPoint(parent.screenRectScale(.{ .x = p1.x, .y = p1.y }).r.topLeft());
+            const scale = parent.screenRectScale(.{}).s;
+            seg.build().stroke(.{ .thickness = thickness * scale, .color = .{ .color = color } });
+        }
+    }
+}
+
+/// A small pill centred on a keycap's top-right corner.
+fn drawBadge(theme: ui.Theme, corner: dvui.Point, mark: KeyMark, id: u16) void {
+    const font = ui.editorFont(mark.badge, 14).withWeight(.bold);
+    const size = font.textSize(mark.badge);
+    const w = size.w + 14;
+    const h: f32 = 23;
+    const rect: dvui.Rect = .{ .x = corner.x - w + 10, .y = corner.y - h / 2 - 2, .w = w, .h = h };
+    const pill = dvui.box(@src(), .{}, .{
+        .id_extra = @as(usize, id) * 16 + 9,
+        .rect = rect,
+        .background = true,
+        .color_fill = .{ .color = mark.color.opacity(mark.alpha) },
+        .color_border = .{ .color = theme.panel.opacity(mark.alpha) },
+        .border = .all(1.5),
+        .corners = .all(h / 2),
+        .padding = .{},
+        .margin = .{},
+    });
+    pill.deinit();
+    dvui.labelNoFmt(@src(), mark.badge, .{ .align_x = 0.5, .align_y = 0.5 }, .{
+        .id_extra = @as(usize, id) * 16 + 10,
+        .rect = rect,
+        .font = font,
+        .color_text = .{ .color = badgeText(theme, mark.color).opacity(mark.alpha) },
+        .padding = .{},
+        .margin = .{},
+    });
+}
+
+/// Dark text on a light badge and light text on a dark one.
+fn badgeText(theme: ui.Theme, fill: dvui.Color) dvui.Color {
+    const luma = 0.299 * @as(f32, @floatFromInt(fill.r)) + 0.587 * @as(f32, @floatFromInt(fill.g)) + 0.114 * @as(f32, @floatFromInt(fill.b));
+    const dark = if (theme.bg.r < 128) theme.bg else theme.text;
+    const light = if (theme.bg.r < 128) theme.text else theme.panel;
+    return if (luma > 150) dark else light;
 }
 
 fn drawMotionChevron(anchor: dvui.Rect, target: dvui.Rect, tint: dvui.Color) void {
@@ -616,10 +746,13 @@ fn drawFooterLegend(
         try std.fmt.allocPrint(arena, "{s} · {s}", .{ params.source_caption, layer_tag })
     else
         layer_tag;
+    // The heatmap legend may run longer than the left half; the right side
+    // gives way to it.
+    const left_share: f32 = if (params.wide_caption) 0.7 else 0.44;
 
     var muted = theme;
     muted.text = theme.muted;
-    var left_opts = ui.options(muted, .{ .x = 16, .y = y, .w = @max(0, bounds.w * 0.44), .h = 20 }, 13);
+    var left_opts = ui.options(muted, .{ .x = 16, .y = y, .w = @max(0, bounds.w * left_share), .h = 20 }, 13);
     left_opts.padding = .{};
     left_opts.tag = "practice.keyboard.source";
     dvui.labelNoFmt(@src(), left_text, .{ .align_y = 0.5, .ellipsize = true }, left_opts);
@@ -655,7 +788,7 @@ fn drawFooterLegend(
         };
         for (fingers, 0..) |fi, i| {
             cursor_x -= fi.w;
-            if (cursor_x < bounds.w * 0.45) break;
+            if (cursor_x < bounds.w * (left_share + 0.01)) break;
             drawLegendItem(theme, cursor_x, y, fingerColor(theme, fi.f), fi.label, 0x3100 + i);
         }
     }
