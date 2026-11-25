@@ -10,6 +10,7 @@ pub const practice_letter_order = @import("practice_letter_order.zig");
 pub const practice_storage = @import("practice_storage.zig");
 pub const practice_view = @import("practice_view.zig");
 pub const practice_tap_hold = @import("practice_tap_hold.zig");
+pub const practice_scratchpad = @import("practice_scratchpad.zig");
 pub const practice_controller = @import("practice_controller.zig");
 pub const host_input = @import("host_input.zig");
 pub const live_keyboard = @import("live_keyboard.zig");
