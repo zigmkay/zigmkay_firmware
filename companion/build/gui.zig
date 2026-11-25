@@ -58,6 +58,9 @@ const doc_screenshots = [_]struct { []const u8, []const u8 }{
     .{ "4", "docs/screenshots/typing-practice/stages.png" },
     .{ "5", "docs/screenshots/typing-practice/progress.png" },
     .{ "6", "docs/screenshots/typing-practice/test-keys.png" },
+    .{ "15", "docs/screenshots/typing-practice/tap-hold-test-layout.png" },
+    .{ "16", "docs/screenshots/typing-practice/tap-hold-tutor.png" },
+    .{ "17", "docs/screenshots/typing-practice/tap-hold-progress.png" },
 };
 
 /// Returns the application executable.

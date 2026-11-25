@@ -179,6 +179,56 @@ letters and the host keyboard layout. The same layout on two keyboards shares
 its progress, while QWERTY and Colemak stay apart. Key positions are compared
 by hand, finger and row.
 
+### Tap/hold feedback
+
+Home-row modifiers and a layer-tap Space make a typical mistake: a quick roll
+into the next key turns the letter into Shift or a layer, or a capital comes
+out lowercase because the Shift key was released too early. With a connected
+Zigmkay keyboard running current firmware, the Tutor and Test layout show
+these from the keyboard's own decisions. Other keyboards, older firmware and
+offline practice show nothing of this, and the scoring does not change: an
+accidental hold still counts as a normal miss of the letter.
+
+- **Test layout** adds a second row to the telemetry bar with the last four
+  decisions, newest on the right: the key, `tap 96 ms`, `tap 171 ms · close`
+  once a tap took at least 75 % of the tapping term, or a teal `HOLD ⇧ 143 ms`
+  with the glyph of the hold. A sentence on the right explains the newest one,
+  for example "A became Shift after 143 ms (term 200 ms): N went up while A
+  was still down". The key that held gets a teal outline with `HOLD ⇧` on the
+  keyboard, the key whose release made it hold a blue one with `went up`;
+  both fade after two seconds. Test layout stays unscored: these decisions are
+  only shown. Without decisions from a keyboard that speaks protocol version
+  2 the row reads "needs current firmware on the keyboard".
+- **Confidence strip:** a key with at least two accidental holds in its last
+  30 decisions carries a small teal marker such as `⇧3`; one that tapped at
+  least twice when its hold was wanted carries an amber `TAP 2`. Its hover card
+  adds a section such as **Home-row Shift (hold A)**: how often it became
+  Shift, what usually caused it (still down when the next key went up, or held
+  past the tapping term), close calls, and a **Details in Progress** link.
+- **After a lesson** in which a key held (or tapped) by mistake, a notice
+  such as "A became Shift 3× · let go before the next key" (a roll) or "· tap
+  it quicker" (the term elapsed), or "Shift on O came as a tap 2× · hold it
+  until the letter", shows for three seconds with the other notices. A key gets
+  it at most once every five lessons. Clicking it opens Progress at the
+  section below. The last lesson's keyboard outlines such a key teal dashed
+  with `HOLD ×3` (amber dashed with `TAP ×2` for taps).
+- **Progress → Tap/hold keys** lists the tap/hold keys by accidental holds:
+  the key and what it holds, how often it became a hold by mistake in its last
+  30 decisions, close calls, the usual cause, and a mini keyboard marking the
+  affected keys. Once a key has 50 decisions and its holds come from holding
+  past the tapping term, it suggests a longer term, for example `Term 200 →
+  230 ms`; clicking it opens the key in the editor with the tapping term field
+  focused, and nothing changes until you flash. When the holds come from
+  rolling into the other hand, a longer term does not help, so it says
+  `practice: let go sooner` instead. Recent lessons are tagged `A → Shift ×2`
+  when a key held by mistake.
+
+![Test layout with the keyboard's last tap/hold decisions: a roll made A Shift, N went up while A was still down](screenshots/typing-practice/tap-hold-test-layout.png)
+
+![The next lesson after A became Shift three times: notice, teal ⇧3 marker and hover card, and the teal dashed key on the last lesson's keyboard](screenshots/typing-practice/tap-hold-tutor.png)
+
+![Progress sheet scrolled to Tap/hold keys with a tapping term suggestion and the mini keyboard](screenshots/typing-practice/tap-hold-progress.png)
+
 ### Moved keys
 
 Statistics are never reset on their own. When another keyboard or an edited
@@ -306,19 +356,26 @@ LK07 running the same layout):
    the shown layer; held modifiers appear in the telemetry bar.
 5. Test layout: a two-key combo shows "Combo keys held" and the character lands
    in the scratchpad.
-6. Tutor Stage 2: finish a lesson; the next one appears at once with the last
+6. Test layout with home-row modifiers: roll from a home-row modifier into a
+   key of the other hand (for example A then N, releasing N first). The
+   telemetry bar's Tap/hold row shows a teal `HOLD ⇧` chip and explains it, and
+   both keys are outlined on the keyboard for two seconds. Then do the same in
+   a Tutor lesson: after the lesson the "became Shift" notice appears, and
+   **Progress → Tap/hold keys** lists the key. With an older firmware the row
+   reads "needs current firmware on the keyboard".
+7. Tutor Stage 2: finish a lesson; the next one appears at once with the last
    lesson in the metrics row and on the keyboard. Skip a letter and keep
    typing: after three more letters the Tutor moves on and counts one mistake.
-7. Tutor Stage 3 and 5: the hint shows the Shift, layer or combo keys that the
+8. Tutor Stage 3 and 5: the hint shows the Shift, layer or combo keys that the
    layout really uses for the highlighted character.
-8. Quit and restart the application: unlocked letters, streak and round count
+9. Quit and restart the application: unlocked letters, streak and round count
    are unchanged.
-9. Connect the second board with the same layout: the same progress is shown
-   and no key statistics are reset. If a practised character sits elsewhere
-   there, the question appears once, only before a lesson starts; choose
-   **Keep all**, then switch boards twice more: nothing is asked again.
-10. **Settings → Reset profile progress** resets only the active profile; a
+10. Connect the second board with the same layout: the same progress is shown
+    and no key statistics are reset. If a practised character sits elsewhere
+    there, the question appears once, only before a lesson starts; choose
+    **Keep all**, then switch boards twice more: nothing is asked again.
+11. **Settings → Reset profile progress** resets only the active profile; a
     different layout type keeps its progress.
-11. **Settings → Reset characters…**: pick two letters and confirm. Only
+12. **Settings → Reset characters…**: pick two letters and confirm. Only
     those start over, one becomes the focus key, the unlocked count stays, and
     all of it is the same after a restart.
