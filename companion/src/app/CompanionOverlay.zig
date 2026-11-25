@@ -1,5 +1,6 @@
 //! The companion window: a passive layout reference beside other
 //! applications, optionally as a borderless always-on-top overlay.
+const std = @import("std");
 const dvui = @import("dvui");
 const Backend = @import("dvui_backend");
 const desktop = @import("desktop-core");
@@ -30,12 +31,12 @@ pub fn hideIfSuppressed(app: *App) void {
 pub fn update(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void {
     if (app.live_enabled and !app.live.verified()) app.life.companion_visible = false;
     hideIfSuppressed(app);
-    if (suppressed(app)) return;
+    if (suppressed(app)) return keepHidden();
     // Child creation inherits this flag from the backend's saved options.
     // The editor's existing native window remains opaque.
     const parent_transparent = app.native.init_opts_save.?.transparent;
     app.native.init_opts_save.?.transparent = true;
-    const child = dvui.osWindow(@src(), .{
+    const child = dvui.osWindow(windowSource(), .{
         .title = "Zigmkay Companion",
         .size = .{ .w = 880, .h = 300 },
         .min_size = .{ .w = 400, .h = 180 },
@@ -63,6 +64,21 @@ pub fn update(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame)
             if (app.frame_limit != null) self.view.overlay = false else app.life.companion_visible = false;
         },
     }
+}
+
+/// The source location that identifies the companion's child window in DVUI.
+fn windowSource() std.builtin.SourceLocation {
+    return @src();
+}
+
+/// DVUI destroys a child window that a frame does not declare. A hidden
+/// companion keeps its native window, renderer, fonts and glyph caches, so
+/// showing it again only draws one frame. The hidden window is neither drawn
+/// nor presented, and it never shortens the frame loop's wait.
+fn keepHidden() void {
+    const parent = dvui.currentWindow();
+    const child = parent.child_os_wins.getPtr(parent.data().id.extendId(windowSource(), 0)) orelse return;
+    child.end_micros = null;
 }
 
 /// Shows the live keyboard when monitoring, otherwise the editor project.

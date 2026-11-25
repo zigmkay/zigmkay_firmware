@@ -18,6 +18,8 @@ const overlay_flags = c.SDL_WINDOW_BORDERLESS | c.SDL_WINDOW_ALWAYS_ON_TOP | c.S
 pub const State = struct {
     /// The companion fixture's unsaved draft, which must survive hiding.
     retained: ?[32]u8 = null,
+    /// The companion fixture's native window while hidden, which showing reuses.
+    hidden_window: ?u32 = null,
     build_checked: bool = false,
     /// The layout notice the tutor gallery shows; fixtures have no keyboard.
     layout_notice: @import("practice-ui").LayoutNotice = .none,
@@ -721,9 +723,11 @@ fn companionScript(app: *App) !void {
             _ = c.SDL_ShowWindow(app.native.window);
         },
         5 => {
-            if (overlay.window) |id| if (c.SDL_GetWindowFromID(id)) |child| {
-                if (c.SDL_GetWindowFlags(child) & c.SDL_WINDOW_HIDDEN == 0) return error.CompanionNativeHideFailed;
-            };
+            // Hiding keeps the native window, so showing it again is quick.
+            const id = overlay.window orelse return error.CompanionWindowMissing;
+            const child = c.SDL_GetWindowFromID(id) orelse return error.CompanionHiddenWindowDestroyed;
+            if (c.SDL_GetWindowFlags(child) & c.SDL_WINDOW_HIDDEN == 0) return error.CompanionNativeHideFailed;
+            app.fixture.hidden_window = id;
             life.action(.toggle_companion);
             overlay.view.overlay = true;
             overlay.view.applied_window = null;
@@ -731,6 +735,7 @@ fn companionScript(app: *App) !void {
         6 => {
             const id = overlay.window orelse return error.CompanionWindowMissing;
             const child = c.SDL_GetWindowFromID(id) orelse return error.CompanionWindowMissing;
+            if (app.fixture.hidden_window != id) return error.CompanionWindowRecreated;
             if (overlay.view.applied_window != id) return error.CompanionModeNotApplied;
             const flags = c.SDL_GetWindowFlags(child);
             if (flags & c.SDL_WINDOW_HIDDEN != 0) return error.CompanionNativeShowFailed;
