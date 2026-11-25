@@ -83,6 +83,8 @@ as short notices that fade after three seconds. Every fifth lesson of Stages 1
 and 2 is built around your slowest letter pair, marked **Weak spot** in the
 metrics row.
 
+![The next lesson right after a finished one: last lesson in the metrics row, keys coloured by how they went, and the New letter and green-key notices](screenshots/typing-practice/next-lesson.png)
+
 ### 6-Stage Learning Path
 
 Click the **Stage** pill in the top bar to open the **Stages** sheet. All six
@@ -252,6 +254,14 @@ that progress never moves backwards and that saved progress reloads unchanged.
 
 ```sh
 zig build test-tutor-learner
+```
+
+The screenshots in this document and the Tutor screenshot of the root README
+are the dark scenes of that gallery. Regenerate them whenever the Tutor's look
+changes, so they never show an older version:
+
+```sh
+zig build doc-screenshots -Ddesktop
 ```
 
 To render native GPU screenshots of the same 19-scene Dark/Light gallery into

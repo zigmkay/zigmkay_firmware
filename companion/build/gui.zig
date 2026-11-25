@@ -46,6 +46,19 @@ const fixtures = [_]struct { []const u8, []const u8 }{
     .{ "--offline-source-refresh-frames", "3" },
 };
 
+/// Dark gallery scenes (`src/app/fixtures.zig`) the documentation shows,
+/// relative to the companion directory.
+const doc_screenshots = [_]struct { []const u8, []const u8 }{
+    .{ "0", "docs/screenshots/typing-practice/active-practice.png" },
+    .{ "0", "../assets/screenshots/tutor.png" },
+    .{ "1", "docs/screenshots/typing-practice/shift-guidance.png" },
+    .{ "2", "docs/screenshots/typing-practice/layers-combos.png" },
+    .{ "3", "docs/screenshots/typing-practice/next-lesson.png" },
+    .{ "4", "docs/screenshots/typing-practice/stages.png" },
+    .{ "5", "docs/screenshots/typing-practice/progress.png" },
+    .{ "6", "docs/screenshots/typing-practice/test-keys.png" },
+};
+
 /// Returns the application executable.
 pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     const b = s.b;
@@ -68,6 +81,22 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
         app.root_module.addWin32ResourceFile(.{ .file = g.icon_files.path(b, "application.rc") });
     s.steps.check.dependOn(&app.step);
     for (fixtures) |fixture| step.dependOn(&tests.addGuiFixture(b, app, &.{ fixture[0], fixture[1] }).step);
+
+    // Renders the Tutor gallery again and rewrites the PNGs the docs show.
+    const gallery = tests.addGuiFixture(b, app, &.{ "--offline-tutor-frames", "76" });
+    gallery.setCwd(b.path("."));
+    const converter = b.addExecutable(.{ .name = "doc-screenshots", .root_module = b.createModule(.{
+        .root_source_file = b.path("tools/doc_screenshots.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseFast,
+    }) });
+    s.steps.check.dependOn(&converter.step);
+    const convert = b.addRunArtifact(converter);
+    convert.setCwd(b.path("."));
+    convert.addArg(".zig-cache/typing-practice-gallery");
+    for (doc_screenshots) |shot| convert.addArg(b.fmt("{s}-dark.bmp={s}", .{ shot[0], shot[1] }));
+    convert.step.dependOn(&gallery.step);
+    s.steps.doc_screenshots.dependOn(&convert.step);
 
     // Installs and removes a real tray icon with a hidden window.
     const tray = b.addRunArtifact(app);
