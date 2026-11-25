@@ -871,7 +871,7 @@ pub fn statusToolbar(app: *const App, toolbar: *@FieldType(editor.Frame, "toolba
 /// Injects the SDL events of the practice and status fixtures before the pump.
 pub fn injectEvents(app: *App) !void {
     if (app.mode.is(.practice) and app.count == 3) try pushFocusLost(app);
-    if (app.mode.isStatus() and app.count == 13) try clickCanvas(app, 480, 32);
+    if (app.mode.isStatus() and app.count == 14) try clickCanvas(app, 480, 32);
 }
 
 /// Types the first reference codepoint as OS text after the pump.
@@ -970,6 +970,7 @@ fn captureStatus(app: *App) !void {
     const automatic = dvui.tagGet("firmware.auto_build") orelse return error.AutoBuildControlMissing;
     if (message.rect.x + message.rect.w > automatic.rect.x) return error.ActivityControlsOverlap;
     if (dvui.tagGet("system.status") != null) return error.SeparateStatusBarRetained;
+    if (statusScene(app) == 3 and dvui.tagGet("layout.menu.popup") == null) return error.LayoutMenuNotDrawn;
     app.window.endRendering(.{ .manage_backend = false });
     const path = try std.fmt.allocPrintSentinel(app.window.arena(), ".zig-cache/editor-status/{d}.bmp", .{statusScene(app)}, 0);
     try screenshot(app, path, error.StatusScreenshotRead, error.StatusScreenshotSave);
