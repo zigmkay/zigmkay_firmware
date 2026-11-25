@@ -13,5 +13,6 @@ test {
     _ = @import("test_process.zig");
     _ = @import("test_picotool_job.zig");
     _ = @import("compiler_cache.zig");
+    _ = @import("cache_retention.zig");
     _ = @import("managed_build.zig");
 }

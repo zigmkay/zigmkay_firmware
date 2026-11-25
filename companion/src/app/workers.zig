@@ -12,6 +12,7 @@ const paths = @import("paths-ui");
 const callbacks = @import("callback-ui");
 const App = @import("App.zig");
 const onboarding_flow = @import("onboarding_flow.zig");
+const maintenance = @import("maintenance.zig");
 
 pub const FileJob = struct {
     worker: *desktop.project_worker.Owner,
@@ -114,6 +115,15 @@ pub fn startBuild(app: *App, config: desktop.build_worker.Config, generation: u6
     };
 }
 
+/// Starts the user's build. A background warm-up of the same snapshot
+/// becomes this build; any other build waits for the warm-up's cache lease.
+pub fn beginBuild(app: *App, config: desktop.build_worker.Config) !void {
+    if (try maintenance.adopt(app)) return;
+    const next_job = try std.math.add(u64, app.job_generation, 1);
+    app.jobs.build = try startBuild(app, config, next_job);
+    app.job_generation = next_job;
+}
+
 pub fn startSource(app: *App, action: callbacks.Action, generation: u64) !SourceJob {
     var request = try captureSource(&app.view, &app.model, action);
     errdefer request.deinit();
@@ -168,6 +178,7 @@ fn pollBuild(app: *App) !App.Flow {
     app.build.tree = bundle.expected_export_tree;
     app.flash.panel = false;
     app.view.diagnostic = @splat(0);
+    maintenance.startCleanup(app);
     return .proceed;
 }
 

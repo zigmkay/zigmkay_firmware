@@ -37,6 +37,7 @@ const preferences = @import("preferences.zig");
 const screens = @import("screens.zig");
 const tray_menu = @import("tray_menu.zig");
 const workers = @import("workers.zig");
+const maintenance = @import("maintenance.zig");
 
 const App = @This();
 
@@ -59,6 +60,12 @@ pub const Build = struct {
     generation: u64 = 0,
     tree: jobs_api.firmware.Digest = @splat(0),
     scheduler: desktop.auto_build.Scheduler = .{},
+    /// The quiet background build that fills the compiler cache; never
+    /// counted as a busy job.
+    warmup: ?maintenance.Warmup = null,
+    warmup_attempted: bool = false,
+    cleanup: ?*desktop.cache_cleanup.Owner = null,
+    first_frame_ms: ?u64 = null,
 };
 
 gpa: std.mem.Allocator,
@@ -186,10 +193,12 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     errdefer if (app.build.tools) |*tools| tools.deinit();
     errdefer if (app.build.resources) |*resources| resources.deinit();
     try app.loadBundle();
+    maintenance.startup(app);
 }
 
 /// Releases everything in the reverse order of `init`.
 pub fn deinit(app: *App) void {
+    maintenance.deinit(app);
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.flash.deinit();
     if (app.build.resources) |*resources| resources.deinit();
@@ -344,6 +353,7 @@ fn frame(app: *App) !Flow {
     tray_menu.handle(app);
     tray_menu.updateResidency(app);
     try app.refreshBuildPlan();
+    try maintenance.step(app);
     if (try tray_menu.waitWhileIdle(app) == .next_frame) return .next_frame;
     try fixtures.script(app);
     const polled = try workers.poll(app);
@@ -570,9 +580,7 @@ fn scheduleBuild(app: *App, can_build: bool, now_us: u64) !void {
         desktop.flash_presenter.blocksAutoBuild(app.flash.phase()) or app.practicing or app.view.modal != .none or
         app.owner.closed or app.owner.close_requested != null or app.editorBusy();
     if (!scheduler.take(now_us / 1000, blocked)) return;
-    const next_job = try std.math.add(u64, app.job_generation, 1);
-    app.jobs.build = workers.startBuild(app, app.build.plan.?.config, next_job) catch |err| return app.view.report(err);
-    app.job_generation = next_job;
+    workers.beginBuild(app, app.build.plan.?.config) catch |err| return app.view.report(err);
     app.flash.discard();
     app.view.diagnostic = @splat(0);
 }

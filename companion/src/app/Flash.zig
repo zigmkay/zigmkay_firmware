@@ -395,12 +395,10 @@ pub fn request(app: *App, captured: desktop.editor_dispatch.Request, board: *con
             app.view.report(error.FreshFirmwareBuildRequired);
             return .next_frame;
         }
-        const next_job = try std.math.add(u64, app.job_generation, 1);
-        app.jobs.build = workers.startBuild(app, app.build.plan.?.config, next_job) catch |err| {
+        workers.beginBuild(app, app.build.plan.?.config) catch |err| {
             app.view.report(err);
             return .next_frame;
         };
-        app.job_generation = next_job;
         flash.pending = .{ .snapshot = try app.model.id(), .generation = app.owner_generation };
         app.build.scheduler.manual(try app.model.id());
         flash.panel = true;

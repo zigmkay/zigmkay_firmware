@@ -245,9 +245,7 @@ fn build(app: *App, captured: desktop.editor_dispatch.Request) !App.Flow {
     if (refuseWhileBusy(app)) return .next_frame;
     captured.validate(&app.model) catch |err| return reported(app, err);
     const plan = app.build.plan orelse return reported(app, error.MissingApplicationBundle);
-    const next_job = try std.math.add(u64, app.job_generation, 1);
-    app.jobs.build = workers.startBuild(app, plan.config, next_job) catch |err| return reported(app, err);
-    app.job_generation = next_job;
+    workers.beginBuild(app, plan.config) catch |err| return reported(app, err);
     app.build.scheduler.manual(try app.model.id());
     app.view.diagnostic = @splat(0);
     return .proceed;

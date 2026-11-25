@@ -152,6 +152,9 @@ pub const Request = struct {
     pub fn prepare(self: *const Request, gpa: std.mem.Allocator, io: std.Io) !Prepared {
         const export_start = std.Io.Clock.awake.now(io);
         const request = try self.verifiedRequest(gpa, io, .create_export);
+        // A snapshot exported earlier is reused as is. Mark it used, so cache
+        // retention keeps it while this build reads it.
+        std.Io.Dir.cwd().setTimestampsNow(io, self.file.path, .{}) catch {};
         std.log.info("build phase export_ms={d}", .{
             export_start.durationTo(std.Io.Clock.awake.now(io)).toMilliseconds(),
         });
