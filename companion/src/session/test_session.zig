@@ -176,7 +176,7 @@ test "firmware reports pin golden bytes, decode and reencode exactly" {
         break :blk report;
     }, first_state);
     try t.expectEqual(literal(&.{ 0x22, 1, 1, 5, 1, 0 }), press);
-    try t.expectEqual(literal(&.{ 0x23, 1, 2, 1 }), overlay_hold);
+    try t.expectEqual(literal(&.{ 0x23, 1, 2, 1, 2 }), overlay_hold);
     try t.expectEqual(literal(&.{ 0x24, 3, 3, 2, 2, 210, 0, 0xFF, 200, 0, 0, 0 }), fixture.decision);
     try t.expectEqual(literal(&.{0x10}), protocol.encodeCommand(.connect));
     try t.expectEqual(literal(&.{0x11}), protocol.encodeCommand(.disconnect));
@@ -268,9 +268,9 @@ test "companion key signals pass through in sequence with keys" {
     _ = feed(&session, hello, 1);
     _ = feed(&session, first_state, 2);
     const held = feed(&session, overlay_hold, 3);
-    try t.expectEqualDeep(protocol.SignalEvent{ .kind = .overlay_toggle, .pressed = true }, held.signal.?);
+    try t.expectEqualDeep(protocol.SignalEvent{ .kind = .overlay_toggle, .pressed = true, .source = .hold }, held.signal.?);
     try t.expectEqualDeep(
-        protocol.SignalEvent{ .kind = .overlay_toggle, .pressed = false },
+        protocol.SignalEvent{ .kind = .overlay_toggle, .pressed = false, .source = .hold },
         feed(&session, overlay_release, 4).signal.?,
     );
     // A signal out of sequence resynchronises like a key.

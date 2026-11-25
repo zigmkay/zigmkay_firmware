@@ -180,6 +180,7 @@ test "generated layer one-shot combo dead chord custom hold and signal traces" {
     try std.testing.expectEqual(@as(usize, 1), signal.signals.len);
     try std.testing.expectEqual(.log_toggle, signal.signals[0].kind);
     try std.testing.expect(signal.signals[0].pressed);
+    try std.testing.expectEqual(.tap, signal.signals[0].source);
 }
 
 test "restarting the native runner resets attached callback globals" {
@@ -244,11 +245,11 @@ test "companion signals are derived host-side from reserved custom ids and keyco
     const t = std.testing;
     const log_tap = core.TapDef{ .custom = core.CUSTOM_ID_COMPANION_LOG_TOGGLE };
     try t.expectEqual(
-        wire.Signal{ .kind = .log_toggle, .pressed = true },
+        wire.Signal{ .kind = .log_toggle, .pressed = true, .source = .tap },
         wire.eventSignal(.{ .OnTapEnterAfter = .{ .tap = log_tap } }).?,
     );
     try t.expectEqual(
-        wire.Signal{ .kind = .log_toggle, .pressed = false },
+        wire.Signal{ .kind = .log_toggle, .pressed = false, .source = .tap },
         wire.eventSignal(.{ .OnTapExitBefore = .{ .tap = log_tap } }).?,
     );
     try t.expectEqual(
@@ -257,15 +258,15 @@ test "companion signals are derived host-side from reserved custom ids and keyco
     );
     const overlay_hold = core.HoldDef{ .custom = core.CUSTOM_ID_COMPANION_TOGGLE };
     try t.expectEqual(
-        wire.Signal{ .kind = .overlay_toggle, .pressed = true },
+        wire.Signal{ .kind = .overlay_toggle, .pressed = true, .source = .hold },
         wire.eventSignal(.{ .OnHoldEnterAfter = .{ .hold = overlay_hold } }).?,
     );
     try t.expectEqual(
-        wire.Signal{ .kind = .overlay_toggle, .pressed = false },
+        wire.Signal{ .kind = .overlay_toggle, .pressed = false, .source = .hold },
         wire.eventSignal(.{ .OnHoldExitBefore = .{ .hold = overlay_hold } }).?,
     );
     try t.expectEqual(
-        wire.Signal{ .kind = .shutdown, .pressed = true },
+        wire.Signal{ .kind = .shutdown, .pressed = true, .source = .tap },
         wire.eventSignal(.{ .OnTapEnterAfter = .{ .tap = .{
             .custom = core.CUSTOM_ID_COMPANION_SHUTDOWN,
         } } }).?,
@@ -276,11 +277,11 @@ test "companion signals are derived host-side from reserved custom ids and keyco
     );
     try t.expectEqual(@as(?wire.Signal, null), wire.eventSignal(.Tick));
     try t.expectEqual(
-        wire.Signal{ .kind = .overlay_toggle, .pressed = true },
+        wire.Signal{ .kind = .overlay_toggle, .pressed = true, .source = .tap },
         wire.commandSignal(.{ .KeyCodePress = core.special_keycode_COMPANION }).?,
     );
     try t.expectEqual(
-        wire.Signal{ .kind = .shutdown, .pressed = false },
+        wire.Signal{ .kind = .shutdown, .pressed = false, .source = .tap },
         wire.commandSignal(.{ .KeyCodeRelease = core.special_keycode_SHUTDOWN_COMPANION }).?,
     );
     try t.expectEqual(@as(?wire.Signal, null), wire.commandSignal(.{ .KeyCodePress = 4 }));

@@ -128,13 +128,22 @@ test "companion session reports companion signals from tap and hold decisions" {
     session.processor_event(.{ .OnHoldExitBefore = .{ .hold = overlay_hold } });
     session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .custom = core.CUSTOM_ID_COMPANION_SHUTDOWN } } });
     session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .key_press = core.KC_COMPANION } } });
+    session.processor_event(.{ .OnTapExitBefore = .{ .tap = .{ .key_press = core.KC_COMPANION } } });
+    session.processor_event(.{ .OnTapExitBefore = .{ .tap = .{ .custom = core.CUSTOM_ID_COMPANION_TOGGLE } } });
 
+    // Byte 4 tells the host whether the tap or the hold action sent it.
     const signal = @backingInt(companion.MessageId.signal);
     const overlay = @backingInt(companion.Signal.overlay_toggle);
-    try std.testing.expectEqualSlices(u8, &.{ signal, 1, overlay, 1 }, take(&session).?[0..4]);
-    try std.testing.expectEqualSlices(u8, &.{ signal, 2, overlay, 0 }, take(&session).?[0..4]);
-    try std.testing.expectEqualSlices(u8, &.{ signal, 3, @backingInt(companion.Signal.shutdown), 1 }, take(&session).?[0..4]);
-    try std.testing.expectEqualSlices(u8, &.{ signal, 4, overlay, 1 }, take(&session).?[0..4]);
+    const tap = @backingInt(companion.SignalSource.tap);
+    const hold = @backingInt(companion.SignalSource.hold);
+    try std.testing.expectEqual(1, tap);
+    try std.testing.expectEqual(2, hold);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 1, overlay, 1, hold, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 2, overlay, 0, hold, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 3, @backingInt(companion.Signal.shutdown), 1, tap, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 4, overlay, 1, tap, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 5, overlay, 0, tap, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 6, overlay, 0, tap, 0 }, take(&session).?[0..6]);
     try std.testing.expectEqual(null, session.next_report());
 }
 

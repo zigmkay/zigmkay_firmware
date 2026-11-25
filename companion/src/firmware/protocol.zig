@@ -17,7 +17,9 @@
 //!               (u16 little endian, bit 0 always set) [6..22] pressed keys
 //!   0x22 key    [1] seq [2] pressed [3] key index [4] layer [5] modifiers
 //!   0x23 signal [1] seq [2] kind (1 log toggle, 2 overlay toggle, 3 shutdown)
-//!               [3] pressed
+//!               [3] pressed [4] source (version 2: 1 tap action, 2 hold
+//!               action; 0 and other values are unknown, which version 1
+//!               keyboards and earlier version 2 builds send as padding)
 //!   0x24 decision (version 2) [1] seq [2] key index [3] outcome (1 tap,
 //!               2 hold, 3 retro tap) [4] reason (1 released within the
 //!               tapping term, 2 term elapsed, 3 permissive hold, 4 same-side
@@ -65,7 +67,10 @@ pub const MessageId = firmware.MessageId;
 
 /// Companion keys on the keyboard, reported after its tap/hold decision.
 pub const SignalKind = firmware.Signal;
-pub const SignalEvent = struct { kind: SignalKind, pressed: bool };
+/// Whether the key's tap or hold action sent a signal; unknown when the
+/// keyboard does not say.
+pub const SignalSource = firmware.SignalSource;
+pub const SignalEvent = struct { kind: SignalKind, pressed: bool, source: SignalSource = .unknown };
 
 pub const KeyEvent = struct {
     pressed: bool,
@@ -235,7 +240,11 @@ pub fn decode(bytes: []const u8, dimensions: core.KeymapDimensions) WireError!?M
             if (bytes[3] > 1) return error.InvalidBoolean;
             break :blk .{ .signal = .{
                 .sequence = bytes[1],
-                .event = .{ .kind = kind, .pressed = bytes[3] == 1 },
+                .event = .{
+                    .kind = kind,
+                    .pressed = bytes[3] == 1,
+                    .source = std.enums.fromInt(SignalSource, bytes[4]) orelse .unknown,
+                },
             } };
         },
         .decision => blk: {
@@ -296,6 +305,7 @@ pub fn encode(message: Message, dimensions: core.KeymapDimensions) WireError!Rep
             report[1] = signal.sequence;
             report[2] = @backingInt(signal.event.kind);
             report[3] = @intFromBool(signal.event.pressed);
+            report[4] = @backingInt(signal.event.source);
         },
         .decision => |decision| {
             const event = decision.event;
@@ -389,6 +399,22 @@ test "signal decodes sequence kind and press" {
     try std.testing.expectEqual(bytes, try encode(.{ .signal = signal }, test_dimensions));
     try std.testing.expectError(error.InvalidSignal, decode(&literal(&.{ 0x23, 4, 9, 1 }), test_dimensions));
     try std.testing.expectError(error.InvalidBoolean, decode(&literal(&.{ 0x23, 4, 2, 2 }), test_dimensions));
+}
+
+test "signal decodes its tap or hold source, anything else is unknown" {
+    const t = std.testing;
+    for ([_]u8{ 1, 2 }, [_]SignalSource{ .tap, .hold }) |byte, source| {
+        const bytes = literal(&.{ 0x23, 5, 2, 0, byte });
+        const signal = (try decode(&bytes, test_dimensions)).?.signal;
+        try t.expectEqualDeep(SignalEvent{ .kind = .overlay_toggle, .pressed = false, .source = source }, signal.event);
+        try t.expectEqual(bytes, try encode(.{ .signal = signal }, test_dimensions));
+    }
+    // Older keyboards pad with zero; unassigned values are not an error.
+    for ([_]u8{ 0, 3, 0xFF }) |byte| {
+        const signal = (try decode(&literal(&.{ 0x23, 5, 2, 1, byte }), test_dimensions)).?.signal;
+        try t.expectEqual(SignalSource.unknown, signal.event.source);
+        try t.expectEqual(literal(&.{ 0x23, 5, 2, 1, 0 }), try encode(.{ .signal = signal }, test_dimensions));
+    }
 }
 
 test "decision decodes outcome reason timing other key term layer and combo" {
@@ -552,9 +578,9 @@ test "firmware reports decode to the events that produced them" {
     session.tap_hold_decision(decision);
     for ([_]Message{
         .{ .key = .{ .sequence = 1, .event = .{ .pressed = true, .key_index = 5, .layer = 1, .modifiers = modifiers } } },
-        .{ .signal = .{ .sequence = 2, .event = .{ .kind = .overlay_toggle, .pressed = true } } },
-        .{ .signal = .{ .sequence = 3, .event = .{ .kind = .log_toggle, .pressed = false } } },
-        .{ .signal = .{ .sequence = 4, .event = .{ .kind = .shutdown, .pressed = true } } },
+        .{ .signal = .{ .sequence = 2, .event = .{ .kind = .overlay_toggle, .pressed = true, .source = .hold } } },
+        .{ .signal = .{ .sequence = 3, .event = .{ .kind = .log_toggle, .pressed = false, .source = .tap } } },
+        .{ .signal = .{ .sequence = 4, .event = .{ .kind = .shutdown, .pressed = true, .source = .tap } } },
         .{ .decision = .{ .sequence = 5, .event = decision } },
     }) |expected| {
         const report = takeFirmware(&session).?;

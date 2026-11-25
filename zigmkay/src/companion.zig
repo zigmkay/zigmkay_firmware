@@ -15,6 +15,8 @@
 //!               (little endian) [6..22]=pressed keys, one bit per key index
 //!   0x22 key    [1]=seq [2]=pressed [3]=key index [4]=layer [5]=modifiers
 //!   0x23 signal [1]=seq [2]=signal (1 log toggle, 2 overlay toggle, 3 shutdown) [3]=pressed
+//!               [4]=source (version 2: 1 the key's tap action, 2 its hold action;
+//!               0 unknown, which earlier keyboards send as padding)
 //!   0x24 decision (version 2) a tap/hold key resolved
 //!               [1]=seq [2]=key index [3]=outcome (1 tap, 2 hold, 3 retro tap)
 //!               [4]=reason (see below) [5..7]=ms from the press to the decision
@@ -32,6 +34,9 @@
 //!
 //! Signals come from keys bound to the reserved CUSTOM_ID_COMPANION_* ids (as tap
 //! or hold) or to KC_COMPANION / KC_SHUTDOWN_COMPANION, after tap/hold decisions.
+//! A tap signal is pressed and released when the tap action starts and ends,
+//! a hold signal for as long as the hold lasts; hosts toggle on a tap and
+//! follow a hold.
 //! A decision follows the key report of the press it belongs to and precedes
 //! the signals and state the decision causes. Version 1 keyboards never send it.
 //!
@@ -41,7 +46,7 @@
 const std = @import("std");
 const core = @import("core.zig");
 
-/// 2 added the tap/hold decision message.
+/// 2 added the tap/hold decision message and the signal source.
 pub const protocol_version: u8 = 2;
 pub const Report = [32]u8;
 
@@ -64,6 +69,14 @@ pub const Signal = enum(u8) {
     log_toggle = 1,
     overlay_toggle = 2,
     shutdown = 3,
+};
+
+/// Which action of its key a signal came from.
+pub const SignalSource = enum(u8) {
+    /// Not reported: version 1 keyboards and earlier version 2 builds.
+    unknown = 0,
+    tap = 1,
+    hold = 2,
 };
 
 pub const DecisionOutcome = enum(u8) {
@@ -114,7 +127,7 @@ const Event = union(enum) {
         layer: core.LayerIndex,
         modifiers: u8,
     },
-    signal: struct { signal: Signal, pressed: bool },
+    signal: struct { signal: Signal, pressed: bool, source: SignalSource },
     decision: Decision,
 };
 
@@ -189,14 +202,14 @@ pub const Session = struct {
 
     /// Records companion signals from the processor's tap and hold decisions.
     pub fn processor_event(self: *Session, event: core.ProcessorEvent) void {
-        const signal: Signal, const pressed = switch (event) {
-            .OnTapEnterAfter => |e| .{ tap_signal(e.tap) orelse return, true },
-            .OnTapExitBefore => |e| .{ tap_signal(e.tap) orelse return, false },
-            .OnHoldEnterAfter => |e| .{ custom_signal(e.hold.custom) orelse return, true },
-            .OnHoldExitBefore => |e| .{ custom_signal(e.hold.custom) orelse return, false },
+        const signal: Signal, const pressed, const source: SignalSource = switch (event) {
+            .OnTapEnterAfter => |e| .{ tap_signal(e.tap) orelse return, true, .tap },
+            .OnTapExitBefore => |e| .{ tap_signal(e.tap) orelse return, false, .tap },
+            .OnHoldEnterAfter => |e| .{ custom_signal(e.hold.custom) orelse return, true, .hold },
+            .OnHoldExitBefore => |e| .{ custom_signal(e.hold.custom) orelse return, false, .hold },
             else => return,
         };
-        self.push(.{ .signal = .{ .signal = signal, .pressed = pressed } });
+        self.push(.{ .signal = .{ .signal = signal, .pressed = pressed, .source = source } });
     }
 
     /// Records a tap/hold decision of the processor.
@@ -256,6 +269,7 @@ pub const Session = struct {
                     report[0] = @backingInt(MessageId.signal);
                     report[2] = @backingInt(signal.signal);
                     report[3] = @intFromBool(signal.pressed);
+                    report[4] = @backingInt(signal.source);
                 },
                 .decision => |decision| {
                     report[0] = @backingInt(MessageId.decision);
