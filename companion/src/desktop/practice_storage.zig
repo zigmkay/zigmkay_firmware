@@ -308,6 +308,8 @@ pub fn loadState(
         .arena = arena.allocator(),
         .source = terminated,
         .diagnostics = &diag,
+        // Fields a newer build added must not throw the progress away.
+        .ignore_unknown_fields = true,
     }) catch {
         backupCorrupt(io, dir);
         return .{ .arena = arena, .state = .{}, .existed = true, .recovered_from_corrupt = true };
@@ -1188,6 +1190,26 @@ test "a schema 2 save still loads with its progress and no tap/hold statistics" 
     try t.expectEqual(@as(u32, 7), loaded.state.total_rounds);
     try t.expectEqual(@as(u32, 25), loaded.state.key_stats[0].samples);
     try t.expectEqual(@as(usize, 0), loaded.state.tap_hold_stats.len);
+}
+
+test "a save from a newer build with unknown fields keeps its progress" {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const hash: [32]u8 = @splat(0x33);
+    var rel_buf: [96]u8 = undefined;
+    var dir = try tmp.dir.createDirPathOpen(t.io, profileRelPath(hash, &rel_buf), .{});
+    defer dir.close(t.io);
+    try dir.writeFile(t.io, .{ .sub_path = state_filename, .data =
+        \\.{ .schema_version = 3, .total_rounds = 9, .unlocked_count = 8, .some_future_field = .{ .x = 1 },
+        \\   .key_stats = .{ .{ .cp = 97, .ema_ms = 300, .ema_acc = 0.9, .samples = 25, .future_key_field = 3 } } }
+        \\
+    });
+    var loaded = try loadState(t.allocator, t.io, tmp.dir, hash);
+    defer loaded.deinit();
+    try t.expect(loaded.existed and !loaded.recovered_from_corrupt);
+    try t.expectEqual(@as(u32, 9), loaded.state.total_rounds);
+    try t.expectEqual(@as(u32, 25), loaded.state.key_stats[0].samples);
 }
 
 test "tap/hold statistics survive a save and a load" {
