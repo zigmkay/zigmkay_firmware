@@ -5,7 +5,7 @@ layout freely or switch to the adaptive 6-stage Typing Tutor.
 
 The top bar provides a **Test layout | Tutor** segmented switch. Opening from
 **Try it out** always lands in **Test layout** first so you can immediately
-verify switches, layers, holds, combos, and free-type in the scratchpad before
+verify switches, layers, holds, combos, and free-type in its text field before
 switching to **Tutor**.
 
 ## Adaptive Typing Tutor
@@ -269,11 +269,57 @@ active profile.
 
 Opening **Try it out** lands directly in **Test layout**. It pairs the exact
 shared Editor keyboard view with a live telemetry bar (active layer, held
-modifiers, simultaneous presses, and triggered 2-key combos) and a calm
-free-typing scratchpad where you can type anything you want—completely unscored
-and unpersisted.
+modifiers, simultaneous presses, triggered 2-key combos and the last key) and
+a multi-line text field where you can type anything you want—completely
+unscored and unpersisted. The field holds up to 8 KB of text; once it is full
+it takes no more instead of dropping the start.
 
-![Test layout mode with free-typing scratchpad, live layer/modifier telemetry, and shared Editor keyboard view](screenshots/typing-practice/test-keys.png)
+![Test layout with the text field holding the keys: several lines of code, "target" selected with ⌥⇧→](screenshots/typing-practice/test-keys.png)
+
+### Keys stay in the field
+
+Test layout opens with the field **holding the keys**: an accent border and
+"Keys stay in this field · Esc to leave" above the text. Every key you press
+then stays in the field, so you can try your layout's navigation layer the way
+you would use it in an editor:
+
+| Keys (macOS) | Keys (Windows/Linux) | What they do |
+| --- | --- | --- |
+| ← → ↑ ↓ | ← → ↑ ↓ | Move by character and by row (long lines wrap) |
+| Home / End, ⌘← / ⌘→ | Home / End | Line start / end |
+| Page Up / Page Down | Page Up / Page Down | Move by the rows in view |
+| ⌥← / ⌥→ | Ctrl+← / Ctrl+→ | Word left / right |
+| ⌘↑ / ⌘↓, ⌘Home / ⌘End | Ctrl+Home / Ctrl+End | Text start / end |
+| ⇧ with any move | Shift with any move | Extend the selection |
+| ⌫ / ⌦, ⌥⌫ / ⌥⌦, ⌘⌫ / ⌘⌦ | Backspace / Delete, Ctrl+Backspace / Ctrl+Delete, Ctrl+Shift+Backspace / Ctrl+Shift+Delete | Delete a character, a word, to the line start / end |
+| Enter, Tab | Enter, Tab | New line, four spaces |
+| ⌘A ⌘C ⌘X ⌘V | Ctrl+A Ctrl+C Ctrl+X Ctrl+V | Select all, copy, cut, paste |
+| ⌘Z, ⇧⌘Z | Ctrl+Z, Ctrl+Y or Ctrl+Shift+Z | Undo, redo |
+
+Clicking places the cursor (⇧-click and dragging select), the wheel scrolls,
+and the header shows the cursor's line and column. **Clear** empties the
+field; undo brings the text back. The telemetry bar names every key with its
+modifiers and what it did, such as "Last key: ⌥⇧← select word left". Other
+shortcuts the application would otherwise react to, such as ⌘D or Tab between
+the controls, do nothing while the field holds the keys and only show as the
+last key.
+
+Shortcuts the operating system handles before the application sees them
+cannot be caught: on macOS ⌘Tab, ⌘Space, Mission Control and the application
+menu's ⌘Q (Quit), ⌘H and ⌥⌘H (Hide), ⌘M (Minimize), ⌘W (Close window) and
+⌃⌘F (Full Screen); on Windows Alt+Tab, Alt+F4 and the Windows key; on Linux
+whatever the desktop reserves. Test those keys elsewhere.
+
+### Leaving the field
+
+**Esc** lets go of the keys: the border turns plain, the cursor hides and the
+header reads "Free typing · click here or press Enter to type again". Tab and
+the arrow keys then move between the controls as usual. Click into the text,
+or press **Enter** while no button has the focus, to hold the keys again; the
+text, cursor and selection are kept. While Progress, Settings or another sheet
+is open, Esc closes it first and the field keeps holding the keys.
+
+![Test layout after Esc: the field let go of the keys and Tab moves between the controls](screenshots/typing-practice/test-layout-released.png)
 
 ## Input Source
 
@@ -310,8 +356,8 @@ zig build test-practice -Donly=practice
 ```
 
 Run the full desktop test suite and headless SDL GUI fixtures (including
-`--offline-practice-frames 3` and the 22-scene
-Dark/Light `--offline-tutor-frames 88` gallery):
+`--offline-practice-frames 3` and the 24-scene
+Dark/Light `--offline-tutor-frames 96` gallery):
 
 ```sh
 zig build test-desktop -Ddesktop
@@ -334,11 +380,11 @@ changes, so they never show an older version:
 zig build doc-screenshots -Ddesktop
 ```
 
-To render native GPU screenshots of the same 22-scene Dark/Light gallery into
+To render native GPU screenshots of the same 24-scene Dark/Light gallery into
 `companion/.zig-cache/typing-practice-gallery/`:
 
 ```sh
-zig build -Ddesktop && ./zig-out/bin/zigmkay-companion --native-tutor-frames 88
+zig build -Ddesktop && ./zig-out/bin/zigmkay-companion --native-tutor-frames 96
 ```
 
 ## Manual hardware checklist
@@ -356,7 +402,7 @@ LK07 running the same layout):
 4. Test layout: every key lights up when pressed; holding a layer key switches
    the shown layer; held modifiers appear in the telemetry bar.
 5. Test layout: a two-key combo shows "Combo keys held" and the character lands
-   in the scratchpad.
+   in the text field.
 6. Test layout with home-row modifiers: roll from a home-row modifier into a
    key of the other hand (for example A then N, releasing N first). The
    telemetry bar's Tap/hold row shows a teal `HOLD ⇧` chip and explains it, and
@@ -364,19 +410,27 @@ LK07 running the same layout):
    a Tutor lesson: after the lesson the "became Shift" notice appears, and
    **Progress → Tap/hold keys** lists the key. With an older firmware the row
    reads "needs current firmware on the keyboard".
-7. Tutor Stage 2: finish a lesson; the next one appears at once with the last
+7. Test layout text field: type or paste a few lines, then move through them
+   with only the layout's navigation layer: arrows, Home/End, Page Up/Down,
+   word jumps (⌥ or Ctrl) and line and text jumps (⌘ or Ctrl), each once with
+   Shift to select; then cut, paste and undo. The cursor and selection follow,
+   the field scrolls with the cursor, and the telemetry bar names each key
+   (for example "⌥⇧← select word left"). A shortcut such as ⌘D only shows as
+   the last key. Esc lets go (plain border, Tab moves between the controls);
+   Enter or a click takes the keys back with the text and cursor unchanged.
+8. Tutor Stage 2: finish a lesson; the next one appears at once with the last
    lesson in the metrics row and on the keyboard. Skip a letter and keep
    typing: after three more letters the Tutor moves on and counts one mistake.
-8. Tutor Stage 3 and 5: the hint shows the Shift, layer or combo keys that the
+9. Tutor Stage 3 and 5: the hint shows the Shift, layer or combo keys that the
    layout really uses for the highlighted character.
-9. Quit and restart the application: unlocked letters, streak and round count
-   are unchanged.
-10. Connect the second board with the same layout: the same progress is shown
+10. Quit and restart the application: unlocked letters, streak and round count
+    are unchanged.
+11. Connect the second board with the same layout: the same progress is shown
     and no key statistics are reset. If a practised character sits elsewhere
     there, the question appears once, only before a lesson starts; choose
     **Keep all**, then switch boards twice more: nothing is asked again.
-11. **Settings → Reset profile progress** resets only the active profile; a
+12. **Settings → Reset profile progress** resets only the active profile; a
     different layout type keeps its progress.
-12. **Settings → Reset characters…**: pick two letters and confirm. Only
+13. **Settings → Reset characters…**: pick two letters and confirm. Only
     those start over, one becomes the focus key, the unlocked count stays, and
     all of it is the same after a restart.
