@@ -417,9 +417,23 @@ fn put(dir: std.Io.Dir, path: []const u8, age_days: i96) !void {
 
 fn age(dir: std.Io.Dir, path: []const u8, age_days: i96) !void {
     const stamp: std.Io.Timestamp = .{ .nanoseconds = test_now.nanoseconds - age_days * day };
-    try dir.setTimestamps(testing.io, std.mem.trimEnd(u8, path, "/"), .{
+    const times: std.Io.File.SetTimestampsOptions = .{
         .access_timestamp = .{ .new = stamp },
         .modify_timestamp = .{ .new = stamp },
+    };
+    const sub_path = std.mem.trimEnd(u8, path, "/");
+    const stat = try dir.statFile(testing.io, sub_path, .{});
+    if (stat.kind != .directory) {
+        // Through the handle: setting times by path is not implemented on
+        // Windows in Zig 0.17.
+        const file = try dir.openFile(testing.io, sub_path, .{ .mode = .read_write });
+        defer file.close(testing.io);
+        return file.setTimestamps(testing.io, times);
+    }
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
+    try dir.setTimestamps(testing.io, sub_path, .{
+        .access_timestamp = times.access_timestamp,
+        .modify_timestamp = times.modify_timestamp,
     });
 }
 

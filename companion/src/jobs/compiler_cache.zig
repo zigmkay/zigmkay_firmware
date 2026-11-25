@@ -135,7 +135,9 @@ pub const Lease = struct {
     pub fn tryAcquire(io: std.Io, root: std.Io.Dir, cache_name: []const u8) !?Lease {
         var buffer: [@sizeOf(Name) + 8]u8 = undefined;
         const path = try lockName(&buffer, cache_name);
-        const file = try root.createFile(io, path, .{ .truncate = false });
+        // Read access lets `stat` compare the locked file with the one on disk;
+        // Windows refuses it on a write-only handle.
+        const file = try root.createFile(io, path, .{ .truncate = false, .read = true });
         errdefer file.close(io);
         if (!try file.tryLock(io, .exclusive)) {
             file.close(io);

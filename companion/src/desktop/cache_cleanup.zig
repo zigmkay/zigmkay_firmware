@@ -63,6 +63,8 @@ pub const Owner = struct {
 };
 
 test "a background pass cleans the cache root and reports once" {
+    // Zig 0.17 cannot set a directory's times on Windows.
+    if (@import("builtin").os.tag == .windows) return error.SkipZigTest;
     var tmp = std.testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
     const io = std.testing.io;
