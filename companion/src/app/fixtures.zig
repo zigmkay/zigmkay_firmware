@@ -35,7 +35,7 @@ pub fn beforeFrame(app: *App) !void {
     if (app.mode.isTutorGallery()) try showTutor(app);
 }
 
-/// The tutor gallery renders 24 scenes for 4 frames each (2 Dark + 2 Light):
+/// The tutor gallery renders 28 scenes for 4 frames each (2 Dark + 2 Light):
 /// 0: Active Stage 2 · All letters (with populated confidences & focus key)
 /// 1: Stage 3 · Shift & capitals (opposite-hand Shift hold + tap bridge)
 /// 2: Stage 5 · Layers & combos (layer auto-preview / 2-key combo arc)
@@ -60,6 +60,10 @@ pub fn beforeFrame(app: *App) !void {
 /// 21: Reset characters sheet asking for confirmation
 /// 22: Test layout after Esc: the field let go of the keys
 /// 23: Narrow Test layout (960x660) with the captured field
+/// 24: New profile dialog naming a second person (P2)
+/// 25: Person menu with two people and their progress (P1)
+/// 26: Refresh lesson for a slipped green letter, with the hover card of another (R)
+/// 27: Progress sheet resized larger, its body filling it down to the tap/hold keys
 fn showTutor(app: *App) !void {
     app.view.toolbar.light = app.count % 4 >= 2;
     const is_scene_start = (app.count == 1) or (app.count >= 4 and app.count % 4 == 0);
@@ -77,6 +81,7 @@ fn showTutor(app: *App) !void {
     app.tutor.view.focus_tap_hold = false;
     app.tutor.view.progress_scroll = .{};
     app.tutor.view.test_field = .{};
+    app.tutor.view.people.close();
     // Notices belong to the scene that finishes a lesson.
     practice.event_len = 0;
 
@@ -249,6 +254,43 @@ fn showTutor(app: *App) !void {
             try practice.choose(.{ .mode = .test_keys }, now);
             try showTestField(practice, &app.tutor.view, scene == 22);
         },
+        24 => {
+            // Scene 18's moved characters keep their statistics from here on.
+            if (practice.reviewSlice().len > 0) try practice.keepMovedKeys(practice.profile.profile_hash);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
+            const people = &app.tutor.view.people;
+            people.dialog = .create;
+            people.dialog_frames = 0;
+            people.name = @splat(0);
+            @memcpy(people.name[0..4], "Lisa");
+            people.colour = 1;
+        },
+        25 => {
+            try seedSecondPerson(app);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            try practice.start();
+            try typeSessionPrefix(&practice.session, @min(12, practice.session.reference_len / 2), now, false);
+            app.tutor.view.people.menu_open = true;
+        },
+        26 => {
+            const hover = seedSlippedLetters(practice);
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            practice.lessons_since_refresh = desktop.practice_controller.refresh_every - 1;
+            try practice.start();
+            if (practice.lesson_refresh == null) return error.FixtureHasNoRefreshLesson;
+            app.tutor.view.forced_tooltip = hover;
+        },
+        27 => {
+            try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
+            practice.lessons_since_refresh = 0;
+            try practice.start();
+            app.tutor.view.sheet = .progress;
+            // As if the user dragged it out to the whole window; the sheet
+            // keeps itself inside the window.
+            app.tutor.view.sheet_rect = .{ .x = 8, .y = 8, .w = 10_000, .h = 10_000 };
+            app.tutor.view.sheet_rect_of = .progress;
+        },
         else => {},
     }
 }
@@ -334,6 +376,12 @@ fn seedTapHoldStats(practice: *desktop.practice_controller.Controller) void {
 
 fn seedTutorGalleryState(app: *App) !void {
     const practice = &app.tutor.controller;
+    // The gallery practises as Conny; scene 25 adds Lisa.
+    const tutor = &app.tutor;
+    tutor.people = .{};
+    tutor.people.current = try tutor.people.add("Conny", 0, 0);
+    tutor.people_ready = true;
+    tutor.fixture_summaries = @splat(null);
     const lm = &practice.learning;
     lm.unlocked_count = @min(14, lm.unlock_len);
     lm.stat_len = lm.unlocked_count;
@@ -739,6 +787,7 @@ pub fn resizeStatusWindow(app: *App) void {
         if (app.count == 57) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
         if (app.count == 61) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
         if (app.count == 93) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
+        if (app.count == 97) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
     }
     if (!app.mode.isStatus() or (app.count != 1 and app.count != 21 and app.count != 25)) return;
     const narrow = app.count == 21;
@@ -952,4 +1001,41 @@ pub fn finish(app: *App) !void {
 fn entryOf(selector: []const u8) usize {
     for (desktop.onboarding.catalog.entries, 0..) |entry, index| if (std.mem.eql(u8, entry.selector, selector)) return index;
     unreachable;
+}
+
+/// Lisa, who practised this layout type yesterday and has seven letters.
+fn seedSecondPerson(app: *App) !void {
+    const tutor = &app.tutor;
+    if (tutor.people.len > 1) return;
+    _ = try tutor.people.add("Lisa", 1, 0);
+    const today: u32 = @intCast(tutor.controller.utc_now_sec / 86_400);
+    tutor.fixture_summaries[1] = .{
+        .started = true,
+        .unlocked = 7,
+        .letters = tutor.controller.learning.unlock_len,
+        .last_day = today -| 1,
+        .streak_days = 1,
+    };
+}
+
+/// Two green letters that slipped since they were mastered: C got slow (12
+/// WPM, best 26) and is refreshed; L got slower too (15 WPM, best 27) and
+/// missed 5 of its last 30.
+/// Returns the letter whose hover card the scene shows.
+fn seedSlippedLetters(practice: *desktop.practice_controller.Controller) u21 {
+    const lm = &practice.learning;
+    const active = lm.activeLetters();
+    const refresh: u8 = if (lm.isUnlocked('c')) 'c' else active[@min(10, active.len - 1)];
+    const hover: u8 = if (lm.isUnlocked('l')) 'l' else active[@min(12, active.len - 1)];
+    const plan = [_]struct { ch: u8, wpm: f32, best: f32, misses: u5 }{
+        .{ .ch = refresh, .wpm = 12, .best = 26, .misses = 3 },
+        .{ .ch = hover, .wpm = 15, .best = 27, .misses = 5 },
+    };
+    for (plan) |p| {
+        const st = lm.getOrAddStat(p.ch) orelse continue;
+        st.* = .{ .cp = p.ch, .ema_ms = 12_000 / p.wpm, .samples = 96, .acc_initialized = true, .mastered = true, .mastered_samples = 40, .best_ms = 12_000 / p.best };
+        st.recordOutcomes(0x3fff_ffff, 30);
+        st.recordOutcomes(0, p.misses);
+    }
+    return hover;
 }

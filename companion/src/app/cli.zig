@@ -123,7 +123,7 @@ pub const Fixture = struct {
 
         fn minimumFrames(kind: Kind) usize {
             return switch (kind) {
-                .tutor, .native_tutor => 96,
+                .tutor, .native_tutor => 112,
                 .companion => 9,
                 .practice, .native_tray, .source_refresh => 3,
                 .build => 2,
@@ -134,6 +134,7 @@ pub const Fixture = struct {
         fn maximumFrames(kind: Kind) usize {
             return switch (kind) {
                 .build => 30_000,
+                .tutor, .native_tutor => 112,
                 else => 100,
             };
         }
@@ -272,11 +273,12 @@ test "fixture modes keep their frame bounds and video requirements" {
     try expectFixture(.{ .kind = .launch, .frames = 3 }, &.{ "app", "--offline-frames", "3" }, dummy_video);
     try expectFixture(.{ .kind = .drawers, .frames = 24 }, &.{ "app", "--offline-drawers-frames", "24" }, dummy_video);
     try expectFixture(.{ .kind = .build, .frames = 30_000 }, &.{ "app", "--offline-build-frames", "30000" }, dummy_video);
-    try expectFixture(.{ .kind = .tutor, .frames = 96 }, &.{ "app", "--offline-tutor-frames", "96" }, dummy_video);
-    try expectFixture(.{ .kind = .native_tutor, .frames = 96 }, &.{ "app", "--native-tutor-frames", "96" }, .{});
+    try expectFixture(.{ .kind = .tutor, .frames = 112 }, &.{ "app", "--offline-tutor-frames", "112" }, dummy_video);
+    try expectFixture(.{ .kind = .native_tutor, .frames = 112 }, &.{ "app", "--native-tutor-frames", "112" }, .{});
     try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--native-tutor-frames", "87" }, .{}));
+    try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--offline-tutor-frames", "113" }, dummy_video));
     try t.expectError(error.InvalidFrameLimit, parse(&.{ "app", "--offline-frames", "101" }, dummy_video));
-    try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tutor-frames", "96" }, dummy_video));
+    try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tutor-frames", "112" }, dummy_video));
     try t.expectError(error.DummyVideoRequired, parse(&.{ "app", "--offline-frames", "3" }, .{}));
     try t.expectError(error.NativeVideoRequired, parse(&.{ "app", "--native-tray-frames", "3" }, dummy_video));
     try t.expectError(error.Usage, parse(&.{ "app", "--native-layout-status-frames", "3" }, .{}));

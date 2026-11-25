@@ -88,6 +88,42 @@ metrics row.
 
 ![The next lesson right after a finished one: last lesson in the metrics row, keys coloured by how they went, and the New letter and green-key notices](screenshots/typing-practice/next-lesson.png)
 
+### Refreshing letters that slipped
+
+A green letter stays green and unlocked, but it can still get rusty. It
+counts as **slipped** once it is clearly below the bar again: slower than
+80 % of the target speed, or fewer than **26 of its last 30 presses** right.
+It needs at least 30 presses after it was mastered first, so one bad lesson
+right after mastering does not count. A slipped letter gets an **amber dot**
+in the top-right corner of its chip; its hover card shows its speed now
+against its best and the target, its recent hits, and what happens next.
+Unlocking never waits for slipped letters.
+
+At most every third lesson of Stages 1 and 2 (never a weak-spot, slow or
+"Practise" lesson) becomes a **refresh lesson** around the weakest slipped
+letter. The strip header then reads, for example, **Refresh: K · slower than
+its best lately: 14 vs 26 WPM · Hits 25 of last 30 · then back to P**, the
+refreshed chip gets an amber border, the metrics row says **Refresh lesson ·
+every word has K**, and every word contains it. The next lesson goes back to
+the new letter.
+
+Independently of that, every lesson of Stages 1 and 2 prefers words that
+also practise weak letters besides the focus letter: unlocked letters that
+are not green, have low confidence or slipped. Each word's frequency weight
+is multiplied by `1 + 2 × (the summed weakness of its other letters)`, at
+most 4, where a letter's weakness is what it lacks of full confidence (at
+least 0.5 for a slipped letter). The focus letter stays in every word, the
+hands stay balanced, and the same seed gives the same lesson. In the
+simulated learner, words with a slipped letter go from about a third of a
+lesson to about half.
+
+**Settings → Refresh slipped letters** turns both off (no refresh lessons,
+no dots, words by frequency alone) and is saved per person.
+
+![Tutor settings with Refresh slipped letters; the popover fits its content and scrolls only in a very small window](screenshots/typing-practice/settings.png)
+
+![A refresh lesson for the slipped C, and the hover card of the slipped L](screenshots/typing-practice/refresh-lesson.png)
+
 ### 6-Stage Learning Path
 
 Click the **Stage** pill in the top bar to open the **Stages** sheet. All six
@@ -148,16 +184,33 @@ keys after it).
 ![Progress sheet with KPI cards, WPM trend chart, unlock markers, and Weak-spot drill](screenshots/typing-practice/progress.png)
 
 All progress is stored **locally on your machine**—no account, no cloud sync,
-and no external database:
+and no external database. Every person has a directory
+`<app_data>/tutor/people/<id>/`, and `<app_data>/tutor/people.zon` names them:
+their id, name, colour, when they were created and last used, and who
+practises now. Per person and layout type:
 
-- `<app_data>/tutor/profiles/<profile_hash>/state.zon` — atomic snapshot of
-  your per-key EMA speed, the outcome of each key's last 30 presses, unlocked keys, daily streak, settings, the
+- `<app_data>/tutor/people/<id>/profiles/<profile_hash>/state.zon` — atomic
+  snapshot of
+  your per-key EMA speed (and the best it reached), the outcome of each key's last 30 presses, unlocked keys, daily streak, settings, the
   key positions your statistics were made at, and the single-character labels
   of up to eight keyboards you practised on (schema 3; a schema 2 file loads
   and keeps its unlocked letters in the new order, an older one is kept as
   `state.zon.corrupt` and the profile starts over).
-- `<app_data>/tutor/profiles/<profile_hash>/runs.jsonl` — append-only lesson
-  history loaded on demand when you open the Progress sheet.
+- `<app_data>/tutor/people/<id>/profiles/<profile_hash>/runs.jsonl` —
+  append-only lesson history loaded on demand when you open the Progress
+  sheet.
+
+Builds before personal profiles kept the layout directories in
+`<app_data>/tutor/profiles/`. On the first start the Tutor writes
+`people.zon` with one person, **Me** (rename it in the menu), and then moves
+each layout directory into `people/<id>/profiles/` with one atomic rename. A
+layout directory is always either at its old or at its new place, so an
+interrupted move loses nothing: the next start finishes it, and a later start
+changes nothing. A layout directory that the person already has stays at the
+old place untouched. If `people.zon` cannot be read, it is kept as
+`people.zon.corrupt` and rebuilt from the person directories (names other than
+**Me** become "Profile 2" and so on); progress stays where it is.
+
 
 With a connected Zigmkay keyboard running current firmware (companion
 protocol version 2), the Tutor also records how each tap/hold key resolved
@@ -178,6 +231,32 @@ A profile is a layout type, not a keyboard: it is scoped to the home-row
 letters and the host keyboard layout. The same layout on two keyboards shares
 its progress, while QWERTY and Colemak stay apart. Key positions are compared
 by hand, finger and row.
+
+### Personal profiles
+
+Several people can practise on one computer. The **person chip** in the
+Tutor top bar (initial and colour, then the name) opens a menu with everyone
+and their progress on the layout type you practise now, such as **16/26
+letters · 5-day streak** or **7/26 letters · practised yesterday**. Pick a
+person to switch, or choose **New profile…**, **Rename “Conny”…** or
+**Delete “Conny”…**. Deleting asks once more, **Delete “Conny” and all of its
+progress?**, and the last remaining profile cannot be deleted. A new profile
+needs a name (at most 24 characters, not used by anyone else; spaces around it
+are dropped) and one of five colours; **Create and switch** starts it fresh,
+Enter confirms and Esc cancels. While the menu or the dialog is open, nothing
+you type reaches the lesson. Test layout shows no chip: it is shared and
+never scored.
+
+![The person menu: Conny practises now, Lisa practised yesterday](screenshots/typing-practice/profiles.png)
+
+![New profile: a name and a colour](screenshots/typing-practice/new-profile.png)
+
+Everything of the Tutor is per person: letters and statistics, tap/hold
+statistics, streak and daily goal, settings, lesson history and the answers to
+the layout-change question. A switch happens between lessons: a lesson in
+progress is dropped and counts for nobody, while everything already finished
+is saved for the person you leave first. The next start opens with the person
+who practised last. The keyboard and its live view stay shared.
 
 ### Tap/hold feedback
 
@@ -356,8 +435,8 @@ zig build test-practice -Donly=practice
 ```
 
 Run the full desktop test suite and headless SDL GUI fixtures (including
-`--offline-practice-frames 3` and the 24-scene
-Dark/Light `--offline-tutor-frames 96` gallery):
+`--offline-practice-frames 3` and the 28-scene
+Dark/Light `--offline-tutor-frames 112` gallery):
 
 ```sh
 zig build test-desktop -Ddesktop
@@ -380,11 +459,11 @@ changes, so they never show an older version:
 zig build doc-screenshots -Ddesktop
 ```
 
-To render native GPU screenshots of the same 24-scene Dark/Light gallery into
+To render native GPU screenshots of the same 28-scene Dark/Light gallery into
 `companion/.zig-cache/typing-practice-gallery/`:
 
 ```sh
-zig build -Ddesktop && ./zig-out/bin/zigmkay-companion --native-tutor-frames 96
+zig build -Ddesktop && ./zig-out/bin/zigmkay-companion --native-tutor-frames 112
 ```
 
 ## Manual hardware checklist
@@ -429,8 +508,25 @@ LK07 running the same layout):
     and no key statistics are reset. If a practised character sits elsewhere
     there, the question appears once, only before a lesson starts; choose
     **Keep all**, then switch boards twice more: nothing is asked again.
-12. **Settings → Reset profile progress** resets only the active profile; a
-    different layout type keeps its progress.
+12. **Settings → Reset profile progress** resets only the active profile of
+    the current person; a different layout type and other people keep their
+    progress.
 13. **Settings → Reset characters…**: pick two letters and confirm. Only
     those start over, one becomes the focus key, the unlocked count stays, and
     all of it is the same after a restart.
+14. First start after updating from a build without personal profiles: the
+    chip reads **Me** and every layout type shows its progress as before;
+    `tutor/profiles/` is gone and `tutor/people/1/profiles/` holds it.
+15. Person chip → **New profile…**: type a name (Esc cancels, Enter
+    confirms), pick a colour, **Create and switch**. A lesson in progress is
+    dropped; the new person starts at the first letters with default settings
+    and no streak. Finish a lesson, switch back: the first person's letters,
+    streak, settings and history are unchanged, and the menu shows both
+    people's progress on this layout type.
+16. Quit and restart: the person who practised last is current. Rename them,
+    then delete the other one (two-step confirmation); the last profile offers
+    no delete.
+17. Let a green letter slow down (type it slowly for a few lessons): its chip
+    gets an amber dot, it stays green, and within three lessons a refresh
+    lesson names it in the header. **Settings → Refresh slipped letters → Off**
+    removes the dot and the refresh lessons.
