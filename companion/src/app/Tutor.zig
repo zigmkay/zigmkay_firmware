@@ -240,7 +240,19 @@ pub fn observe(app: *App, now_us: u64) !void {
         self.snapshot = try Snapshot.init(app, selected, live);
     }
     practice.observe(if (self.snapshot) |*value| value.control else try app.model.id());
+    routeTapHolds(app);
     flushPersistence(app, now_us);
+}
+
+/// Hands the keyboard's tap/hold decisions to a lesson typed on that very
+/// keyboard and layout; the controller ignores them outside a lesson. Others
+/// are dropped, so none of them is counted against a later lesson.
+fn routeTapHolds(app: *App) void {
+    const self = &app.tutor;
+    defer app.live.tap_holds.clear();
+    const snapshot = if (self.snapshot) |*value| value else return;
+    if (!snapshot.live or !app.live.verified() or !sameLayout(&snapshot.model, &app.live.model)) return;
+    for (app.live.tap_holds.slice()) |decision| _ = self.controller.observeTapHold(decision);
 }
 
 pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {

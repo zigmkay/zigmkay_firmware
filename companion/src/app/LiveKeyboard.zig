@@ -27,6 +27,8 @@ visibility: desktop.live_keyboard.Visibility,
 pressed: [128]bool = @splat(false),
 frame: desktop.live_keyboard.Frame = .{},
 last_status: ?Status = null,
+/// Tap/hold decisions waiting for the Tutor, which takes them every frame.
+tap_holds: desktop.live_keyboard.TapHoldQueue = .{},
 
 /// The captions and board of a project prepared for binding. After `rebind`
 /// or `swap` it holds those of the previous binding, which the caller
@@ -53,6 +55,7 @@ pub fn deinit(self: *LiveKeyboard) void {
 pub fn poll(self: *LiveKeyboard) !?bool {
     const driver = if (self.driver) |*value| value else return null;
     driver.poll(driver.transport.now());
+    self.tap_holds.add(driver.decision_events[0..driver.decision_event_count]);
     self.frame = try self.presenter.select(&self.captions.labels, self.identity, &driver.session, &self.pressed);
     const current = self.status();
     if (self.last_status == null or self.last_status.? != current) {
@@ -110,6 +113,7 @@ pub fn rebind(
     self.driver = driver;
     self.swap(model, binding);
     self.identity = identity;
+    self.tap_holds.clear();
     resetPresentation(&self.presenter, &self.visibility, &self.frame, &self.pressed, life);
 }
 

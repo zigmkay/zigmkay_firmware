@@ -159,6 +159,21 @@ and no external database:
 - `<app_data>/tutor/profiles/<profile_hash>/runs.jsonl` — append-only lesson
   history loaded on demand when you open the Progress sheet.
 
+With a connected Zigmkay keyboard running current firmware (companion
+protocol version 2), the Tutor also records how each tap/hold key resolved
+during a lesson: home-row modifiers, a layer-tap Space and the like. The
+keyboard reports every decision (tap, hold or retro tap, why, and how long it
+took within the tapping term), and the Tutor compares it with the text at the
+cursor. Per character the key types on tap, `state.zon` keeps the last 30
+decisions as accidental holds (the letter was wanted, Shift or a layer
+fired), accidental taps (the hold was wanted, the letter came), near holds
+(a correct tap late in the tapping term) and wanted ones, the reasons, the
+typical decision time and how long a rolled-over key overlapped; each
+`runs.jsonl` line counts the lesson's accidental holds and taps. This never
+changes speed or accuracy: a wrong character still counts as a miss. Older
+keyboards, other keyboards and offline practice simply record nothing, and
+saves and history lines from before this load unchanged.
+
 A profile is a layout type, not a keyboard: it is scoped to the home-row
 letters and the host keyboard layout. The same layout on two keyboards shares
 its progress, while QWERTY and Colemak stay apart. Key positions are compared

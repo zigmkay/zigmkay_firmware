@@ -4,6 +4,7 @@ const cache = @import("label_cache.zig");
 const companion = @import("session");
 const protocol = @import("device-protocol");
 const model = @import("layout-model");
+const tap_hold = @import("practice_tap_hold.zig");
 
 pub const Frame = struct {
     labels: ?*const cache.LabelCache = null,
@@ -98,6 +99,96 @@ pub fn fromKeyboard(buffer: *[max_signals]Signal, events: []const protocol.Signa
         .pressed = event.pressed,
     };
     return buffer[0..count];
+}
+
+/// A keyboard tap/hold decision as the Tutor classifies it.
+pub fn tapHoldDecision(event: protocol.TapHoldDecision) tap_hold.Decision {
+    return .{
+        .key_index = event.key_index,
+        .outcome = switch (event.outcome) {
+            .tap => .tap,
+            .hold => .hold,
+            .retro_tap => .retro_tap,
+        },
+        .reason = switch (event.reason) {
+            .released_within_term => .released_within_term,
+            .term_elapsed => .term_elapsed,
+            .permissive_hold => .permissive_hold,
+            .same_side_tap => .same_side_tap,
+            .released_after_term => .released_after_term,
+        },
+        .elapsed_ms = event.elapsed_ms,
+        .other_key = if (event.other_key) |other| other else null,
+        .tapping_term_ms = event.tapping_term_ms,
+        .layer = event.layer,
+        .combo = event.combo,
+    };
+}
+
+/// Tap/hold decisions received since the Tutor last took them, oldest
+/// first. When nobody takes them the oldest are dropped.
+pub const TapHoldQueue = struct {
+    pub const capacity = 64;
+    items: [capacity]tap_hold.Decision = undefined,
+    len: usize = 0,
+
+    pub fn add(self: *TapHoldQueue, events: []const protocol.TapHoldDecision) void {
+        for (events) |event| {
+            if (self.len == capacity) {
+                std.mem.copyForwards(tap_hold.Decision, self.items[0 .. capacity - 1], self.items[1..capacity]);
+                self.len -= 1;
+            }
+            self.items[self.len] = tapHoldDecision(event);
+            self.len += 1;
+        }
+    }
+
+    /// The queued decisions; they stay valid until the next `add` or `clear`.
+    pub fn slice(self: *const TapHoldQueue) []const tap_hold.Decision {
+        return self.items[0..self.len];
+    }
+
+    pub fn clear(self: *TapHoldQueue) void {
+        self.len = 0;
+    }
+};
+
+test "tap/hold decisions convert field by field and the queue keeps the newest" {
+    const t = std.testing;
+    const event = protocol.TapHoldDecision{
+        .key_index = 9,
+        .outcome = .retro_tap,
+        .reason = .released_after_term,
+        .elapsed_ms = 333,
+        .other_key = 4,
+        .tapping_term_ms = 190,
+        .layer = 2,
+        .combo = true,
+    };
+    try t.expectEqualDeep(tap_hold.Decision{
+        .key_index = 9,
+        .outcome = .retro_tap,
+        .reason = .released_after_term,
+        .elapsed_ms = 333,
+        .other_key = 4,
+        .tapping_term_ms = 190,
+        .layer = 2,
+        .combo = true,
+    }, tapHoldDecision(event));
+    inline for (@typeInfo(protocol.DecisionReason).@"enum".field_names) |name| {
+        const reason = @field(protocol.DecisionReason, name);
+        try t.expectEqual(@backingInt(reason), @backingInt(@field(tap_hold.model.TapHoldReason, name)));
+    }
+    var queue: TapHoldQueue = .{};
+    var events: [TapHoldQueue.capacity + 3]protocol.TapHoldDecision = undefined;
+    for (&events, 0..) |*e, i| e.* = .{ .key_index = @intCast(i), .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 1, .tapping_term_ms = 200 };
+    queue.add(events[0..2]);
+    queue.add(events[2..]);
+    try t.expectEqual(@as(usize, TapHoldQueue.capacity), queue.slice().len);
+    try t.expectEqual(@as(usize, 3), queue.slice()[0].key_index);
+    try t.expectEqual(@as(usize, TapHoldQueue.capacity + 2), queue.slice()[TapHoldQueue.capacity - 1].key_index);
+    queue.clear();
+    try t.expectEqual(@as(usize, 0), queue.slice().len);
 }
 
 /// Overlay requests never make an unverified draft visible. Hold state is
