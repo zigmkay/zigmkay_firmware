@@ -166,6 +166,10 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     app.captions = try app.captionsFor(&app.model, "Offline launch fixture");
     errdefer app.captions.deinit();
     if (builtin.os.tag == .linux) _ = Backend.c.SDL_SetHint(Backend.c.SDL_HINT_APP_ID, "zigmkay");
+    // Closing the editor window hides it while the tray keeps the app
+    // resident (`handleWindowRequests`). SDL would otherwise also post a quit
+    // when the last visible window closes, and the app would quit.
+    _ = Backend.c.SDL_SetHint(Backend.c.SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
     app.native = try Backend.initWindow(.{
         .io = io,
         .size = if (frame_limit != null) .{ .w = 1536, .h = 1024 } else .{
