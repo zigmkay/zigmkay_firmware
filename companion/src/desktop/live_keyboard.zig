@@ -84,7 +84,10 @@ pub const Presenter = struct {
 /// Companion-owned overlay intent. The live session reports keyboard signal
 /// messages (`fromKeyboard`); the draft runner derives them on the host.
 pub const SignalKind = enum { log_toggle, overlay_toggle, shutdown };
-pub const Signal = struct { kind: SignalKind, pressed: bool };
+/// Which action of its key sent a signal. Keyboards that do not say are
+/// `unknown`, and the overlay falls back to judging the press duration.
+pub const SignalSource = enum { unknown, tap, hold };
+pub const Signal = struct { kind: SignalKind, pressed: bool, source: SignalSource = .unknown };
 pub const max_signals = 32;
 
 /// Converts keyboard signals from the live session, keeping at most `max_signals`.
@@ -97,6 +100,11 @@ pub fn fromKeyboard(buffer: *[max_signals]Signal, events: []const protocol.Signa
             .shutdown => .shutdown,
         },
         .pressed = event.pressed,
+        .source = switch (event.source) {
+            .unknown => .unknown,
+            .tap => .tap,
+            .hold => .hold,
+        },
     };
     return buffer[0..count];
 }
@@ -193,6 +201,12 @@ test "tap/hold decisions convert field by field and the queue keeps the newest" 
 
 /// Overlay requests never make an unverified draft visible. Hold state is
 /// transient and must be cleared on loss of coherent session state.
+///
+/// In `tap_hold` mode a signal from a key's tap action toggles the overlay on
+/// its press, and one from a hold action shows it while the hold lasts; one
+/// key can do both. A signal of unknown source (older firmware) toggles when
+/// released within `hold_ms` and is momentary otherwise. `hold` and `toggle`
+/// treat every signal alike.
 pub const Visibility = struct {
     mode: enum { toggle, hold, tap_hold } = .toggle,
     latched: bool = false,
@@ -214,6 +228,19 @@ pub const Visibility = struct {
         }
         for (signals) |signal| {
             if (signal.kind != .overlay_toggle) continue;
+            if (self.mode == .tap_hold) switch (signal.source) {
+                // However long the key stays down, a tap toggles once; its
+                // release only ends the tap action.
+                .tap => {
+                    if (signal.pressed) self.latched = !self.latched;
+                    continue;
+                },
+                .hold => {
+                    self.held = signal.pressed;
+                    continue;
+                },
+                .unknown => {},
+            };
             if (self.mode == .tap_hold) {
                 if (signal.pressed and !self.down) {
                     self.pressed_at = now;
@@ -288,6 +315,83 @@ test "quick taps latch while long holds restore preceding visibility" {
     try t.expect(visibility.updateAt(frame, &press, 2300));
     try t.expect(!visibility.updateAt(.{}, &.{}, 2400));
     try t.expect(!visibility.updateAt(frame, &release, 2450));
+}
+
+test "a tap source toggles on its press and a hold source shows while held" {
+    const t = std.testing;
+    var labels = try cache.LabelCache.init(t.allocator, 2, 3);
+    defer labels.deinit();
+    const frame = Frame{ .labels = &labels, .stale = false };
+    const tap_press = [_]Signal{.{ .kind = .overlay_toggle, .pressed = true, .source = .tap }};
+    const tap_release = [_]Signal{.{ .kind = .overlay_toggle, .pressed = false, .source = .tap }};
+    const hold_press = [_]Signal{.{ .kind = .overlay_toggle, .pressed = true, .source = .hold }};
+    const hold_release = [_]Signal{.{ .kind = .overlay_toggle, .pressed = false, .source = .hold }};
+    const tap = tap_press ++ tap_release;
+
+    // Tap only: every tap flips the overlay and it stays, even a long tap
+    // whose release comes well after `hold_ms`.
+    var visibility = Visibility{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &tap, 100));
+    try t.expect(visibility.updateAt(frame, &.{}, 5000));
+    try t.expect(!visibility.updateAt(frame, &tap_press, 5100));
+    try t.expect(!visibility.updateAt(frame, &tap_release, 5900));
+    try t.expect(visibility.updateAt(frame, &tap_press, 6000));
+    try t.expect(visibility.updateAt(frame, &tap_release, 6010));
+
+    // Hold only: shown while held, however short, and hidden on release.
+    visibility = .{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &hold_press, 100));
+    try t.expect(!visibility.updateAt(frame, &hold_release, 120));
+    try t.expect(visibility.updateAt(frame, &hold_press, 200));
+    try t.expect(visibility.updateAt(frame, &.{}, 3000));
+    try t.expect(!visibility.updateAt(frame, &hold_release, 3100));
+
+    // Tap then hold on one key: the hold keeps the latched overlay.
+    visibility = .{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &tap, 100));
+    try t.expect(visibility.updateAt(frame, &hold_press, 400));
+    try t.expect(visibility.updateAt(frame, &hold_release, 900));
+    try t.expect(!visibility.updateAt(frame, &tap, 1000));
+
+    // Hold then tap on one key: the hold peeks, the tap latches.
+    visibility = .{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &hold_press, 100));
+    try t.expect(!visibility.updateAt(frame, &hold_release, 200));
+    try t.expect(visibility.updateAt(frame, &tap, 300));
+    try t.expect(visibility.updateAt(frame, &hold_press, 600));
+    try t.expect(visibility.updateAt(frame, &hold_release, 700));
+
+    // Losing the session clears both.
+    visibility = .{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &(tap ++ hold_press), 100));
+    try t.expect(!visibility.updateAt(.{}, &.{}, 200));
+    try t.expect(!visibility.updateAt(frame, &.{}, 300));
+
+    // The explicit modes ignore the source.
+    var hold = Visibility{ .mode = .hold };
+    try t.expect(hold.update(frame, &tap_press));
+    try t.expect(!hold.update(frame, &tap_release));
+    var toggle = Visibility{};
+    try t.expect(toggle.update(frame, &hold_press));
+    try t.expect(toggle.update(frame, &hold_release));
+    try t.expect(!toggle.update(frame, &tap_press));
+}
+
+test "an unknown source keeps judging the press duration" {
+    const t = std.testing;
+    var labels = try cache.LabelCache.init(t.allocator, 2, 3);
+    defer labels.deinit();
+    const frame = Frame{ .labels = &labels, .stale = false };
+    const press = [_]Signal{.{ .kind = .overlay_toggle, .pressed = true, .source = .unknown }};
+    const release = [_]Signal{.{ .kind = .overlay_toggle, .pressed = false, .source = .unknown }};
+    var visibility = Visibility{ .mode = .tap_hold };
+    // A short press latches, a long one is momentary.
+    try t.expect(visibility.updateAt(frame, &press, 100));
+    try t.expect(visibility.updateAt(frame, &release, 100 + Visibility.hold_ms - 1));
+    try t.expect(visibility.updateAt(frame, &press, 1000));
+    try t.expect(!visibility.updateAt(frame, &release, 1100));
+    try t.expect(visibility.updateAt(frame, &press, 2000));
+    try t.expect(!visibility.updateAt(frame, &release, 2000 + Visibility.hold_ms));
 }
 
 test "verified visibility preserves releases and clears holds on stale or mismatched identity" {
@@ -396,11 +500,13 @@ test "hello and the first state promote the verified presentation atomically" {
 test "keyboard signals convert to overlay signals" {
     var buffer: [max_signals]Signal = undefined;
     const converted = fromKeyboard(&buffer, &.{
-        .{ .kind = .overlay_toggle, .pressed = true },
+        .{ .kind = .overlay_toggle, .pressed = true, .source = .hold },
+        .{ .kind = .overlay_toggle, .pressed = false, .source = .tap },
         .{ .kind = .shutdown, .pressed = false },
     });
     try std.testing.expectEqualSlices(Signal, &.{
-        .{ .kind = .overlay_toggle, .pressed = true },
-        .{ .kind = .shutdown, .pressed = false },
+        .{ .kind = .overlay_toggle, .pressed = true, .source = .hold },
+        .{ .kind = .overlay_toggle, .pressed = false, .source = .tap },
+        .{ .kind = .shutdown, .pressed = false, .source = .unknown },
     }, converted);
 }

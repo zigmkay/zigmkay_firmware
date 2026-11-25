@@ -59,9 +59,12 @@ keyboard icon in the tray.
 - **Live overlay.** A transparent, click-through overlay of your keyboard that
   follows the running layout's active layer, modifiers and pressed keys over a
   verified connection. Bind a key's tap or hold to **Show / hide companion**
-  (reserved signal `255`): a quick tap toggles the overlay, a longer press shows
-  it while held. Losing the connection hides it; editor changes stay a draft
-  until built and flashed.
+  (reserved signal `255`) or use `KC_COMPANION`: each tap toggles the overlay
+  and it stays that way, while a hold shows it only for as long as the key is
+  held. One tap/hold key can do both. Keyboards flashed before the signal
+  carried its source fall back to timing: a press shorter than 250 ms toggles,
+  a longer one shows the overlay while held. Losing the connection hides it;
+  editor changes stay a draft until built and flashed.
 - **Tray.** Close the editor and the application stays resident. The tray menu
   shows the device status and opens the editor, shows or hides the companion,
   binds the saved editor project to the live companion, zooms the editor and

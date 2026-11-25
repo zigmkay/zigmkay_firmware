@@ -142,7 +142,8 @@ for the same firmware, written in Zig and living in [`companion/`](companion/).
   Zig toolchain and firmware sources.
 - **Live companion overlay.** A transparent, click-through overlay that follows
   the active layer, modifiers and pressed keys of a connected keyboard. Bind a
-  key to **Show / hide companion** to bring it up.
+  key to **Show / hide companion** to bring it up: a tap toggles it, a hold
+  shows it while held.
 - **Typing tutor.** Check a freshly flashed layout key by key, then run short
   English tests or Zig lessons with words per minute and accuracy.
 
