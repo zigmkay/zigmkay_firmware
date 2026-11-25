@@ -411,3 +411,110 @@ fn alternate(a: *const Keyboard, b: *const Keyboard, reset: bool) !void {
         a.selector, b.selector, moved,
     });
 }
+
+test "tap/hold decisions of a home-row Shift keyboard survive saving and loading" {
+    const t = std.testing;
+    var exercised: usize = 0;
+    for (catalog.entries) |entry| {
+        if (catalog.defaultData(entry.selector) == null) continue;
+        const profile = try deriveDefault(entry);
+        const home_row_shift = for (profile.shiftSlice()) |provider| {
+            if (provider.kind == .home_row_hold) break true;
+        } else false;
+        if (!home_row_shift) continue;
+        exercised += 1;
+        tapHolds(entry, &profile) catch |err| {
+            std.debug.print("tutor learner tap/hold failed on {s}: {t}\n", .{ entry.selector, err });
+            return err;
+        };
+    }
+    try t.expect(exercised > 0);
+}
+
+/// A Stage 3 lesson typed without mistakes, with the keyboard reporting a
+/// Shift hold for each capital, now and then a missed Shift, and now and
+/// then a home-row letter rolled into its hold.
+fn tapHolds(entry: catalog.Entry, profile: *const lp.LayoutProfile) !void {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    const owner = try t.allocator.create(control.Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = control.Controller.init(@splat(1));
+    _ = owner.bindProfile(profile.*, null);
+    var now: u64 = 1_000_000;
+    _ = try owner.dispatch(owner.action(.{ .set_stage = .shift }), now);
+    try owner.start();
+    const session = &owner.session;
+    const reference = session.reference[0..session.reference_len];
+    const generation = owner.generation;
+    var step: usize = 0;
+    var accidental: usize = 0;
+    while (owner.generation == generation) : (step += 1) {
+        if (step > reference.len) return error.RoundCannotBeFinished;
+        const at = desktop.practice_view.focus(session);
+        const wanted = reference[at];
+        if (profile.routeFor(wanted)) |route| {
+            const provider = for (profile.shiftSlice()) |p| {
+                if (p.key_index == route.key_index and p.kind == .home_row_hold) break p;
+            } else null;
+            if (route.modifiers & 0x22 != 0 and route.kind == .shifted) {
+                if (profile.preferredShiftFor(route.key_index)) |shift| if (shift.kind == .home_row_hold) {
+                    const missed = step % 5 == 0;
+                    const class = owner.observeTapHold(.{
+                        .key_index = shift.key_index,
+                        .outcome = if (missed) .tap else .hold,
+                        .reason = if (missed) .released_within_term else .permissive_hold,
+                        .elapsed_ms = if (missed) 70 else 120,
+                        .other_key = if (missed) null else route.key_index,
+                        .tapping_term_ms = 200,
+                    });
+                    try t.expectEqual(@as(?desktop.practice_model.TapHoldClass, if (missed) .accidental_tap else .wanted_hold), class);
+                    if (missed) accidental += 1;
+                };
+            } else if (provider != null and route.kind == .base) {
+                if (step % 3 == 0) {
+                    // Rolled into the hold: Shift fired instead of the letter.
+                    try t.expectEqual(@as(?desktop.practice_model.TapHoldClass, .accidental_hold), owner.observeTapHold(.{
+                        .key_index = route.key_index,
+                        .outcome = .hold,
+                        .reason = .permissive_hold,
+                        .elapsed_ms = 95,
+                        .tapping_term_ms = 200,
+                    }));
+                    accidental += 1;
+                }
+                // The letter itself, typed again after a roll.
+                try t.expectEqual(@as(?desktop.practice_model.TapHoldClass, .wanted_tap), owner.observeTapHold(.{
+                    .key_index = route.key_index,
+                    .outcome = .tap,
+                    .reason = .released_within_term,
+                    .elapsed_ms = 80,
+                    .tapping_term_ms = 200,
+                }));
+            }
+        }
+        var bytes: [4]u8 = undefined;
+        const len = try std.unicode.utf8Encode(wanted, &bytes);
+        now += 200_000;
+        _ = try owner.insertOs(true, bytes[0..len], now, false);
+    }
+    try t.expect(owner.learning.tap_hold_len > 0);
+    const lesson = owner.last_lesson.?.tap_holds;
+    try t.expectEqual(accidental, @as(usize, lesson.accidental_holds) + lesson.accidental_taps);
+    // Typing without mistakes stays a perfect lesson.
+    try t.expectApproxEqAbs(@as(f32, 100), owner.last_lesson.?.accuracy, 0.01);
+
+    try owner.persistPending(t.allocator, t.io, tmp.dir, entry.selector, "en-US");
+    var loaded = try storage.loadState(t.allocator, t.io, tmp.dir, profile.profile_hash);
+    defer loaded.deinit();
+    const resumed = try t.allocator.create(control.Controller);
+    defer t.allocator.destroy(resumed);
+    resumed.* = control.Controller.init(@splat(1));
+    _ = resumed.bindProfile(profile.*, loaded.state);
+    try t.expectEqual(owner.learning.tap_hold_len, resumed.learning.tap_hold_len);
+    for (owner.learning.tapHoldSlice(), resumed.learning.tapHoldSlice()) |before, after| try t.expectEqualDeep(before, after);
+    var runs = try storage.loadRuns(t.allocator, t.io, tmp.dir, profile.profile_hash);
+    defer runs.deinit();
+    try t.expectEqual(lesson.decisions, runs.runs[0].tap_hold_decisions);
+}

@@ -11,6 +11,7 @@ const storage = @import("practice_storage.zig");
 const key_progress = @import("practice_key_progress.zig");
 const word_list = @import("practice_words.zig");
 const letter_order = @import("practice_letter_order.zig");
+const tap_hold = @import("practice_tap_hold.zig");
 
 pub const Digest = [32]u8;
 pub const Mode = enum { tutor, test_keys };
@@ -71,6 +72,8 @@ pub const LessonSummary = struct {
     /// Every key typed in the lesson, for the keyboard heatmap.
     keys: [max_lesson_keys]LessonKey = undefined,
     key_len: usize = 0,
+    /// Tap/hold decisions of the lesson; all zero without a Zigmkay keyboard.
+    tap_holds: LessonTapHolds = .{},
 
     pub fn changeSlice(self: *const LessonSummary) []const KeyChange {
         return self.changes[0..self.change_len];
@@ -83,6 +86,28 @@ pub const LessonSummary = struct {
 
 pub const max_round_changes: usize = 8;
 pub const max_lesson_keys: usize = 40;
+
+/// Classified tap/hold decisions of one lesson.
+pub const LessonTapHolds = struct {
+    decisions: u16 = 0,
+    accidental_holds: u16 = 0,
+    accidental_taps: u16 = 0,
+    near_holds: u16 = 0,
+
+    fn count(self: *LessonTapHolds, class: model.TapHoldClass) void {
+        self.decisions +|= 1;
+        switch (class) {
+            .accidental_hold => self.accidental_holds +|= 1,
+            .accidental_tap => self.accidental_taps +|= 1,
+            .near_hold => self.near_holds +|= 1,
+            .wanted_tap, .wanted_hold => {},
+        }
+    }
+};
+
+/// A hold the tapping term decided, which a retro tap of the same key may
+/// turn into a late tap.
+const TermHold = struct { key_index: usize, cp: u21, class: model.TapHoldClass };
 
 /// One key of a finished lesson: how often it was pressed, missed, and how
 /// long it took (median of its clean presses, 0 without one).
@@ -245,6 +270,7 @@ pub const PendingRun = struct {
     weak_spot: ?[2]u32 = null,
     newly_green: [max_round_changes]u32 = @splat(0),
     newly_green_len: usize = 0,
+    tap_holds: LessonTapHolds = .{},
 };
 
 /// Every this many lessons of Stages 1 and 2 one is built around the
@@ -348,6 +374,12 @@ pub const Controller = struct {
     lessons_since_weak_spot: u8 = 0,
     /// The letter pair the current lesson is built around, if any.
     lesson_bigram: ?[2]u8 = null,
+    /// Tap/hold decisions of the current lesson.
+    lesson_tap_holds: LessonTapHolds = .{},
+    last_term_hold: ?TermHold = null,
+    /// Text positions the latest tap decisions typed, newest last.
+    tap_claims: [4]usize = undefined,
+    tap_claim_len: usize = 0,
 
     custom_text: [2048]u8 = @splat(0),
     custom_text_len: usize = 0,
@@ -904,6 +936,9 @@ pub const Controller = struct {
         self.slow_round_next = false;
         self.failure = null;
         self.round_recorded = false;
+        self.lesson_tap_holds = .{};
+        self.last_term_hold = null;
+        self.tap_claim_len = 0;
         return;
     }
 
@@ -975,6 +1010,58 @@ pub const Controller = struct {
         if (self.config.mode == .test_keys) return false;
         return focused and self.active and
             (self.session.state == .ready or self.session.state == .running);
+    }
+
+    /// Whether tap/hold decisions of the keyboard count for the lesson. The
+    /// caller also makes sure they come from the verified keyboard the
+    /// lesson's layout profile was derived from.
+    pub fn acceptingTapHold(self: *const Controller) bool {
+        return self.config.mode == .tutor and self.active and self.profile_bound and
+            (self.session.state == .ready or self.session.state == .running);
+    }
+
+    /// Classifies a tap/hold decision against the text at the cursor and
+    /// records it for the character the key types on tap. Scoring of the
+    /// typed text is untouched. Returns the class, or null when the decision
+    /// was ignored.
+    pub fn observeTapHold(self: *Controller, decision: tap_hold.Decision) ?model.TapHoldClass {
+        if (!self.acceptingTapHold()) return null;
+        const term_hold = self.last_term_hold;
+        self.last_term_hold = null;
+        if (decision.outcome == .retro_tap) if (term_hold) |held| if (held.key_index == decision.key_index) {
+            // The hold the term decided typed the character after all.
+            if (held.class != .accidental_hold or !self.learning.amendRetroTap(held.cp)) return null;
+            self.lesson_tap_holds.accidental_holds -|= 1;
+            self.lesson_tap_holds.near_holds +|= 1;
+            return .near_hold;
+        };
+        const classified = tap_hold.classify(&self.profile, &self.session, decision, self.tap_claims[0..self.tap_claim_len]) orelse return null;
+        if (classified.typed_at) |index| self.claimTap(index);
+        self.learning.recordTapHold(classified.cp, classified.sample);
+        self.lesson_tap_holds.count(classified.sample.class);
+        if (decision.outcome == .hold and decision.reason == .term_elapsed) {
+            self.last_term_hold = .{ .key_index = decision.key_index, .cp = classified.cp, .class = classified.sample.class };
+        }
+        return classified.sample.class;
+    }
+
+    fn claimTap(self: *Controller, index: usize) void {
+        if (self.tap_claim_len == self.tap_claims.len) {
+            std.mem.copyForwards(usize, self.tap_claims[0 .. self.tap_claims.len - 1], self.tap_claims[1..]);
+            self.tap_claim_len -= 1;
+        }
+        self.tap_claims[self.tap_claim_len] = index;
+        self.tap_claim_len += 1;
+    }
+
+    /// The tap/hold window of the key that types `cp` on tap.
+    pub fn tapHoldSummary(self: *const Controller, cp: u21) ?model.TapHoldSummary {
+        return self.learning.tapHoldSummary(cp);
+    }
+
+    /// The keys with the most accidental holds in their window, most first.
+    pub fn mostAccidentalHolds(self: *const Controller, out: []model.TapHoldSummary) []model.TapHoldSummary {
+        return self.learning.mostAccidentalHolds(out);
     }
 
     /// Handles OS text input in Tutor mode.
@@ -1087,6 +1174,7 @@ pub const Controller = struct {
         rd.change_len = changes.len;
         rd.slow_round = self.slow_round;
         rd.weak_spot = self.lesson_bigram;
+        rd.tap_holds = self.lesson_tap_holds;
         if (self.lesson_bigram != null) {
             self.lessons_since_weak_spot = 0;
         } else {
@@ -1122,6 +1210,7 @@ pub const Controller = struct {
         for (wk_slice, 0..) |wk, i| pr.weak_keys[i] = wk.cp;
         for (wb_slice, 0..) |wb, i| pr.weak_bigrams[i] = .{ wb.prev, wb.cur };
         if (self.lesson_bigram) |pair| pr.weak_spot = .{ pair[0], pair[1] };
+        pr.tap_holds = self.lesson_tap_holds;
         for (changes.items[0..changes.len]) |change| {
             if (!change.newly_green) continue;
             pr.newly_green[pr.newly_green_len] = change.cp;
@@ -1165,6 +1254,10 @@ pub const Controller = struct {
                 .top_weak_bigrams = pr.weak_bigrams[0..pr.weak_bigram_len],
                 .weak_spot = pr.weak_spot,
                 .newly_green = pr.newly_green[0..pr.newly_green_len],
+                .tap_hold_decisions = pr.tap_holds.decisions,
+                .accidental_holds = pr.tap_holds.accidental_holds,
+                .accidental_taps = pr.tap_holds.accidental_taps,
+                .near_holds = pr.tap_holds.near_holds,
             })
         else {};
         if (appended) |_| self.pending_run = null else |_| {}
@@ -1722,4 +1815,71 @@ test "a save from before the word-forming order keeps its unlocked letters" {
     try t.expectEqual(ErrorMode.forgive, owner.config.error_mode);
     // 'q' was green, so it counts as mastered and stays unlocked.
     try t.expect(owner.learning.getStat('q').?.mastered);
+}
+
+test "tap/hold decisions are classified during a lesson, counted for it and saved" {
+    const t = std.testing;
+    var tmp = t.tmpDir(.{});
+    defer tmp.cleanup();
+    var owner = Controller.init(@splat(1));
+    var profile = tap_hold.testProfile();
+    @memcpy(profile.unlock_order[0..6], "asdfjk");
+    profile.unlock_len = 6;
+    profile.zone1_len = 4;
+    profile.profile_hash = @splat(0x55);
+    owner.config.letter_order = .home_row;
+    _ = owner.bindProfile(profile, null);
+
+    const roll: tap_hold.Decision = .{ .key_index = 3, .outcome = .hold, .reason = .permissive_hold, .elapsed_ms = 80, .other_key = 0, .tapping_term_ms = 200 };
+    // Nothing counts without a lesson.
+    try t.expectEqual(@as(?model.TapHoldClass, null), owner.observeTapHold(roll));
+    try owner.start();
+    try owner.session.loadWithMode("fad fad", .forgive);
+    owner.config.mode = .test_keys;
+    try t.expectEqual(@as(?model.TapHoldClass, null), owner.observeTapHold(roll));
+    owner.config.mode = .tutor;
+
+    try t.expectEqual(@as(?model.TapHoldClass, .accidental_hold), owner.observeTapHold(roll));
+    // A hold the term decided, released into a retro tap: the f came late.
+    var slow = roll;
+    slow.reason = .term_elapsed;
+    slow.elapsed_ms = 210;
+    slow.other_key = null;
+    try t.expectEqual(@as(?model.TapHoldClass, .accidental_hold), owner.observeTapHold(slow));
+    const retro: tap_hold.Decision = .{ .key_index = 3, .outcome = .retro_tap, .reason = .released_after_term, .elapsed_ms = 260, .tapping_term_ms = 200 };
+    try t.expectEqual(@as(?model.TapHoldClass, .near_hold), owner.observeTapHold(retro));
+    try t.expectEqual(@as(?model.TapHoldClass, .wanted_tap), owner.observeTapHold(.{ .key_index = 3, .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 70, .tapping_term_ms = 200 }));
+    // A key the text does not ask for is ignored.
+    try t.expectEqual(@as(?model.TapHoldClass, null), owner.observeTapHold(.{ .key_index = 5, .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 70, .tapping_term_ms = 200 }));
+
+    const before_accuracy = owner.session.accuracy();
+    try t.expectEqual(LessonTapHolds{ .decisions = 3, .accidental_holds = 1, .near_holds = 1 }, owner.lesson_tap_holds);
+    // Typed text is scored as before; decisions do not touch it.
+    try t.expectEqual(before_accuracy, owner.session.accuracy());
+    var now: u64 = 1_000_000;
+    for ("fad fad") |ch| {
+        now += 200_000;
+        try owner.insertOs(true, &.{ch}, now, false);
+    }
+    try t.expectEqual(LessonTapHolds{ .decisions = 3, .accidental_holds = 1, .near_holds = 1 }, owner.last_lesson.?.tap_holds);
+    try t.expectEqual(LessonTapHolds{}, owner.lesson_tap_holds);
+    const f = owner.tapHoldSummary('f').?;
+    try t.expectEqual(@as(u8, 3), f.window);
+    try t.expectEqual(@as(u8, 1), f.accidental_holds);
+    try t.expectEqual(@as(u8, 1), f.near_holds);
+    var top: [4]model.TapHoldSummary = undefined;
+    try t.expectEqual(@as(u21, 'f'), owner.mostAccidentalHolds(&top)[0].cp);
+
+    try owner.persistPending(t.allocator, t.io, tmp.dir, "board", "en-US");
+    var runs = try storage.loadRuns(t.allocator, t.io, tmp.dir, profile.profile_hash);
+    defer runs.deinit();
+    try t.expectEqual(@as(u16, 3), runs.runs[0].tap_hold_decisions);
+    try t.expectEqual(@as(u16, 1), runs.runs[0].accidental_holds);
+    try t.expectEqual(@as(u16, 1), runs.runs[0].near_holds);
+    var saved = try storage.loadState(t.allocator, t.io, tmp.dir, profile.profile_hash);
+    defer saved.deinit();
+    var reloaded = Controller.init(@splat(1));
+    reloaded.config.letter_order = .home_row;
+    _ = reloaded.bindProfile(profile, saved.state);
+    try t.expectEqualDeep(f, reloaded.tapHoldSummary('f').?);
 }

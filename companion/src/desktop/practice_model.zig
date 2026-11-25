@@ -84,6 +84,209 @@ pub const KeyStat = struct {
     }
 };
 
+/// Tap/hold behaviour of a key is measured over its most recent decisions.
+pub const tap_hold_window: u8 = 30;
+/// A correct tap decided this late in the tapping term was nearly a hold.
+pub const near_hold_fraction: f32 = 0.75;
+/// Characters with tap/hold statistics; a keyboard has few tap/hold keys.
+pub const max_tap_hold_keys: usize = 48;
+
+/// Why the keyboard resolved a tap/hold key as it did; the values are the
+/// companion protocol's.
+pub const TapHoldReason = enum(u8) {
+    released_within_term = 1,
+    term_elapsed = 2,
+    /// A key on the other hand was pressed and released within the term.
+    permissive_hold = 3,
+    /// A key on the same hand was pressed and released within the term.
+    same_side_tap = 4,
+    /// A hold was released with no other key in between: a retro tap.
+    released_after_term = 5,
+
+    pub const count = 5;
+};
+
+/// How a tap/hold decision compares with what the lesson asked for.
+pub const TapHoldClass = enum(u8) {
+    wanted_tap,
+    wanted_hold,
+    /// The key's character was expected, but the key acted as its hold.
+    accidental_hold,
+    /// The key's hold was expected (Shift, a layer), but it typed its character.
+    accidental_tap,
+    /// A wanted tap decided at `near_hold_fraction` of the term or later,
+    /// or typed by a retro tap after the term.
+    near_hold,
+};
+
+/// One classified decision of a key.
+pub const TapHoldSample = struct {
+    class: TapHoldClass,
+    reason: TapHoldReason,
+    elapsed_ms: u16,
+    tapping_term_ms: u16,
+    /// The tap character of the other key of a permissive hold or same-side tap.
+    other_cp: ?u21 = null,
+};
+
+/// What the tap/hold window of a character says, for display.
+pub const TapHoldSummary = struct {
+    cp: u21,
+    /// Decisions in the window, at most `tap_hold_window`.
+    window: u8,
+    accidental_holds: u8,
+    accidental_taps: u8,
+    near_holds: u8,
+    wanted_holds: u8,
+    /// The most common reason among the accidental decisions of the window,
+    /// or among all of them when none was accidental.
+    dominant_reason: ?TapHoldReason,
+    /// Smoothed time from press to decision.
+    typical_ms: f32,
+    /// Smoothed time a permissive hold took: how long the next key overlapped.
+    overlap_ms: f32,
+    /// The tapping term the keyboard reported last; 0 before any decision.
+    tapping_term_ms: u16,
+    /// The character the key was last rolled into by a permissive hold.
+    last_overlap_cp: ?u21,
+    /// Decisions ever recorded.
+    total: u32,
+};
+
+/// Tap/hold decisions of the key that types `cp` on tap.
+pub const TapHoldStat = struct {
+    cp: u21 = 0,
+    /// One bit per recent decision, newest in bit 0.
+    holds: u32 = 0,
+    accidental_holds: u32 = 0,
+    accidental_taps: u32 = 0,
+    near_holds: u32 = 0,
+    /// The reason of each recent decision, as three bit planes of its value.
+    reason_bits: [3]u32 = @splat(0),
+    recent_len: u8 = 0,
+    total: u32 = 0,
+    /// Lifetime decisions per reason, in `TapHoldReason` order.
+    reasons: [TapHoldReason.count]u32 = @splat(0),
+    accidental_hold_total: u32 = 0,
+    accidental_tap_total: u32 = 0,
+    near_hold_total: u32 = 0,
+    ema_ms: f32 = 0.0,
+    ema_overlap_ms: f32 = 0.0,
+    tapping_term_ms: u16 = 0,
+    /// 0 when no permissive hold was seen.
+    last_overlap_cp: u21 = 0,
+
+    const window_mask: u32 = (@as(u32, 1) << tap_hold_window) - 1;
+
+    pub fn record(self: *TapHoldStat, sample: TapHoldSample) void {
+        const hold = sample.class == .wanted_hold or sample.class == .accidental_hold;
+        self.holds = push(self.holds, hold);
+        self.accidental_holds = push(self.accidental_holds, sample.class == .accidental_hold);
+        self.accidental_taps = push(self.accidental_taps, sample.class == .accidental_tap);
+        self.near_holds = push(self.near_holds, sample.class == .near_hold);
+        const value = @backingInt(sample.reason);
+        for (&self.reason_bits, 0..) |*plane, bit| plane.* = push(plane.*, (value >> @intCast(bit)) & 1 != 0);
+        self.recent_len = @min(tap_hold_window, self.recent_len + 1);
+        self.total +|= 1;
+        self.reasons[value - 1] +|= 1;
+        switch (sample.class) {
+            .accidental_hold => self.accidental_hold_total +|= 1,
+            .accidental_tap => self.accidental_tap_total +|= 1,
+            .near_hold => self.near_hold_total +|= 1,
+            .wanted_tap, .wanted_hold => {},
+        }
+        self.ema_ms = smooth(self.ema_ms, self.total == 1, sample.elapsed_ms);
+        if (sample.reason == .permissive_hold) {
+            self.ema_overlap_ms = smooth(self.ema_overlap_ms, self.reasons[value - 1] == 1, sample.elapsed_ms);
+            if (sample.other_cp) |other| self.last_overlap_cp = other;
+        }
+        self.tapping_term_ms = sample.tapping_term_ms;
+    }
+
+    /// A retro tap after an accidental hold that the term decided: the
+    /// character was typed after all, only too slowly. The newest decision
+    /// becomes a near hold. Returns whether it applied.
+    pub fn amendRetroTap(self: *TapHoldStat) bool {
+        if (self.recent_len == 0 or self.accidental_holds & 1 == 0) return false;
+        if (self.reasonAt(0) != .term_elapsed) return false;
+        self.holds &= ~@as(u32, 1);
+        self.accidental_holds &= ~@as(u32, 1);
+        self.near_holds |= 1;
+        const retro = @backingInt(TapHoldReason.released_after_term);
+        for (&self.reason_bits, 0..) |*plane, bit| {
+            plane.* = (plane.* & ~@as(u32, 1)) | ((retro >> @intCast(bit)) & 1);
+        }
+        self.reasons[@backingInt(TapHoldReason.term_elapsed) - 1] -|= 1;
+        self.reasons[retro - 1] +|= 1;
+        self.accidental_hold_total -|= 1;
+        self.near_hold_total +|= 1;
+        return true;
+    }
+
+    /// The reason of the decision `age` steps back; 0 is the newest.
+    pub fn reasonAt(self: TapHoldStat, age: u5) ?TapHoldReason {
+        if (age >= self.recent_len) return null;
+        var value: u8 = 0;
+        for (self.reason_bits, 0..) |plane, bit| value |= @as(u8, @intCast((plane >> age) & 1)) << @intCast(bit);
+        return std.enums.fromInt(TapHoldReason, value);
+    }
+
+    pub fn summary(self: TapHoldStat) TapHoldSummary {
+        const mask = self.recentMask();
+        const accidental = (self.accidental_holds | self.accidental_taps) & mask;
+        return .{
+            .cp = self.cp,
+            .window = self.recent_len,
+            .accidental_holds = @popCount(self.accidental_holds & mask),
+            .accidental_taps = @popCount(self.accidental_taps & mask),
+            .near_holds = @popCount(self.near_holds & mask),
+            .wanted_holds = @popCount(self.holds & ~self.accidental_holds & mask),
+            .dominant_reason = self.dominantReason(if (accidental != 0) accidental else mask),
+            .typical_ms = self.ema_ms,
+            .overlap_ms = self.ema_overlap_ms,
+            .tapping_term_ms = self.tapping_term_ms,
+            .last_overlap_cp = if (self.last_overlap_cp == 0) null else self.last_overlap_cp,
+            .total = self.total,
+        };
+    }
+
+    pub fn reset(self: *TapHoldStat) void {
+        self.* = .{ .cp = self.cp };
+    }
+
+    fn recentMask(self: TapHoldStat) u32 {
+        return (@as(u32, 1) << @as(u5, @intCast(self.recent_len))) - 1;
+    }
+
+    /// The most common reason among the window decisions in `subset`; ties
+    /// go to the reason seen more recently.
+    fn dominantReason(self: TapHoldStat, subset: u32) ?TapHoldReason {
+        var counts: [TapHoldReason.count + 1]u8 = @splat(0);
+        var best: ?TapHoldReason = null;
+        var best_count: u8 = 0;
+        for (0..self.recent_len) |age| {
+            if (subset >> @intCast(age) & 1 == 0) continue;
+            const reason = self.reasonAt(@intCast(age)) orelse continue;
+            const value = @backingInt(reason);
+            counts[value] += 1;
+            if (counts[value] > best_count) {
+                best_count = counts[value];
+                best = reason;
+            }
+        }
+        return best;
+    }
+
+    fn push(bits: u32, set: bool) u32 {
+        return ((bits << 1) | @intFromBool(set)) & window_mask;
+    }
+
+    fn smooth(average: f32, first: bool, ms: u16) f32 {
+        const value: f32 = @floatFromInt(ms);
+        return if (first) value else average + ema_ms_alpha * (value - average);
+    }
+};
+
 pub const FocusSample = struct {
     ema_ms: f32,
     confidence: f32,
@@ -447,6 +650,10 @@ pub const LearningModel = struct {
     known: [max_known_positions]KnownPosition = undefined,
     known_len: usize = 0,
 
+    /// Tap/hold decisions per tap character, apart from the typing statistics.
+    tap_holds: [max_tap_hold_keys]TapHoldStat = @splat(.{}),
+    tap_hold_len: usize = 0,
+
     pub fn init(unlock_order: []const u8, initial_unlocked: usize, config: ModelConfig) LearningModel {
         var model: LearningModel = .{
             .config = config,
@@ -795,6 +1002,69 @@ pub const LearningModel = struct {
         return st.samples > 0 or st.acc_initialized;
     }
 
+    pub fn tapHoldSlice(self: *const LearningModel) []const TapHoldStat {
+        return self.tap_holds[0..self.tap_hold_len];
+    }
+
+    pub fn tapHoldStat(self: *const LearningModel, cp: u21) ?TapHoldStat {
+        for (self.tapHoldSlice()) |st| if (st.cp == cp) return st;
+        return null;
+    }
+
+    fn tapHoldPtr(self: *LearningModel, cp: u21) ?*TapHoldStat {
+        for (self.tap_holds[0..self.tap_hold_len]) |*st| if (st.cp == cp) return st;
+        return null;
+    }
+
+    /// The statistics slot of `cp`, added when missing; null when full.
+    pub fn getOrAddTapHold(self: *LearningModel, cp: u21) ?*TapHoldStat {
+        if (self.tapHoldPtr(cp)) |st| return st;
+        if (self.tap_hold_len >= max_tap_hold_keys) return null;
+        self.tap_holds[self.tap_hold_len] = .{ .cp = cp };
+        self.tap_hold_len += 1;
+        return &self.tap_holds[self.tap_hold_len - 1];
+    }
+
+    /// Records a classified decision of the key that types `cp` on tap.
+    pub fn recordTapHold(self: *LearningModel, cp: u21, sample: TapHoldSample) void {
+        const st = self.getOrAddTapHold(cp) orelse return;
+        st.record(sample);
+    }
+
+    /// See `TapHoldStat.amendRetroTap`.
+    pub fn amendRetroTap(self: *LearningModel, cp: u21) bool {
+        const st = self.tapHoldPtr(cp) orelse return false;
+        return st.amendRetroTap();
+    }
+
+    pub fn tapHoldSummary(self: *const LearningModel, cp: u21) ?TapHoldSummary {
+        const st = self.tapHoldStat(cp) orelse return null;
+        return st.summary();
+    }
+
+    /// The characters with accidental holds in their window, most first and
+    /// then by the share of their window; at most `out.len`.
+    pub fn mostAccidentalHolds(self: *const LearningModel, out: []TapHoldSummary) []TapHoldSummary {
+        var len: usize = 0;
+        for (self.tapHoldSlice()) |st| {
+            const s = st.summary();
+            if (s.accidental_holds == 0) continue;
+            var at = len;
+            while (at > 0 and moreAccidental(s, out[at - 1])) : (at -= 1) {
+                if (at < out.len) out[at] = out[at - 1];
+            }
+            if (at < out.len) out[at] = s;
+            if (len < out.len) len += 1;
+        }
+        return out[0..len];
+    }
+
+    fn moreAccidental(a: TapHoldSummary, b: TapHoldSummary) bool {
+        if (a.accidental_holds != b.accidental_holds) return a.accidental_holds > b.accidental_holds;
+        // a.holds / a.window > b.holds / b.window
+        return @as(u16, a.accidental_holds) * b.window > @as(u16, b.accidental_holds) * a.window;
+    }
+
     pub fn knownSlice(self: *const LearningModel) []const KnownPosition {
         return self.known[0..self.known_len];
     }
@@ -947,8 +1217,9 @@ pub const LearningModel = struct {
         }
     }
 
-    /// Starts `cps` over: their statistics and every transition into or out
-    /// of them are dropped, and only their current position stays known.
+    /// Starts `cps` over: their statistics, tap/hold ones included, and every
+    /// transition into or out of them are dropped, and only their current
+    /// position stays known.
     /// Unlocked letters stay unlocked; since they no longer have full
     /// confidence, they hold back the next unlock until they are mastered
     /// again. Streaks, the daily goal and the run history are untouched.
@@ -960,6 +1231,7 @@ pub const LearningModel = struct {
             }
             _ = self.removeKnown(cp);
             if (findCurrent(current, cp)) |cur| self.pushKnown(cur);
+            if (self.tapHoldPtr(cp)) |th| th.reset();
         }
         self.dropBigramsWith(cps);
         if (self.focus_cp) |fcp| {
@@ -1355,4 +1627,74 @@ test "a mastered letter stays green and unlocked and leaves the focus to the oth
     try t.expectEqualStrings("rt", lm.firstLetters());
     lm.getOrAddStat('e').?.reset();
     try t.expect(!lm.isGreen('e'));
+}
+
+test "the tap/hold window counts the last 30 decisions by class and reason" {
+    const t = std.testing;
+    var lm = LearningModel.init("fa", 2, .{});
+    try t.expectEqual(@as(?TapHoldSummary, null), lm.tapHoldSummary('f'));
+    // 40 wanted taps, then rolls into 'a' that fired the home-row Shift.
+    for (0..40) |_| lm.recordTapHold('f', .{ .class = .wanted_tap, .reason = .released_within_term, .elapsed_ms = 80, .tapping_term_ms = 200 });
+    for (0..3) |_| lm.recordTapHold('f', .{ .class = .accidental_hold, .reason = .permissive_hold, .elapsed_ms = 120, .tapping_term_ms = 200, .other_cp = 'a' });
+    lm.recordTapHold('f', .{ .class = .near_hold, .reason = .released_within_term, .elapsed_ms = 170, .tapping_term_ms = 210 });
+    lm.recordTapHold('f', .{ .class = .accidental_hold, .reason = .term_elapsed, .elapsed_ms = 215, .tapping_term_ms = 210 });
+    var s = lm.tapHoldSummary('f').?;
+    try t.expectEqual(@as(u8, tap_hold_window), s.window);
+    try t.expectEqual(@as(u32, 45), s.total);
+    try t.expectEqual(@as(u8, 4), s.accidental_holds);
+    try t.expectEqual(@as(u8, 1), s.near_holds);
+    try t.expectEqual(@as(u8, 0), s.accidental_taps);
+    try t.expectEqual(@as(u8, 0), s.wanted_holds);
+    try t.expectEqual(@as(?TapHoldReason, .permissive_hold), s.dominant_reason);
+    try t.expectEqual(@as(?u21, 'a'), s.last_overlap_cp);
+    try t.expectEqual(@as(u16, 210), s.tapping_term_ms);
+    try t.expectApproxEqAbs(@as(f32, 120), s.overlap_ms, 0.01);
+    try t.expect(s.typical_ms > 80 and s.typical_ms < 215);
+    const st = lm.tapHoldStat('f').?;
+    try t.expectEqual(@as(?TapHoldReason, .term_elapsed), st.reasonAt(0));
+    try t.expectEqual(@as(?TapHoldReason, .released_within_term), st.reasonAt(1));
+    try t.expectEqual(@as(?TapHoldReason, .permissive_hold), st.reasonAt(2));
+    try t.expectEqual(@as(u32, 41), st.reasons[@backingInt(TapHoldReason.released_within_term) - 1]);
+
+    // The hold the term decided was released into a retro tap: typed, but late.
+    try t.expect(lm.amendRetroTap('f'));
+    try t.expect(!lm.amendRetroTap('f'));
+    s = lm.tapHoldSummary('f').?;
+    try t.expectEqual(@as(u8, 3), s.accidental_holds);
+    try t.expectEqual(@as(u8, 2), s.near_holds);
+    try t.expectEqual(@as(?TapHoldReason, .released_after_term), lm.tapHoldStat('f').?.reasonAt(0));
+    try t.expectEqual(@as(u32, 3), lm.tapHoldStat('f').?.accidental_hold_total);
+
+    // A wanted hold leaves the accidental counts alone.
+    lm.recordTapHold(' ', .{ .class = .wanted_hold, .reason = .term_elapsed, .elapsed_ms = 250, .tapping_term_ms = 200 });
+    lm.recordTapHold(' ', .{ .class = .accidental_tap, .reason = .released_within_term, .elapsed_ms = 90, .tapping_term_ms = 200 });
+    s = lm.tapHoldSummary(' ').?;
+    try t.expectEqual(@as(u8, 1), s.wanted_holds);
+    try t.expectEqual(@as(u8, 1), s.accidental_taps);
+    try t.expectEqual(@as(?TapHoldReason, .released_within_term), s.dominant_reason);
+    try t.expectEqual(@as(?u21, null), s.last_overlap_cp);
+}
+
+test "keys with the most accidental holds come first and resetting a key clears them" {
+    const t = std.testing;
+    var lm = LearningModel.init("fdsa", 4, .{});
+    const hold: TapHoldSample = .{ .class = .accidental_hold, .reason = .permissive_hold, .elapsed_ms = 100, .tapping_term_ms = 200 };
+    const tap: TapHoldSample = .{ .class = .wanted_tap, .reason = .released_within_term, .elapsed_ms = 60, .tapping_term_ms = 200 };
+    for (0..2) |_| lm.recordTapHold('f', hold);
+    for (0..2) |_| lm.recordTapHold('d', hold);
+    for (0..5) |_| lm.recordTapHold('d', tap);
+    for (0..3) |_| lm.recordTapHold('s', hold);
+    lm.recordTapHold('a', tap);
+    var out: [2]TapHoldSummary = undefined;
+    const top = lm.mostAccidentalHolds(&out);
+    try t.expectEqual(@as(usize, 2), top.len);
+    try t.expectEqual(@as(u21, 's'), top[0].cp);
+    // Equal counts: the larger share of the window first.
+    try t.expectEqual(@as(u21, 'f'), top[1].cp);
+    var all: [8]TapHoldSummary = undefined;
+    try t.expectEqual(@as(usize, 3), lm.mostAccidentalHolds(&all).len);
+
+    lm.resetKeys(&.{'s'}, &.{});
+    try t.expectEqual(@as(u8, 0), lm.tapHoldSummary('s').?.window);
+    try t.expectEqual(@as(u21, 'f'), lm.mostAccidentalHolds(&out)[0].cp);
 }

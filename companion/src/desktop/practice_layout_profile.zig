@@ -258,6 +258,9 @@ pub const LayoutProfile = struct {
 
     routes: [max_routes]CharRoute = undefined,
     route_len: usize = 0,
+    /// The character each key types on the base layer without modifiers;
+    /// 0 for none. Unlike `routes` it names every key, not one per character.
+    base_taps: [max_keys]u21 = @splat(0),
 
     punctuation: [16]u8 = @splat(0),
     punctuation_len: usize = 0,
@@ -366,6 +369,20 @@ pub const LayoutProfile = struct {
             if (route.cp == cp) return route;
         }
         return null;
+    }
+
+    /// The character `key_index` types on tap on `layer`, or null when it
+    /// knows none there. Other layers only know the characters of their routes.
+    pub fn tapCharFor(self: *const LayoutProfile, key_index: usize, layer: usize) ?u21 {
+        if (key_index >= self.key_count) return null;
+        if (layer > 0) {
+            for (self.routeSlice()) |route| {
+                if (route.kind == .layer_tap and route.layer == layer and route.key_index == key_index and route.modifiers == 0) return route.cp;
+            }
+            return null;
+        }
+        const cp = self.base_taps[key_index];
+        return if (cp == 0) null else cp;
     }
 
     pub fn comboFor(self: *const LayoutProfile, cp: u21) ?CharRoute {
@@ -787,6 +804,7 @@ fn discoverRoutesAndInventories(
     for (0..profile.key_count) |idx| {
         const entry = labels.get(0, idx, 0, 1);
         const cp = literalCodepoint(entry) orelse continue;
+        profile.base_taps[idx] = cp;
         addRouteIfNew(profile, .{
             .cp = cp,
             .kind = .base,
