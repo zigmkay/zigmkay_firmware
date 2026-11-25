@@ -1323,7 +1323,7 @@ fn formatNextKeyHint(
 ) !NextKeyInfo {
     const s = &owner.session;
     if (s.state == .complete) {
-        return .{ .text = "Round complete", .dot_color = theme.success, .text_color = theme.success };
+        return .{ .text = "Lesson complete", .dot_color = theme.success, .text_color = theme.success };
     }
     // Forgiving input keeps the hint calm; typing on catches up by itself.
     if (s.current_error and s.error_mode != .forgive) {

@@ -875,8 +875,8 @@ fn drawWpmTrendPanel(
     line.build().stroke(.{ .thickness = 2.4, .color = .{ .color = theme.accent } });
 
     // Subtle X-axis start/end labels
-    const first_lbl = try std.fmt.allocPrint(arena, "Round {d}", .{start_idx + 1});
-    const last_lbl = try std.fmt.allocPrint(arena, "Round {d}", .{runs.len});
+    const first_lbl = try std.fmt.allocPrint(arena, "Lesson {d}", .{start_idx + 1});
+    const last_lbl = try std.fmt.allocPrint(arena, "Lesson {d}", .{runs.len});
     presentation.label(first_lbl, .{ .x = plot_x, .y = plot_y + plot_h + 6, .w = 90, .h = 16 }, 11, theme.muted, null);
     dvui.labelNoFmt(@src(), last_lbl, .{ .align_x = 1, .align_y = 0.5 }, .{
         .id_extra = 0xc490,

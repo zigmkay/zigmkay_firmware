@@ -65,6 +65,8 @@ fn showTutor(app: *App) !void {
     app.tutor.view.settings_open = false;
     app.tutor.view.confirm_reset = false;
     app.fixture.layout_notice = .none;
+    // Notices belong to the scene that finishes a lesson.
+    practice.event_len = 0;
 
     // Seed realistic learning progress & synthetic history once profile is bound (frame 1).
     if (scene == 0) {
@@ -213,6 +215,8 @@ fn seedTutorGalleryState(app: *App) !void {
     lm.bigrams[0] = .{ .prev = 't', .cur = 'h', .ema_ms = 390.0, .samples = 14 };
     lm.bigrams[1] = .{ .prev = 'n', .cur = 'e', .ema_ms = 345.0, .samples = 12 };
     lm.bigram_len = 2;
+    // Today's practice, so a finished lesson adds to it.
+    if (practice.utc_now_sec > 0) practice.persisted.daily_utc_day = @intCast(practice.utc_now_sec / 86_400);
     practice.persisted.daily_active_seconds = 420;
     practice.persisted.streak_days = 5;
     practice.persisted.total_rounds = 14;
