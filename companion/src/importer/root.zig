@@ -465,7 +465,7 @@ pub fn analyze(
         try std.fmt.allocPrint(a, "-Dimport-root={s}", .{capture.directory}),
         try std.fmt.allocPrint(a, "-Dimport-module={s}", .{capture.provenance.entry}),
         "-Dnative-only=true",
-        "-j2",
+        try std.fmt.allocPrint(a, "-j{d}", .{jobs.compiler_cache.hostParallelism(false)}),
         "-p",
         output,
         "--cache-dir",

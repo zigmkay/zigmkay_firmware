@@ -75,13 +75,12 @@ fn checkImports(
     const exe_suffix = if (@import("builtin").os.tag == .windows) ".exe" else "";
     // Share the global Zig cache already populated by firmware builds so
     // `analyze-keymap` does not recompile the Zig standard library cold.
-    const shared_global_cache = try std.fs.path.join(a, &.{
-        cache,
-        "builds",
-        "compiler-cache",
-        &std.fmt.bytesToHex(resources.manifest.id, .lower),
-        "global",
-    });
+    const compiler_cache: jobs.compiler_cache.Layout = try .init(
+        a,
+        try std.fs.path.join(a, &.{ cache, "builds" }),
+        resources.manifest.compiler_hash orelse resources.manifest.id,
+    );
+    const shared_global_cache = try compiler_cache.global(a);
     inline for (.{ "us", "de" }) |name| {
         if (comptime representative_only and !std.mem.eql(u8, name, "us")) continue;
         const source_path = try std.fs.path.join(a, &.{ root_path, name });

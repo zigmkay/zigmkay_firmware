@@ -18,27 +18,31 @@ pub const Request = struct {
     export_directory: []const u8,
     expected_export_tree: jobs.firmware.Digest,
     install_directory: []const u8,
-    // Cold builds compile the shipped build runner and the firmware.
-    // Hosted Windows runners can exceed five minutes without being hung.
+    /// Digest of the bundled compiler. Bundles with the same compiler share
+    /// one compiler cache; without it the cache stays private to the bundle.
+    compiler_identity: ?jobs.firmware.Digest = null,
+    /// `zig build -j`; null selects the interactive value for this host.
+    parallelism: ?u16 = null,
+    // Cold builds compile the shipped build runner, host tools and the
+    // firmware. Hosted Windows runners have two to four cores, so they build
+    // with -j2 or -j3 and can exceed five minutes without being hung.
     timeout_ms: u32 = 900_000,
-};
 
-fn compilerCacheDirectory(a: std.mem.Allocator, request: Request) ![]u8 {
-    return std.fs.path.join(a, &.{
-        request.install_directory,
-        "compiler-cache",
-        &std.fmt.bytesToHex(request.bundled.receipt.bundle_id, .lower),
-    });
-}
+    pub fn compilerIdentity(self: Request) jobs.firmware.Digest {
+        return self.compiler_identity orelse self.bundled.receipt.bundle_id;
+    }
+
+    pub fn compilerCache(self: Request, a: std.mem.Allocator) !jobs.compiler_cache.Layout {
+        return .init(a, self.install_directory, self.compilerIdentity());
+    }
+};
 
 /// A single small completion marker, read only when a build is requested.
 pub fn isFirstBuild(gpa: std.mem.Allocator, io: std.Io, request: Request) bool {
-    const path = compilerCacheDirectory(gpa, request) catch return true;
-    defer gpa.free(path);
-    var directory = std.Io.Dir.cwd().openDir(io, path, .{}) catch return true;
-    defer directory.close(io);
-    _ = directory.statFile(io, "built", .{}) catch return true;
-    return false;
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    const layout = request.compilerCache(arena.allocator()) catch return true;
+    return jobs.compiler_cache.isFirstBuild(io, layout, request.bundled.receipt.bundle_id);
 }
 
 /// Stable address from start through completion/cancellation.
@@ -51,6 +55,10 @@ pub const Job = struct {
     command: jobs.firmware.Command,
     process: jobs.Job,
     install_name: []const u8,
+    compiler_cache: jobs.compiler_cache.Layout,
+    /// Held from start until deinit: one compiler per cache at a time, and
+    /// cleanup never deletes the cache under it.
+    lease: ?jobs.compiler_cache.Lease = null,
     completed: bool = false,
     accepted: bool = false,
     finish_verified: bool = false,
@@ -101,11 +109,8 @@ pub const Job = struct {
         errdefer command.deinit();
         var selected_environment = try environment.clone(gpa);
         defer selected_environment.deinit();
-        const compiler_cache = try compilerCacheDirectory(arena.allocator(), owned);
-        try selected_environment.put(
-            "ZIG_GLOBAL_CACHE_DIR",
-            try std.fs.path.join(arena.allocator(), &.{ compiler_cache, "global" }),
-        );
+        const compiler_cache = try owned.compilerCache(arena.allocator());
+        try selected_environment.put("ZIG_GLOBAL_CACHE_DIR", try compiler_cache.global(arena.allocator()));
         for ([_][]const u8{
             "ZIG_LOCAL_CACHE_DIR",
             "ZIG_LOCAL_PKG_DIR",
@@ -127,7 +132,10 @@ pub const Job = struct {
             try std.fs.path.join(a, &.{ owned.selection.compiler_distribution_path, "lib" }),
         );
         const args = try extendArgv(&command, &.{ "--system", package_path });
-        args[jobs.firmware.Command.cache_dir_arg] = try std.fs.path.join(a, &.{ compiler_cache, "local" });
+        args[jobs.firmware.Command.cache_dir_arg] = try compiler_cache.local(a);
+        args[jobs.firmware.Command.jobs_arg] = try std.fmt.allocPrint(a, "-j{d}", .{
+            owned.parallelism orelse jobs.compiler_cache.hostParallelism(false),
+        });
         const os = @import("builtin").os.tag;
         const process = try jobs.Job.init(gpa, io, .{
             .argv = command.argv,
@@ -146,6 +154,7 @@ pub const Job = struct {
             .command = command,
             .process = process,
             .install_name = install_name,
+            .compiler_cache = compiler_cache,
         };
     }
 
@@ -161,6 +170,14 @@ pub const Job = struct {
         var output = try std.Io.Dir.cwd().createDirPathOpen(self.io, self.request.install_directory, .{});
         defer output.close(self.io);
         try output.createDir(self.io, self.install_name, .default_dir);
+        var root = try std.Io.Dir.cwd().createDirPathOpen(self.io, self.compiler_cache.root, .{});
+        defer root.close(self.io);
+        // Waits while a background warm-up or another instance compiles.
+        self.lease = try .acquire(self.io, root, &self.compiler_cache.name, .fromMilliseconds(self.request.timeout_ms));
+        errdefer if (self.lease) |*lease| {
+            lease.release(self.io);
+            self.lease = null;
+        };
         try self.process.start();
     }
 
@@ -214,11 +231,7 @@ pub const Job = struct {
     }
 
     fn noteWarmCache(self: *Job) !void {
-        const path = try compilerCacheDirectory(self.gpa, self.request);
-        defer self.gpa.free(path);
-        var directory = try std.Io.Dir.cwd().createDirPathOpen(self.io, path, .{});
-        defer directory.close(self.io);
-        try directory.writeFile(self.io, .{ .sub_path = "built", .data = "" });
+        try jobs.compiler_cache.noteBuilt(self.io, self.compiler_cache, self.captured.receipt.bundle_id);
     }
 
     pub fn cancel(self: *Job) void {
@@ -230,6 +243,7 @@ pub const Job = struct {
 
     pub fn deinit(self: *Job) void {
         self.process.deinit();
+        if (self.lease) |*lease| lease.release(self.io);
         self.command.deinit();
         self.captured.deinit();
         self.arena.deinit();
