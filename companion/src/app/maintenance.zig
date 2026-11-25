@@ -70,7 +70,10 @@ fn startWarmup(app: *App) !void {
     defer selected.deinit();
     const plan = try desktop.application_bundle.plan(app.gpa, bundle, owned.paths.cache, selected.entry.selector, app.model.board.id);
     defer project.owned_zon.free(app.gpa, plan);
-    if (!jobs_api.managed_build.isFirstBuild(app.gpa, app.io, plan.config.request)) return;
+    // Warm on every start unless a build already ran: a reinstalled bundle
+    // keeps its id and first-build marker, yet Zig still rebuilds some host
+    // libraries for its fresh files (~35 s). A warm cache costs about a second.
+    if (app.build.artifact != null) return;
     var config = plan.config;
     config.request.parallelism = jobs_api.compiler_cache.hostParallelism(true);
     const next_job = try std.math.add(u64, app.job_generation, 1);

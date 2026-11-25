@@ -2,9 +2,10 @@
 //! cache, and what happens to that build when the user builds. Pure: no
 //! process, filesystem or device access.
 //!
-//! A warm-up runs at most once per application run, only for a bundle that
-//! has not completed a build in its compiler cache yet, and only while the
-//! editor is idle. A user build of the same snapshot adopts the running
+//! A warm-up runs at most once per application run, unless a build already
+//! ran, and only while the editor is idle. It also runs for a bundle that
+//! built before: a reinstalled bundle keeps its id, yet its fresh files make
+//! Zig rebuild some host libraries, and a warm cache costs about a second. A user build of the same snapshot adopts the running
 //! warm-up; any other user build waits for the cache lease the warm-up holds,
 //! so two compilers never share a cache.
 const std = @import("std");

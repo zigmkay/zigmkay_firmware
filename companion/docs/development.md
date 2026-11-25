@@ -196,14 +196,17 @@ minus one, between 2 and 12. On this graph it shortens a cold build only a
 little (76 to 80 seconds with `-j2`, 72 seconds with `-j12`) because the critical
 path is sequential.
 
-**Warm-up.** About three seconds after an interactive start, if this bundle
-has not completed a build yet and the editor is idle, the editor quietly
-builds the open layout, or the default layout while no project is open, with
+**Warm-up.** About three seconds after every interactive start, unless a
+build already ran and once the editor is idle, the editor quietly builds the
+open layout, or the default layout while no project is open, with
 half the cores. The warm-up never flashes or opens a device, shows no progress
 and only logs failures. Build or Flash of the same snapshot takes the running
 warm-up over and shows the first-build message; any other build waits for the
 warm-up's lock and then builds from the warm cache. A warm-up of the current
-layout counts as an ordinary build of it. Fixtures, tests, `--offline`, light
+layout counts as an ordinary build of it. It also runs when this bundle built
+before: after the application is reinstalled or rebuilt, Zig recompiles a few
+host libraries (sqlite, libxml, regz) for the fresh files, about 35 seconds,
+while an already warm cache costs about a second. Fixtures, tests, `--offline`, light
 previews and bundles without a toolchain never warm up.
 
 **Cleanup.** At startup and after each accepted build, a background pass
