@@ -115,12 +115,37 @@ two layer colors at least CIE76 ΔE 30 apart.
 Top bar, left to right: the Zigmkay wordmark; the breadcrumb
 **Keyboard › Layout ▾** (the keyboard opens My Keyboards, the layout opens the
 layout menu of screen 11); the save state ("Saved", "Edited", "Saving…" or
-"Save failed"); then the work flow **Build › Flash**, filled with `accent`;
-then Undo, Redo and the theme toggle. Saving is automatic, so there is no
-Save button. Export Zig source moved into the layout menu (screen 12).
+"Save failed"); then the work flow **Build › Flash**; then Undo, Redo and the
+theme toggle. Saving is automatic, so there is no Save button. Export Zig
+source moved into the layout menu (screen 12).
 
-Status row: status dot, current message, a hint when building, the Auto-build
-switch and Details on the right.
+Build and Flash show where the work stands (`build_flash_state.zig` derives
+it, `toolbar_ui.zig` draws it). At rest both are plain `control` buttons. The
+step to take next is filled with `accent` and glows: Build after a change with
+Auto-build off, Flash after a build that is not on the keyboard yet. The glow
+pulses for about seven seconds after the state changes, then stays as a steady
+highlight. A step that works ("Building…", "Flashing…") is tinted with
+`accent`, and a soft light sweeps across it; while the build caches are
+prepared Build carries a slower orange sweep and Flash looks disabled. Both
+still take a click, which queues it ("Queued…"). Finished steps turn green
+("Built", "Flashed" for five seconds), failed ones red ("Build failed",
+"Flash failed"). Motion runs at about 30 frames per second, only while the
+window is shown and focused, and only while something works or a glow
+pulses; otherwise the head redraws once a second at most for its counters.
+
+Status row: a mark (green dot at rest, `accent` dot when a step waits, spinner
+while working, pulsing orange dot while preparing caches, warning mark on
+failures), the message, a progress bar during the cache warm-up, a muted
+hint, the connection, the Auto-build switch and Details on the right.
+"Ready · the keyboard runs this layout" appears only when the connected
+keyboard verified exactly the editor's layout.
+
+Details: the current state with its explanation, the steps Caches › Build ›
+Flash › Reconnect, and two tabs. **Activity** is this session's timeline
+(start, cache cleanup, warm-up, every build with what started it, its
+duration and UF2 size, Flash steps, errors). **Compiler output** is the last
+build's output (the last 64 KB of stderr and stdout), opened by itself when a
+build fails. **Copy details** copies both.
 
 Layers: one 48-high row per layer with a colored number badge and the name.
 The selected row is tinted with its color and outlined in it. Duplicate and
@@ -260,18 +285,24 @@ the width it freed.
 
 Open: typing a number into a timing field applies every valid keystroke as
 its own undo step. Encoder slots are
-numbered because board definitions do not name knobs or directions yet; the
-flash tracker shows three steps because the toolbar only knows whether a
-build or a flash is running. Copying an outside project into the collection
+numbered because board definitions do not name knobs or directions yet.
+Flashing shows no percentage: the transfer takes about a second. Copying an outside project into the collection
 has no control on My Keyboards yet. Revision transfers still match by key
 index.
 
 Compare screenshots against these mockups when changing them. Every fixture
 below writes BMP files to `.zig-cache/` without capturing the desktop:
 
-- `--offline-status-frames 24` renders editor scenes: scene 2 shows the
-  export sheet, scene 3 the layout menu and the flash panel of a failed
-  build, scene 4 the Build and Flash activity.
+- `--offline-status-frames 68` renders editor scenes to
+  `.zig-cache/editor-status/` (the list is in `statusScene` of
+  `src/app/fixtures.zig`): scene 2 shows the export sheet, scene 3 the layout
+  menu and the flash panel of a failed build, scene 4 the Build and Flash
+  activity, scene 6 the plain editor. Scenes 7 to 16 show the Build and Flash
+  states in the dark and the light theme (`<scene>-dark.bmp`,
+  `<scene>-light.bmp`): preparing caches, a changed layout, building, built,
+  a failed build, Details on the activity and on the compiler output, a queued
+  Build, a keyboard that runs the layout, and Details at content scale 2.
+  Moving parts are drawn at a fixed time, mid-sweep and at the glow's peak.
 - `--offline-drawers-frames 24` renders the Combos, Callbacks and Encoders
   sheets, each dark and then light, to `.zig-cache/editor-drawers/`.
 - `--offline-onboarding-frames 24` renders first launch, My Keyboards, the

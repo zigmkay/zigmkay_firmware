@@ -199,11 +199,17 @@ path is sequential.
 **Warm-up.** About three seconds after every interactive start, unless a
 build already ran and once the editor is idle, the editor quietly builds the
 open layout, or the default layout while no project is open, with
-half the cores. The warm-up never flashes or opens a device, shows no progress
-and only logs failures. Build or Flash of the same snapshot takes the running
-warm-up over and shows the first-build message; any other build waits for the
-warm-up's lock and then builds from the warm cache. A warm-up of the current
-layout counts as an ordinary build of it. It also runs when this bundle built
+half the cores. The warm-up never flashes or opens a device. The status row
+shows it as **Preparing build caches** with a pulsing orange dot and a thin
+progress bar estimated from the last long warm-up (its duration is kept in
+`builds/compiler-cache/warmup-ms`; without one the bar moves indeterminately).
+Meanwhile Build and Flash look disabled but still take a click: the clicked
+button reads **Queued…**, a second click cancels it, and the build or flash
+starts by itself when the warm-up ends. Auto-build waits for the warm-up too.
+A queued Flash runs only if the layout is still the one it was clicked on. A
+warm-up failure is only logged in Details; Build and Flash then work as usual.
+A warm-up of the current layout counts as an ordinary build of it, so a
+queued Build of that layout needs no second build. It also runs when this bundle built
 before: after the application is reinstalled or rebuilt, Zig recompiles a few
 host libraries (sqlite, libxml, regz) for the fresh files, about 35 seconds,
 while an already warm cache costs about a second. Fixtures, tests, `--offline`, light
@@ -233,7 +239,7 @@ A cold cache of one bundle holds about 210 MB; each reinstall adds about
 transfers the verified UF2, and waits for coherent reconnection. Only that
 explicit click authorizes transfer; startup and edits do not. **Auto-build** is
 optional and does not authorize flashing. Normal Flash progress stays in the
-system-message bar; a separate window opens only for errors. If BOOTSEL is not
+status row below the toolbar; a separate window opens only for errors. If BOOTSEL is not
 discovered within five seconds of the HID trigger, the bar asks the user to
 enter BOOTSEL manually and allows thirty additional seconds. That is the same
 authorized transaction, not another transfer attempt. No automatic retry occurs.
