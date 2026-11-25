@@ -12,6 +12,7 @@ const key_progress = @import("practice_key_progress.zig");
 const word_list = @import("practice_words.zig");
 const letter_order = @import("practice_letter_order.zig");
 const tap_hold = @import("practice_tap_hold.zig");
+const scratchpad = @import("practice_scratchpad.zig");
 
 pub const Digest = [32]u8;
 pub const Mode = enum { tutor, test_keys };
@@ -269,12 +270,15 @@ pub const StuckHelp = struct {
 };
 
 pub const TestKeysTelemetry = struct {
-    last_text: [32]u8 = @splat(0),
+    /// The last key or text, such as "a" or "⌥⇧←".
+    last_text: [48]u8 = @splat(0),
     last_text_len: usize = 0,
+    /// The field command the last key ran, such as "select word left".
+    last_action: []const u8 = "",
     last_event: [64]u8 = @splat(0),
     last_event_len: usize = 0,
-    scratchpad: [512]u8 = @splat(0),
-    scratchpad_len: usize = 0,
+    /// The text field; it keeps its text, cursor and history across modes.
+    field: scratchpad.Editor = .{},
     active_layers: u16 = 1,
     highest_layer: usize = 0,
     modifiers: u8 = 0,
@@ -302,36 +306,25 @@ pub const TestKeysTelemetry = struct {
         return self.tap_holds[0..self.tap_hold_len];
     }
 
+    /// Shows typed `text` as the last key.
     pub fn setLastText(self: *TestKeysTelemetry, text: []const u8) void {
         const kept = utf8Prefix(text, self.last_text.len);
         @memcpy(self.last_text[0..kept.len], kept);
         self.last_text_len = kept.len;
+        self.last_action = "";
     }
 
-    pub fn appendScratchpad(self: *TestKeysTelemetry, text: []const u8) void {
+    /// Types `text` into the field and shows it as the last key.
+    pub fn typeText(self: *TestKeysTelemetry, text: []const u8) void {
         if (text.len == 0) return;
-        if (text.len >= self.scratchpad.len) {
-            // A paste larger than the buffer replaces it with its own tail,
-            // starting on a codepoint boundary.
-            var start = text.len - self.scratchpad.len;
-            while (start < text.len and (text[start] & 0xC0) == 0x80) : (start += 1) {}
-            const tail = text[start..];
-            @memcpy(self.scratchpad[0..tail.len], tail);
-            self.scratchpad_len = tail.len;
-            return;
-        }
-        // Keep the latest tail when the buffer reaches capacity, trimming on UTF-8 boundaries.
-        if (self.scratchpad_len + text.len > self.scratchpad.len) {
-            const overflow = (self.scratchpad_len + text.len) - self.scratchpad.len;
-            var drop = @min(self.scratchpad_len, overflow + 64);
-            while (drop < self.scratchpad_len and (self.scratchpad[drop] & 0xC0) == 0x80) : (drop += 1) {}
-            const keep = self.scratchpad_len - drop;
-            std.mem.copyForwards(u8, self.scratchpad[0..keep], self.scratchpad[drop..self.scratchpad_len]);
-            self.scratchpad_len = keep;
-        }
-        const kept = utf8Prefix(text, self.scratchpad.len - self.scratchpad_len);
-        @memcpy(self.scratchpad[self.scratchpad_len .. self.scratchpad_len + kept.len], kept);
-        self.scratchpad_len += kept.len;
+        self.setLastText(text);
+        _ = self.field.insert(text);
+    }
+
+    /// Shows `combo` as the last key, with the editor action it ran, if any.
+    pub fn setLastKey(self: *TestKeysTelemetry, combo: []const u8, action: []const u8) void {
+        self.setLastText(combo);
+        self.last_action = action;
     }
 
     /// The longest prefix of `text` of at most `max` bytes that ends on a codepoint boundary.
@@ -342,20 +335,11 @@ pub const TestKeysTelemetry = struct {
         return text[0..n];
     }
 
-    pub fn backspaceScratchpad(self: *TestKeysTelemetry) void {
-        if (self.scratchpad_len == 0) return;
-        var end = self.scratchpad_len - 1;
-        while (end > 0 and (self.scratchpad[end] & 0xC0) == 0x80) : (end -= 1) {}
-        self.scratchpad_len = end;
-    }
-
-    pub fn clearScratchpad(self: *TestKeysTelemetry) void {
-        self.scratchpad_len = 0;
+    /// Empties the field (undo brings it back) and the last key.
+    pub fn clearField(self: *TestKeysTelemetry) void {
+        self.field.clear();
         self.last_text_len = 0;
-    }
-
-    pub fn scratchpadSlice(self: *const TestKeysTelemetry) []const u8 {
-        return self.scratchpad[0..self.scratchpad_len];
+        self.last_action = "";
     }
 
     pub fn setLastEvent(self: *TestKeysTelemetry, note: []const u8) void {
@@ -1266,10 +1250,7 @@ pub const Controller = struct {
     /// Handles OS text input in Tutor mode.
     pub fn insertOs(self: *Controller, focused: bool, bytes: []const u8, now: u64, paste: bool) !void {
         if (self.config.mode == .test_keys) {
-            if (focused and bytes.len > 0) {
-                self.test_keys.setLastText(bytes);
-                self.test_keys.appendScratchpad(bytes);
-            }
+            if (focused) self.test_keys.typeText(bytes);
             return;
         }
         if (!self.acceptingOsText(focused)) return;
@@ -1698,25 +1679,29 @@ test "rendered tutor actions reject changed project and replaced operation" {
     try t.expectError(error.StalePracticeAction, owner.dispatch(current, 2));
 }
 
-test "Test layout buffers keep whole codepoints when multibyte text overflows them" {
+test "Test layout keeps whole codepoints when multibyte text fills the field" {
     const t = std.testing;
     var telemetry: TestKeysTelemetry = .{};
     const euro = "€"; // three bytes
-    var paste: [171 * euro.len]u8 = undefined;
-    for (0..171) |i| @memcpy(paste[i * euro.len ..][0..euro.len], euro);
+    const count = scratchpad.capacity / euro.len + 1;
+    var paste: [count * euro.len]u8 = undefined;
+    for (0..count) |i| @memcpy(paste[i * euro.len ..][0..euro.len], euro);
 
-    telemetry.appendScratchpad(&paste);
-    try t.expect(std.unicode.utf8ValidateSlice(telemetry.scratchpadSlice()));
-    try t.expectEqual(@as(usize, 170 * euro.len), telemetry.scratchpadSlice().len);
+    // The field keeps the start of a paste that does not fit.
+    telemetry.typeText(&paste);
+    try t.expect(std.unicode.utf8ValidateSlice(telemetry.field.text()));
+    try t.expectEqual(@as(usize, (count - 1) * euro.len), telemetry.field.text().len);
+    try t.expect(telemetry.field.full);
 
-    telemetry.clearScratchpad();
-    telemetry.appendScratchpad("ab");
-    telemetry.appendScratchpad(paste[0 .. 170 * euro.len]);
-    try t.expect(std.unicode.utf8ValidateSlice(telemetry.scratchpadSlice()));
+    telemetry.clearField();
+    telemetry.typeText("ab");
+    telemetry.typeText(paste[0 .. (count - 1) * euro.len]);
+    try t.expect(std.unicode.utf8ValidateSlice(telemetry.field.text()));
+    try t.expect(std.mem.startsWith(u8, telemetry.field.text(), "ab€"));
 
     telemetry.setLastText(&paste);
     try t.expect(std.unicode.utf8ValidateSlice(telemetry.textSlice()));
-    try t.expectEqual(@as(usize, 10 * euro.len), telemetry.textSlice().len);
+    try t.expectEqual(@as(usize, 16 * euro.len), telemetry.textSlice().len);
 }
 
 test "discardPending drops a confirmed reset and round record before a profile switch" {

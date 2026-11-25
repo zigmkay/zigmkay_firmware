@@ -42,7 +42,7 @@ const fixtures = [_]struct { []const u8, []const u8 }{
     .{ "--offline-catalog-frames", "56" },
     .{ "--offline-status-frames", "24" },
     .{ "--offline-practice-frames", "3" },
-    .{ "--offline-tutor-frames", "88" },
+    .{ "--offline-tutor-frames", "96" },
     .{ "--offline-companion-frames", "9" },
     .{ "--offline-source-refresh-frames", "3" },
 };
@@ -58,6 +58,7 @@ const doc_screenshots = [_]struct { []const u8, []const u8 }{
     .{ "4", "docs/screenshots/typing-practice/stages.png" },
     .{ "5", "docs/screenshots/typing-practice/progress.png" },
     .{ "6", "docs/screenshots/typing-practice/test-keys.png" },
+    .{ "22", "docs/screenshots/typing-practice/test-layout-released.png" },
     .{ "15", "docs/screenshots/typing-practice/tap-hold-test-layout.png" },
     .{ "16", "docs/screenshots/typing-practice/tap-hold-tutor.png" },
     .{ "17", "docs/screenshots/typing-practice/tap-hold-progress.png" },
@@ -87,7 +88,7 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     for (fixtures) |fixture| step.dependOn(&tests.addGuiFixture(b, app, &.{ fixture[0], fixture[1] }).step);
 
     // Renders the Tutor gallery again and rewrites the PNGs the docs show.
-    const gallery = tests.addGuiFixture(b, app, &.{ "--offline-tutor-frames", "88" });
+    const gallery = tests.addGuiFixture(b, app, &.{ "--offline-tutor-frames", "96" });
     gallery.setCwd(b.path("."));
     const converter = b.addExecutable(.{ .name = "doc-screenshots", .root_module = b.createModule(.{
         .root_source_file = b.path("tools/doc_screenshots.zig"),

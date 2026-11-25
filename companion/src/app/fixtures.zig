@@ -35,14 +35,14 @@ pub fn beforeFrame(app: *App) !void {
     if (app.mode.isTutorGallery()) try showTutor(app);
 }
 
-/// The tutor gallery renders 22 scenes for 4 frames each (2 Dark + 2 Light):
+/// The tutor gallery renders 24 scenes for 4 frames each (2 Dark + 2 Light):
 /// 0: Active Stage 2 · All letters (with populated confidences & focus key)
 /// 1: Stage 3 · Shift & capitals (opposite-hand Shift hold + tap bridge)
 /// 2: Stage 5 · Layers & combos (layer auto-preview / 2-key combo arc)
 /// 3: Next lesson right after a finished one (last lesson, notices, heatmap)
 /// 4: Stages sheet (6-stage learning path)
 /// 5: Progress sheet (KPI cards, WPM trend chart, weakest keys)
-/// 6: Test keys mode (clean keyboard + telemetry bar)
+/// 6: Test layout: the captured field with several lines and a selection
 /// 7: Settings popover
 /// 8: Notice that no keyboard is verified for the layout (Stage 2)
 /// 9: Notice that the editor holds unflashed changes (Test layout)
@@ -58,6 +58,8 @@ pub fn beforeFrame(app: *App) !void {
 /// 19: Layout changes sheet comparing a layer character on both keyboards
 /// 20: Layout changes sheet with a combo letter marked for reset
 /// 21: Reset characters sheet asking for confirmation
+/// 22: Test layout after Esc: the field let go of the keys
+/// 23: Narrow Test layout (960x660) with the captured field
 fn showTutor(app: *App) !void {
     app.view.toolbar.light = app.count % 4 >= 2;
     const is_scene_start = (app.count == 1) or (app.count >= 4 and app.count % 4 == 0);
@@ -74,6 +76,7 @@ fn showTutor(app: *App) !void {
     app.tutor.view.forced_tooltip = null;
     app.tutor.view.focus_tap_hold = false;
     app.tutor.view.progress_scroll = .{};
+    app.tutor.view.test_field = .{};
     // Notices belong to the scene that finishes a lesson.
     practice.event_len = 0;
 
@@ -184,9 +187,8 @@ fn showTutor(app: *App) !void {
         },
         15 => {
             try practice.choose(.{ .mode = .test_keys }, now);
-            practice.test_keys.clearScratchpad();
+            practice.test_keys.field.setText("Testing my layout an");
             practice.test_keys.setLastText("N");
-            practice.test_keys.appendScratchpad("Testing my layout an");
             app.fixture.tap_hold_support = .reporting;
             const p = &practice.profile;
             const space = p.space_key orelse keyOf(p, ' ') orelse 0;
@@ -237,14 +239,55 @@ fn showTutor(app: *App) !void {
                 runs[runs.len - 3].top_accidental_tap = .{ 'o', 1 };
             }
         },
-        6, 9 => {
-            if (scene == 9) app.fixture.layout_notice = .editor_changed;
+        9 => {
+            app.fixture.layout_notice = .editor_changed;
             try practice.choose(.{ .mode = .test_keys }, now);
-            practice.test_keys.clearScratchpad();
+            practice.test_keys.field.setText("Testing my Keycaprio layout — layers, holds & combos feel crisp!");
             practice.test_keys.setLastText("!");
-            practice.test_keys.appendScratchpad("Testing my Keycaprio layout — layers, holds & combos feel crisp!");
+        },
+        6, 22, 23 => {
+            try practice.choose(.{ .mode = .test_keys }, now);
+            try showTestField(practice, &app.tutor.view, scene == 22);
         },
         else => {},
+    }
+}
+
+/// Test layout's field with a few lines of Zig, "target" selected by ⌥⇧→
+/// (Ctrl+Shift+Right off macOS), or let go by Esc.
+fn showTestField(practice: *desktop.practice_controller.Controller, view: *@import("practice-ui").View, released: bool) !void {
+    const scratchpad = desktop.practice_scratchpad;
+    const source =
+        \\const std = @import("std");
+        \\const layers = .{ .base, .nav, .sym };
+        \\
+        \\fn moveCursor(line: usize) usize {
+        \\    const target = line + 1;
+        \\    return target;
+        \\}
+        \\
+        \\test moveCursor {
+        \\    try std.testing.expectEqual(2, moveCursor(1));
+        \\}
+    ;
+    practice.test_keys.tap_hold_len = 0;
+    const field = &practice.test_keys.field;
+    field.setText(source);
+    const start = std.mem.indexOf(u8, source, "target").?;
+    const platform = scratchpad.Platform.native();
+    var buffer: [48]u8 = undefined;
+    if (released) {
+        field.select(start + "target".len, start + "target".len);
+        view.test_field = .{ .captured = false, .capture_on_show = false };
+        practice.test_keys.setLastKey(scratchpad.comboText(&buffer, .{ .code = .escape }, "", platform), "");
+    } else {
+        field.select(start, start + "target".len);
+        const key: scratchpad.Key = .{ .code = .right, .mods = if (platform == .mac)
+            .{ .alt = true, .shift = true }
+        else
+            .{ .control = true, .shift = true } };
+        const command = scratchpad.commandFor(key, platform) orelse return error.FixtureKeyUnmapped;
+        practice.test_keys.setLastKey(scratchpad.comboText(&buffer, key, "", platform), command.label());
     }
 }
 
@@ -695,6 +738,7 @@ pub fn resizeStatusWindow(app: *App) void {
         if (app.count == 1) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
         if (app.count == 57) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
         if (app.count == 61) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
+        if (app.count == 93) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
     }
     if (!app.mode.isStatus() or (app.count != 1 and app.count != 21 and app.count != 25)) return;
     const narrow = app.count == 21;

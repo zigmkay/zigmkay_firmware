@@ -14,6 +14,7 @@ const tap_hold_ui = @import("practice_tap_hold_ui.zig");
 
 const control = desktop.practice_controller;
 const storage = desktop.practice_storage;
+const scratchpad = desktop.practice_scratchpad;
 
 pub const Sheet = sheets_ui.Sheet;
 pub const Picks = sheets_ui.Picks;
@@ -99,6 +100,8 @@ pub const View = struct {
     focus_tap_hold: bool = false,
     /// Shows this key's hover card without the pointer (gallery fixtures).
     forced_tooltip: ?u21 = null,
+    /// Test layout's text field: whether it holds the keys, and its size.
+    test_field: presentation.TestField = .{},
 };
 
 pub const DrawResult = struct {
@@ -189,51 +192,7 @@ fn consumeInput(
         return;
     }
 
-    if (owner.config.mode == .test_keys) {
-        dvui.wantTextInput(data.borderRectScale().r.toNatural());
-        for (dvui.events()) |*event| {
-            if (event.handled) continue;
-            switch (event.evt) {
-                .text => |text| {
-                    if (text.action == .value and !text.action.value.selected) {
-                        owner.test_keys.setLastText(text.action.value.txt);
-                        owner.test_keys.appendScratchpad(text.action.value.txt);
-                        event.handle(@src(), data);
-                    }
-                },
-                .key => |key| {
-                    if (key.action != .up) {
-                        if (key.matchBind("paste")) {
-                            const clip = dvui.clipboardText();
-                            if (clip.len > 0) {
-                                owner.test_keys.setLastText(clip);
-                                owner.test_keys.appendScratchpad(clip);
-                            }
-                            event.handle(@src(), data);
-                        } else if (!key.mod.control() and !key.mod.command()) {
-                            switch (key.code) {
-                                .backspace => {
-                                    owner.test_keys.backspaceScratchpad();
-                                    event.handle(@src(), data);
-                                },
-                                .enter => {
-                                    owner.test_keys.appendScratchpad("\n");
-                                    event.handle(@src(), data);
-                                },
-                                .tab => {
-                                    owner.test_keys.appendScratchpad("    ");
-                                    event.handle(@src(), data);
-                                },
-                                else => {},
-                            }
-                        }
-                    }
-                },
-                else => {},
-            }
-        }
-        return;
-    }
+    if (owner.config.mode == .test_keys) return consumeFieldInput(owner, view, data);
 
     // Paused state: Esc or Enter resumes cleanly.
     if (owner.session.state == .paused) {
@@ -286,6 +245,158 @@ fn consumeInput(
             }
         }
     }
+}
+
+/// Test layout's field. Captured, it takes every key and text event before
+/// the controls and dvui's focus navigation see them; shortcuts that are no
+/// editor command only show as the last key. Released, the keyboard steers
+/// the app, and Enter takes the keys back while no control has focus.
+fn consumeFieldInput(owner: *control.Controller, view: *View, data: *dvui.WidgetData) void {
+    const field = &view.test_field;
+    if (!field.captured) {
+        const focused = dvui.focusedWidgetId();
+        if (focused != null and focused.? != data.id) return;
+        for (dvui.events()) |*event| {
+            if (event.handled or event.evt != .key) continue;
+            const key = event.evt.key;
+            if (key.action == .down and key.code == .enter and !key.mod.control() and !key.mod.command() and !key.mod.alt()) {
+                captureField(view, data.id);
+                event.handle(@src(), data);
+                break;
+            }
+        }
+        return;
+    }
+    // The field holds the focus, so no control shows it or reacts to keys.
+    if (dvui.focusedWidgetId() != data.id) dvui.focusWidget(data.id, null, null);
+    dvui.wantTextInput(data.borderRectScale().r.toNatural());
+    const editor = &owner.test_keys.field;
+    for (dvui.events()) |*event| {
+        if (event.handled) continue;
+        switch (event.evt) {
+            .text => |text| {
+                event.handle(@src(), data);
+                if (text.action == .value and !text.action.value.selected) {
+                    owner.test_keys.typeText(text.action.value.txt);
+                    editor.reveal(field.cells);
+                }
+            },
+            .key => |key| {
+                event.handle(@src(), data);
+                if (key.action != .up) fieldKey(owner, view, key);
+                // Esc let go: the next keys belong to the app again.
+                if (!field.captured) return;
+            },
+            else => {},
+        }
+    }
+}
+
+fn captureField(view: *View, root: dvui.Id) void {
+    view.test_field.captured = true;
+    dvui.focusWidget(root, null, null);
+}
+
+fn releaseField(view: *View) void {
+    view.test_field.captured = false;
+    dvui.focusWidget(null, null, null);
+}
+
+/// Runs the field command of `key` and shows the key in the telemetry.
+fn fieldKey(owner: *control.Controller, view: *View, key: dvui.Event.Key) void {
+    if (key.code.isModifier()) return;
+    const platform = scratchpad.Platform.native();
+    const pressed: scratchpad.Key = .{ .code = fieldCode(key.code), .mods = .{
+        .shift = key.mod.shift(),
+        .alt = key.mod.alt(),
+        .control = key.mod.control(),
+        .command = key.mod.command(),
+    } };
+    const command = scratchpad.commandFor(pressed, platform);
+    // Characters arrive as text right after their key, and the text names them.
+    const types = !pressed.mods.control and !pressed.mods.command and (platform == .mac or !pressed.mods.alt);
+    if (command == null and types and printable(key.code)) return;
+    var name: [16]u8 = undefined;
+    var combo: [48]u8 = undefined;
+    const shown = scratchpad.comboText(&combo, pressed, keyName(&name, key.code), platform);
+    const run = command orelse return owner.test_keys.setLastKey(shown, "");
+    owner.test_keys.setLastKey(shown, if (run.op == .release) "" else run.label());
+    const editor = &owner.test_keys.field;
+    switch (run.op) {
+        .release => return releaseField(view),
+        .copy, .cut => if (editor.hasSelection()) dvui.clipboardTextSet(editor.selected()),
+        else => {},
+    }
+    editor.run(run, view.test_field.cells, if (run.op == .paste) dvui.clipboardText() else "");
+}
+
+fn fieldCode(code: dvui.enums.Key) scratchpad.Code {
+    return switch (code) {
+        .left => .left,
+        .right => .right,
+        .up => .up,
+        .down => .down,
+        .home => .home,
+        .end => .end,
+        .page_up => .page_up,
+        .page_down => .page_down,
+        .backspace => .backspace,
+        .delete => .delete,
+        .enter, .kp_enter => .enter,
+        .tab => .tab,
+        .escape => .escape,
+        .insert => .insert,
+        .a => .a,
+        .c => .c,
+        .v => .v,
+        .x => .x,
+        .y => .y,
+        .z => .z,
+        else => .other,
+    };
+}
+
+/// Keys whose press types a character.
+fn printable(code: dvui.enums.Key) bool {
+    return switch (code) {
+        .a, .b, .c, .d, .e, .f, .g, .h, .i, .j, .k, .l, .m, .n, .o, .p, .q, .r, .s, .t, .u, .v, .w, .x, .y, .z => true,
+        .zero, .one, .two, .three, .four, .five, .six, .seven, .eight, .nine => true,
+        .space, .minus, .equal, .left_bracket, .right_bracket, .backslash, .semicolon, .apostrophe, .comma, .period, .slash, .grave => true,
+        .kp_divide, .kp_multiply, .kp_subtract, .kp_add, .kp_decimal, .kp_equal => true,
+        .kp_0, .kp_1, .kp_2, .kp_3, .kp_4, .kp_5, .kp_6, .kp_7, .kp_8, .kp_9 => true,
+        else => false,
+    };
+}
+
+/// How the telemetry names a key the field has no glyph for, such as "D".
+fn keyName(buffer: []u8, code: dvui.enums.Key) []const u8 {
+    const tag = @tagName(code);
+    const value = @backingInt(code);
+    if (value >= @backingInt(dvui.enums.Key.a) and value <= @backingInt(dvui.enums.Key.z)) {
+        buffer[0] = std.ascii.toUpper(tag[0]);
+        return buffer[0..1];
+    }
+    if (value >= @backingInt(dvui.enums.Key.zero) and value <= @backingInt(dvui.enums.Key.nine)) {
+        buffer[0] = '0' + @as(u8, @intCast(value - @backingInt(dvui.enums.Key.zero)));
+        return buffer[0..1];
+    }
+    if (value >= @backingInt(dvui.enums.Key.f1) and value <= @backingInt(dvui.enums.Key.f25))
+        return std.fmt.bufPrint(buffer, "F{d}", .{value - @backingInt(dvui.enums.Key.f1) + 1}) catch tag;
+    return switch (code) {
+        .space => "Space",
+        .minus => "-",
+        .equal => "=",
+        .left_bracket => "[",
+        .right_bracket => "]",
+        .backslash => "\\",
+        .semicolon => ";",
+        .apostrophe => "'",
+        .comma => ",",
+        .period => ".",
+        .slash => "/",
+        .grave => "`",
+        else => tag,
+    };
 }
 
 fn handleKey(
@@ -352,6 +463,13 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     view.drawn_panel = true;
 
     trackWindowFocus(owner, view, input);
+    // Test layout opens with its field holding the keys.
+    if (owner.config.mode == .test_keys) {
+        if (view.test_field.capture_on_show) {
+            view.test_field.capture_on_show = false;
+            view.test_field.captured = true;
+        }
+    } else view.test_field.capture_on_show = true;
     var pending: ?control.Intent = null;
     try consumeInput(owner, view, root.data(), input, &pending);
 
@@ -367,7 +485,7 @@ pub fn draw(owner: *control.Controller, view: *View, theme: ui.Theme, bounds: dv
     const work_h = @max(200.0, size.h - work_top - 16);
 
     if (owner.config.mode == .test_keys) {
-        try drawTestKeysWorkspace(owner, view, theme, .{ .x = pad_x, .y = work_top, .w = content_w, .h = work_h }, input);
+        if (try drawTestKeysWorkspace(owner, view, theme, .{ .x = pad_x, .y = work_top, .w = content_w, .h = work_h }, input)) captureField(view, root.data().id);
     } else {
         try drawTutorWorkspace(owner, view, theme, .{ .x = pad_x, .y = work_top, .w = content_w, .h = work_h }, input, &pending);
     }
@@ -704,13 +822,14 @@ fn drawTutorWorkspace(
     }
 }
 
+/// Returns true when a click into the text field asks to capture it.
 fn drawTestKeysWorkspace(
     owner: *control.Controller,
     view: *View,
     theme: ui.Theme,
     bounds: dvui.Rect,
     input: Input,
-) !void {
+) !bool {
     const gap: f32 = 12;
     const layer = if (input.frame) |f| f.layer else owner.test_keys.highest_layer;
     const layer_name = if (input.frame) |f| f.layer_name else "";
@@ -735,16 +854,19 @@ fn drawTestKeysWorkspace(
 
     const rem_y = bounds.y + bar_h + gap;
     const rem_h = @max(220.0, bounds.h - bar_h - gap);
-    const scratch_h: f32 = std.math.clamp(rem_h * 0.24, 124.0, 168.0);
-    try presentation.testLayoutScratchpad(
+    // About six rows of text on a roomy window, at least three.
+    const scratch_h: f32 = std.math.clamp(rem_h * 0.36, presentation.testFieldHeight(3), presentation.testFieldHeight(presentation.test_field_rows));
+    const clicked = try presentation.testLayoutScratchpad(
         owner,
         theme,
         .{ .x = bounds.x, .y = rem_y, .w = bounds.w, .h = scratch_h },
+        &view.test_field,
     );
 
     const kb_y = rem_y + scratch_h + gap;
     const kb_h = @max(160.0, bounds.y + bounds.h - kb_y);
     try drawKeyboardArea(owner, view, theme, .{ .x = bounds.x, .y = kb_y, .w = bounds.w, .h = kb_h }, 0, null, input);
+    return clicked;
 }
 
 fn drawKeyboardArea(
@@ -910,6 +1032,12 @@ fn lessonHeat(arena: std.mem.Allocator, owner: *const control.Controller, key_co
         try out.append(arena, .{ .key_index = route.key_index, .heat = heat });
     }
     return out.items;
+}
+
+/// Call while the practice screen is not shown, so Test layout captures its
+/// field again when it opens.
+pub fn hidden(view: *View) void {
+    view.test_field.capture_on_show = true;
 }
 
 /// Pauses a run when the window loses focus.

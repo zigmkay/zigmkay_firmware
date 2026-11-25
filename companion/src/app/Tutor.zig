@@ -280,6 +280,7 @@ pub fn prepareFrame(app: *App, board: *const boards.OwnedBoard) !Frame {
     const host_layout = if (app.source) |*source| source.id() else "offline";
 
     syncProfileAndPersistence(app, active_board, labels, model, host_layout);
+    if (!app.practicing) tutor.hidden(&self.view);
 
     // Zero-friction entry: when entering Tutor mode in interactive use, immediately prepare a ready round.
     if (app.practicing and app.frame_limit == null and practice.config.mode == .tutor and !practice.active) {

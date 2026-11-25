@@ -14,6 +14,7 @@ const keyboard_view = @import("practice_keyboard_ui.zig");
 const key_change = @import("practice_key_change_ui.zig");
 const key_progress = desktop.practice_key_progress;
 const tap_hold_ui = @import("practice_tap_hold_ui.zig");
+const scratchpad = desktop.practice_scratchpad;
 
 pub const Scroll = struct { position: f32 = 0, at: ?u64 = null };
 
@@ -1211,26 +1212,134 @@ pub fn testKeysTelemetryBar(
         break :blk try std.fmt.allocPrint(arena, "Combo keys held → {s}", .{g});
     } else if (owner.test_keys.pressed_count >= 2)
         try std.fmt.allocPrint(arena, "{d} keys held simultaneously", .{owner.test_keys.pressed_count})
-    else if (last_txt.len > 0)
-        try std.fmt.allocPrint(arena, "Last key: {s}", .{last_txt})
-    else
-        "Press switches on your keyboard to verify layers, holds, and combos";
+    else if (last_txt.len > 0) {
+        // Last key: [⌥⇧←] select word left
+        const x0 = mx + 12;
+        const max_x = x0 + @max(0, bounds.w - mx - 200);
+        const intro = "Last key:";
+        const intro_w = ui.editorFont(intro, 14).textSize(intro).w + 8;
+        label(intro, .{ .x = x0, .y = y, .w = @min(intro_w, @max(0, max_x - x0)), .h = pill_h }, 14, theme.muted, "practice.metrics");
+        const shown = if (std.mem.eql(u8, last_txt, " ")) "Space" else last_txt;
+        const chip_w = @min(ui.editorFont(shown, 13.5).textSize(shown).w + 16, @max(0, max_x - x0 - intro_w));
+        const chip_h: f32 = 24;
+        const chip = dvui.box(@src(), .{}, .{
+            .rect = .{ .x = x0 + intro_w, .y = y + (pill_h - chip_h) * 0.5, .w = chip_w, .h = chip_h },
+            .background = true,
+            .color_fill = .{ .color = theme.control },
+            .color_border = .{ .color = theme.border },
+            .border = .all(1),
+            .corners = .all(5),
+            .padding = .{},
+            .margin = .{},
+            .tag = "practice.test_keys.last_key",
+        });
+        chip.deinit();
+        caption(shown, .{ .x = x0 + intro_w, .y = y + (pill_h - chip_h) * 0.5, .w = chip_w, .h = chip_h }, 13.5, theme.text, null);
+        const action = owner.test_keys.last_action;
+        const action_x = x0 + intro_w + chip_w + 8;
+        if (action.len > 0 and action_x < max_x)
+            label(action, .{ .x = action_x, .y = y, .w = max_x - action_x, .h = pill_h }, 14, theme.muted, null);
+        return;
+    } else "Press switches on your keyboard to verify layers, holds, and combos";
     label(emitted, .{ .x = mx + 12, .y = y, .w = @max(0, bounds.w - mx - 200), .h = pill_h }, 14, if (owner.test_keys.active_combo_cp != null) ui.layerColor(theme, 4) else theme.muted, "practice.metrics");
 }
 
-/// Calm free-typing scratchpad card for Test layout mode, matching the Tutor's
-/// monospace text stage aesthetic so the user can type anything they want freely.
+/// What the Test layout field shows and how it reacts, kept by the view.
+pub const TestField = struct {
+    /// Every key stays in the field (`practice_ui.consumeInput`); Esc lets go.
+    captured: bool = true,
+    /// The next Test layout frame captures the field, as on opening it.
+    capture_on_show: bool = true,
+    /// The field's size in cells as last drawn, for moves by row and page.
+    cells: scratchpad.Editor.View = .{ .columns = 72, .rows = 6 },
+    /// Wheel movement not yet turned into whole rows.
+    wheel: f32 = 0,
+    /// Scroll the cursor into view on the next frame.
+    reveal: bool = true,
+};
+
+/// The rows of text the field shows on a roomy window.
+pub const test_field_rows: f32 = 6;
+const field_font_size: f32 = 18;
+const field_line_h: f32 = 26;
+const field_head_h: f32 = 42;
+const field_foot_h: f32 = 30;
+const field_text_pad: f32 = 6;
+
+/// The field's height for `rows` rows of text.
+pub fn testFieldHeight(rows: f32) f32 {
+    return field_head_h + rows * field_line_h + field_text_pad * 2 + 2 + field_foot_h;
+}
+
+/// A key cap such as Esc in running text; returns its width.
+fn keyCap(theme: ui.Theme, text: []const u8, x: f32, y: f32, h: f32) f32 {
+    const size: f32 = 12;
+    const w = ui.editorFont(text, size).textSize(text).w + 12;
+    const cap_h: f32 = 20;
+    const top = y + (h - cap_h) * 0.5;
+    const cap = dvui.box(@src(), .{}, .{
+        .id_extra = rectId(.{ .x = x, .y = top, .w = w, .h = cap_h }),
+        .rect = .{ .x = x, .y = top, .w = w, .h = cap_h },
+        .background = true,
+        .color_fill = .{ .color = theme.control },
+        .color_border = .{ .color = theme.border },
+        .border = .{ .x = 1, .y = 1, .w = 1, .h = 2 },
+        .corners = .all(4),
+        .padding = .{},
+        .margin = .{},
+    });
+    cap.deinit();
+    caption(text, .{ .x = x, .y = top, .w = w, .h = cap_h - 1 }, size, theme.text, null);
+    return w;
+}
+
+/// Lays out running text and key caps from the left; returns the next x.
+fn runningText(theme: ui.Theme, parts: []const []const u8, x0: f32, y: f32, h: f32, color: dvui.Color, max_x: f32) f32 {
+    var x = x0;
+    for (parts, 0..) |part, i| {
+        if (x >= max_x) break;
+        if (i % 2 == 1) {
+            x += 5;
+            x += keyCap(theme, part, x, y, h) + 5;
+        } else {
+            const w = ui.editorFont(part, 13.5).textSize(part).w + 1;
+            label(part, .{ .x = x, .y = y, .w = @min(w, max_x - x), .h = h }, 13.5, color, null);
+            x += w;
+        }
+    }
+    return x;
+}
+
+/// The Test layout text field: a multi-line editor that keeps every key
+/// while captured, and lets the keyboard steer the app once released.
+/// Returns true when a click asks to capture it.
 pub fn testLayoutScratchpad(
     owner: *control.Controller,
     theme: ui.Theme,
     bounds: dvui.Rect,
-) !void {
+    field: *TestField,
+) !bool {
+    const editor = &owner.test_keys.field;
+    const captured = field.captured;
+    const arena = dvui.currentWindow().arena();
+    if (captured) {
+        // A soft glow around the accent border.
+        const glow = dvui.box(@src(), .{}, .{
+            .rect = .{ .x = bounds.x - 3, .y = bounds.y - 3, .w = bounds.w + 6, .h = bounds.h + 6 },
+            .background = true,
+            .color_fill = .{ .color = theme.accent.opacity(0.16) },
+            .corners = .all(13),
+            .padding = .{},
+            .margin = .{},
+        });
+        glow.deinit();
+    }
     const card = dvui.box(@src(), .{}, .{
         .rect = bounds,
         .background = true,
         .color_fill = .{ .color = theme.panel },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
+        .color_border = .{ .color = if (captured) theme.accent else theme.border },
+        .border = .all(if (captured) 2 else 1),
         .corners = .all(10),
         .padding = .{},
         .margin = .{},
@@ -1239,23 +1348,54 @@ pub fn testLayoutScratchpad(
     defer card.deinit();
 
     const pad_x: f32 = 16;
-    const head_y: f32 = 8;
+    const head_y: f32 = 7;
     const head_h: f32 = 28;
-    const text = owner.test_keys.scratchpadSlice();
+    const mac = scratchpad.Platform.native() == .mac;
 
-    label("Free typing · test your layout", .{ .x = pad_x, .y = head_y, .w = @max(0, bounds.w - 130), .h = head_h }, 14.5, theme.muted, null);
-
-    if (text.len > 0) {
-        if (ui.button(theme, "Clear", "practice.test_keys.clear", .{ .x = bounds.w - pad_x - 76, .y = head_y, .w = 76, .h = 28 })) {
-            owner.test_keys.clearScratchpad();
+    // Right of the header: where the cursor is, and Clear.
+    const where = editor.lineColumn();
+    const position = try std.fmt.allocPrint(arena, "Line {d}, column {d}{s}", .{
+        where.line,
+        where.column,
+        if (editor.full or editor.len == scratchpad.capacity) " · Full (8 KB)" else "",
+    });
+    const clear_w: f32 = 64;
+    var right_x = bounds.w - pad_x;
+    if (editor.len > 0) {
+        right_x -= clear_w;
+        if (ui.button(theme, "Clear", "practice.test_keys.clear", .{ .x = right_x, .y = head_y, .w = clear_w, .h = head_h })) {
+            owner.test_keys.clearField();
         }
+        right_x -= 8;
+    }
+    const position_w = ui.editorFont(position, 13.5).textSize(position).w + 2;
+    const position_x = @max(pad_x + 200, right_x - position_w);
+    label(position, .{ .x = position_x, .y = head_y, .w = right_x - position_x, .h = head_h }, 13.5, theme.muted, "practice.test_keys.position");
+
+    // Left of the header: whether keys stay in the field.
+    const head_max = position_x - 12;
+    if (captured) {
+        const lit = ui.mix(theme.accent, theme.text, 0.3);
+        const dot = dvui.box(@src(), .{}, .{
+            .rect = .{ .x = pad_x, .y = head_y + head_h * 0.5 - 3.5, .w = 7, .h = 7 },
+            .background = true,
+            .color_fill = .{ .color = theme.accent },
+            .corners = .all(3.5),
+            .padding = .{},
+            .margin = .{},
+        });
+        dot.deinit();
+        _ = runningText(theme, &.{ "Keys stay in this field ·", "Esc", "to leave" }, pad_x + 15, head_y, head_h, lit, head_max);
+    } else {
+        _ = runningText(theme, &.{ "Free typing · click here or press", "Enter", "to type again" }, pad_x, head_y, head_h, theme.muted, head_max);
     }
 
-    const stage_y: f32 = 42;
-    const stage_h = @max(54.0, bounds.h - stage_y - 12);
-    const stage_rect: dvui.Rect = .{ .x = pad_x, .y = stage_y, .w = @max(0, bounds.w - pad_x * 2), .h = stage_h };
-    const stage = dvui.box(@src(), .{}, .{
-        .rect = stage_rect,
+    // The text.
+    const box_y = field_head_h;
+    const box_h = @max(field_line_h + field_text_pad * 2, bounds.h - box_y - field_foot_h);
+    const box_rect: dvui.Rect = .{ .x = pad_x, .y = box_y, .w = @max(0, bounds.w - pad_x * 2), .h = box_h };
+    const box = dvui.box(@src(), .{}, .{
+        .rect = box_rect,
         .background = true,
         .color_fill = .{ .color = theme.bg },
         .color_border = .{ .color = theme.border },
@@ -1265,90 +1405,171 @@ pub fn testLayoutScratchpad(
         .margin = .{},
         .tag = "practice.test_keys.input",
     });
-    defer stage.deinit();
 
+    const font = dvui.Font.theme(.mono).withSize(field_font_size);
+    const cell_w = font.textSize("M").w + 0.5;
+    const text_x: f32 = 14;
+    const bar_w: f32 = 10;
+    const rows_shown: usize = @intFromFloat(@max(1, @floor((box_h - field_text_pad * 2) / field_line_h)));
+    const columns: usize = @intFromFloat(@max(8, @floor((box_rect.w - text_x - bar_w) / cell_w)));
+    // A new size, or a text set from outside, scrolls the cursor into view.
+    const cells: scratchpad.Editor.View = .{ .columns = columns, .rows = rows_shown };
+    if (field.reveal or !std.meta.eql(cells, field.cells)) editor.reveal(cells);
+    field.reveal = false;
+    field.cells = cells;
+    const row_count = editor.rowCount(columns);
+    editor.top_row = @min(editor.top_row, row_count -| rows_shown);
+
+    // A click places the cursor (Shift extends the selection) and captures
+    // the field; dragging selects; the wheel scrolls.
+    var wants_capture = false;
+    const data = box.data();
+    const content = data.contentRectScale();
+    for (dvui.events()) |*event| {
+        if (!dvui.eventMatchSimple(event, data)) continue;
+        const mouse = switch (event.evt) {
+            .mouse => |mouse| mouse,
+            else => continue,
+        };
+        const local = content.pointFromPhysical(mouse.p);
+        const row = editor.top_row + @as(usize, @intFromFloat(@max(0, @floor((local.y - field_text_pad) / field_line_h))));
+        const column: usize = @intFromFloat(@max(0, @round((local.x - text_x) / cell_w)));
+        switch (mouse.action) {
+            .focus => event.handle(@src(), data),
+            .press => if (mouse.button.pointer()) {
+                event.handle(@src(), data);
+                dvui.captureMouse(data, event.num);
+                editor.pointAt(row, column, columns, mouse.mod.shift());
+                wants_capture = true;
+            },
+            .motion => if (dvui.captured(data.id)) {
+                event.handle(@src(), data);
+                editor.pointAt(row, column, columns, true);
+                editor.reveal(field.cells);
+            },
+            .release => if (dvui.captured(data.id)) {
+                event.handle(@src(), data);
+                dvui.captureMouse(null, event.num);
+            },
+            .wheel_y => |dy| {
+                event.handle(@src(), data);
+                field.wheel -= dy;
+                const rows_moved: isize = @intFromFloat(@trunc(field.wheel / field_line_h));
+                if (rows_moved != 0) {
+                    field.wheel -= @as(f32, @floatFromInt(rows_moved)) * field_line_h;
+                    editor.scroll(rows_moved, field.cells);
+                }
+            },
+            .position => dvui.cursorSet(.ibeam),
+            else => {},
+        }
+    }
+
+    const parent = dvui.parentGet();
+    const text = editor.text();
+    const sel_start = editor.selectionStart();
+    const sel_end = editor.selectionEnd();
+    const selection_fill = ui.mix(theme.bg, theme.accent, 0.38);
+    var caret: ?dvui.Rect = null;
     if (text.len == 0) {
-        // Placeholder + calm cursor cue
-        const ph = "Type anything here to test your layout…";
-        const ph_font = dvui.Font.theme(.mono).withSize(20);
-        const caret_h: f32 = 24;
-        const caret = dvui.box(@src(), .{}, .{
-            .rect = .{ .x = 18, .y = (stage_h - caret_h) * 0.5, .w = 3, .h = caret_h },
-            .background = true,
-            .color_fill = .{ .color = theme.warning },
-            .corners = .all(1.5),
-            .padding = .{},
-            .margin = .{},
-        });
-        caret.deinit();
-        dvui.labelNoFmt(@src(), ph, .{ .align_x = 0, .align_y = 0.5, .ellipsize = true }, .{
-            .rect = .{ .x = 28, .y = 0, .w = @max(0, stage_rect.w - 44), .h = stage_h },
-            .font = ph_font,
+        const placeholder = "Type anything here to test your layout…";
+        dvui.labelNoFmt(@src(), placeholder, .{ .align_x = 0, .align_y = 0.5, .ellipsize = true }, .{
+            .rect = .{ .x = text_x, .y = field_text_pad, .w = @max(0, box_rect.w - text_x * 2), .h = field_line_h },
+            .font = font,
             .color_text = .{ .color = theme.muted },
             .padding = .{},
             .margin = .{},
         });
-        return;
-    }
-
-    // Decode UTF-8 scratchpad text into codepoints and wrap into up to 3 trailing lines.
-    var cps: [512]u21 = undefined;
-    var cp_len: usize = 0;
-    // Clipboard and IME text is not trusted to be valid UTF-8.
-    const utf8 = std.unicode.Utf8View.init(text) catch return;
-    var it = utf8.iterator();
-    while (it.nextCodepoint()) |cp| {
-        if (cp_len >= cps.len) break;
-        cps[cp_len] = cp;
-        cp_len += 1;
-    }
-
-    const font_size: f32 = @min(@as(f32, 26.0), @max(@as(f32, 18.0), stage_h * 0.28));
-    const mono_font = dvui.Font.theme(.mono).withSize(font_size);
-    const cell_w = mono_font.textSize("M").w + 1.5;
-    const line_h = @min(stage_h / 2.2, font_size * 1.48);
-    const cols: usize = @intFromFloat(@max(8.0, @floor((stage_rect.w - 40.0) / cell_w)));
-
-    var ranges_buf: [256]view.Range = undefined;
-    const ranges = view.lines(cps[0..cp_len], cols, &ranges_buf);
-    const max_vis: usize = if (stage_h >= 104) 3 else 2;
-    const start_row = if (ranges.len > max_vis) ranges.len - max_vis else 0;
-    const vis = ranges[start_row..];
-    const total_h = @as(f32, @floatFromInt(vis.len)) * line_h;
-    const top_y = @max(6.0, (stage_h - total_h) * 0.5);
-
-    const parent = dvui.parentGet();
-    var caret_x: f32 = 18;
-    var caret_y: f32 = top_y;
-    for (vis, 0..) |r, slot| {
-        const y = top_y + @as(f32, @floatFromInt(slot)) * line_h;
-        var col: usize = 0;
-        for (r.start..r.end) |idx| {
-            const cp = cps[idx];
-            if (cp == '\n') continue;
-            const cx = 18.0 + @as(f32, @floatFromInt(col)) * cell_w;
-            var gbuf: [4]u8 = undefined;
-            const g = view.glyph(cp, false, &gbuf);
-            if (g.len > 0) {
-                renderUncroppedGlyph(parent, .{ .x = cx, .y = y, .w = cell_w, .h = line_h }, mono_font, g, theme.text);
+        caret = .{ .x = text_x, .y = field_text_pad, .w = 0, .h = field_line_h };
+    } else {
+        var rows = scratchpad.Rows.init(text, columns);
+        var index: usize = 0;
+        const cursor_place = editor.place(editor.cursor, columns);
+        while (rows.next()) |row| : (index += 1) {
+            if (index < editor.top_row) continue;
+            const slot = index - editor.top_row;
+            if (slot >= rows_shown) break;
+            const y = field_text_pad + @as(f32, @floatFromInt(slot)) * field_line_h;
+            // The selection, with the line break shown as a narrow cell.
+            const lo = @max(sel_start, row.start);
+            const hi = @min(sel_end, row.end);
+            const takes_break = !row.wrapped and row.end < text.len and sel_start <= row.end and sel_end > row.end;
+            if (lo < hi or takes_break) {
+                const from = scratchpad.codepoints(text[row.start..@max(row.start, @min(lo, row.end))]);
+                const to = if (lo < hi) scratchpad.codepoints(text[row.start..hi]) else from;
+                const x = text_x + @as(f32, @floatFromInt(from)) * cell_w;
+                const w = @as(f32, @floatFromInt(to - from)) * cell_w + if (takes_break) cell_w * 0.5 else 0;
+                const highlight = dvui.box(@src(), .{}, .{
+                    .id_extra = index,
+                    .rect = .{ .x = x, .y = y + 2, .w = w, .h = field_line_h - 4 },
+                    .background = true,
+                    .color_fill = .{ .color = selection_fill },
+                    .corners = .all(2),
+                    .padding = .{},
+                    .margin = .{},
+                });
+                highlight.deinit();
             }
-            col += 1;
+            var at = row.start;
+            var column: usize = 0;
+            while (at < row.end) : (column += 1) {
+                const n = std.unicode.utf8ByteSequenceLength(text[at]) catch 1;
+                const glyph = text[at..@min(row.end, at + n)];
+                at += glyph.len;
+                if (glyph[0] == ' ') continue;
+                const cx = text_x + @as(f32, @floatFromInt(column)) * cell_w;
+                renderUncroppedGlyph(parent, .{ .x = cx, .y = y, .w = cell_w, .h = field_line_h }, font, glyph, theme.text);
+            }
+            if (cursor_place.row == index) {
+                caret = .{ .x = text_x + @as(f32, @floatFromInt(cursor_place.column)) * cell_w, .y = y, .w = 0, .h = field_line_h };
+            }
         }
-        caret_x = 18.0 + @as(f32, @floatFromInt(col)) * cell_w;
-        caret_y = y;
+        // A slim indicator shows where the view is in a longer text.
+        if (row_count > rows_shown) {
+            const track_h = box_h - field_text_pad * 2;
+            const thumb_h = @max(18, track_h * @as(f32, @floatFromInt(rows_shown)) / @as(f32, @floatFromInt(row_count)));
+            const travel = track_h - thumb_h;
+            const ratio = @as(f32, @floatFromInt(editor.top_row)) / @as(f32, @floatFromInt(row_count - rows_shown));
+            const thumb = dvui.box(@src(), .{}, .{
+                .rect = .{ .x = box_rect.w - 8, .y = field_text_pad + travel * ratio, .w = 4, .h = thumb_h },
+                .background = true,
+                .color_fill = .{ .color = theme.border },
+                .corners = .all(2),
+                .padding = .{},
+                .margin = .{},
+                .tag = "practice.test_keys.scrollbar",
+            });
+            thumb.deinit();
+        }
     }
+    // A thin amber caret while keys stay in the field.
+    if (captured) if (caret) |spot| {
+        const caret_h = field_font_size * 1.15;
+        const bar = dvui.box(@src(), .{}, .{
+            .rect = .{ .x = spot.x - 1, .y = spot.y + (spot.h - caret_h) * 0.5, .w = 2, .h = caret_h },
+            .background = true,
+            .color_fill = .{ .color = theme.warning },
+            .corners = .all(1),
+            .padding = .{},
+            .margin = .{},
+            .tag = "practice.test_keys.caret",
+        });
+        bar.deinit();
+    };
+    box.deinit();
 
-    // Trailing amber cursor bar
-    const caret_h = @max(14.0, font_size * 1.05);
-    const caret = dvui.box(@src(), .{}, .{
-        .rect = .{ .x = @min(caret_x + 2, stage_rect.w - 14), .y = caret_y + (line_h - caret_h) * 0.5, .w = 3, .h = caret_h },
-        .background = true,
-        .color_fill = .{ .color = theme.warning },
-        .corners = .all(1.5),
-        .padding = .{},
-        .margin = .{},
-    });
-    caret.deinit();
+    // Footer: what the keys do, and that nothing is scored.
+    const foot_y = bounds.h - field_foot_h;
+    const unscored_w: f32 = 80;
+    caption("Unscored", .{ .x = bounds.w - pad_x - unscored_w, .y = foot_y + 3, .w = unscored_w, .h = field_foot_h - 6 }, 12.5, theme.muted, null);
+    const hint: []const u8 = if (!captured)
+        "Tab and arrows move between the controls"
+    else if (mac)
+        "Arrows, Home/End, Page Up/Down, ⌥ word, ⌘ line and text start/end, ⇧ selects, ⌘A ⌘C ⌘X ⌘V ⌘Z"
+    else
+        "Arrows, Home/End, Page Up/Down, Ctrl word, Ctrl+Home/End text start/end, Shift selects, Ctrl+A C X V Z";
+    label(hint, .{ .x = pad_x + 2, .y = foot_y + 3, .w = @max(0, bounds.w - pad_x * 2 - unscored_w - 10), .h = field_foot_h - 6 }, 12.5, theme.muted, "practice.test_keys.hint");
+    return wants_capture;
 }
 
 /// Renders a single glyph centered inside `cell` via `dvui.renderText` without
