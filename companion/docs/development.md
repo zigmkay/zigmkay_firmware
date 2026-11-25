@@ -160,8 +160,9 @@ separate explicit hardware task. The checks below never flash a device.
 
 The installed application contains Zig 0.17.0 and its libraries, the pinned
 firmware dependency closure, and prebuilt Flash tools.
-Startup reads a small bundle descriptor; it does not scan packages, run the
-compiler, download files or compile tools. Build exports the selected project
+Startup reads a small bundle descriptor; it does not scan packages or download
+files. An interactive start may run one quiet background build a few seconds
+later, described [below](#compiler-cache-warm-up-and-cleanup). Build exports the selected project
 and invokes the bundled compiler with `--system`, which forbids dependency
 fetching. Missing resources produce a local error.
 
@@ -170,6 +171,60 @@ in the single `Zigmkay.exe`; the first Build extracts those shipped bytes
 atomically into an application-owned cache. This requires disk space, never a
 network connection. Subsequent builds reuse the extracted resources. Project
 exports, compiler caches and results stay outside the installed application.
+
+### Compiler cache, warm-up and cleanup
+
+Builds use one Zig cache per bundled compiler and host:
+`builds/compiler-cache/zig-<hash>` in the application cache directory
+(`~/Library/Caches/zigmkay` on macOS). The key is the SHA-256 of the bundled
+compiler, recorded as `compiler_hash` in `application.zon`, and the host
+target, not the bundle identity, so an application update reuses what it did
+not change. A build holds the cache's lock file `zig-<hash>.lock` while its
+compiler runs: builds of several running instances take turns, and cleanup
+never deletes a cache in use. After its first completed build a bundle leaves
+a `built-<bundle id>` marker in the cache; until then the editor shows the
+first-build message.
+
+Measured on a 15-core Apple Silicon Mac for the Keycaprio default layout, a
+cold build takes about 72 seconds. Nearly all of it is the build runner, the
+`regz` register generator with its C libraries and the other host tools; the
+firmware itself takes about a second. With a warm cache the same layout builds
+again in 0.3 seconds and another board's layout in about a second. After an
+identical bundle is reinstalled, the C libraries and `regz` are rebuilt (about
+35 seconds); everything else stays cached. `zig build -j` is the core count
+minus one, between 2 and 12. On this graph it shortens a cold build only a
+little (76 to 80 seconds with `-j2`, 72 seconds with `-j12`) because the critical
+path is sequential.
+
+**Warm-up.** About three seconds after an interactive start, if this bundle
+has not completed a build yet and the editor is idle, the editor quietly
+builds the open layout, or the default layout while no project is open, with
+half the cores. The warm-up never flashes or opens a device, shows no progress
+and only logs failures. Build or Flash of the same snapshot takes the running
+warm-up over and shows the first-build message; any other build waits for the
+warm-up's lock and then builds from the warm cache. A warm-up of the current
+layout counts as an ordinary build of it. Fixtures, tests, `--offline`, light
+previews and bundles without a toolchain never warm up.
+
+**Cleanup.** At startup and after each accepted build, a background pass
+deletes cache entries the application recreates on demand. It matches exact
+name patterns and never touches projects, preferences or Tutor data. Entries
+changed within the last hour are kept, since another instance may be using
+them.
+
+| Cache entry | Rule |
+| --- | --- |
+| `builds/compiler-cache/<64 hex>` | Per-bundle caches of earlier versions: deleted |
+| `builds/compiler-cache/zig-<hash>` | Other compilers' caches: deleted when unlocked. The current cache is dropped above 1 GiB, which makes the next build cold once |
+| `builds/build-<hex>` | Build outputs and logs: the newest five and the accepted build are kept |
+| `exports/v<format>/<snapshot>` | The newest ten and the accepted build's export are kept; older formats are deleted |
+| `flash/<hash>.uf2` | Frozen transfer copies: the newest five and the accepted firmware are kept |
+| `imports/{analysis,capture,download}-<hex>` | The newest five are kept; the importer's compiler caches are dropped above 512 MiB |
+| `editor-environment` | Preparation cache of editors before the bundled toolchain: deleted |
+| `runtime/<bundle id>` | Windows payloads of other bundles: deleted |
+
+A cold cache of one bundle holds about 210 MB; each reinstall adds about
+160 MB of rebuilt host tools, so the cap is reached after about five updates.
 
 **Flash** builds the current project if necessary, enters BOOTSEL,
 transfers the verified UF2, and waits for coherent reconnection. Only that

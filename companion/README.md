@@ -48,6 +48,10 @@ keyboard icon in the tray.
   is not found, the editor asks you to enter it by hand. Auto-build compiles
   while you edit and never starts a transfer. The installed application carries
   its own Zig compiler, firmware sources and flash tools, so it builds offline.
+  The first build compiles the build tools once, about a minute on a recent
+  Mac; the editor starts it quietly in the background shortly after launch,
+  later builds take seconds, and its caches stay bounded
+  ([details](docs/development.md#compiler-cache-warm-up-and-cleanup)).
 - **Live overlay.** A transparent, click-through overlay of your keyboard that
   follows the running layout's active layer, modifiers and pressed keys over a
   verified connection. Bind a key's tap or hold to **Show / hide companion**
