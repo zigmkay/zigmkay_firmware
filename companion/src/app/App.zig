@@ -432,7 +432,7 @@ fn fitWindow(app: *App) void {
     // Practice has a responsive canvas; keep its controls readable in the
     // native minimum window instead of shrinking the editor's fixed canvas.
     const scale = if (app.practicing) @max(@as(f32, 0.8), fitted_scale) else fitted_scale;
-    window.content_scale = scale * app.life.editor_scale;
+    window.content_scale = app.fixture.content_scale orelse scale * app.life.editor_scale;
     window.snap_to_pixels = window.content_scale == 1;
     window.themeSet(editor_ui.dvuiTheme(window, app.view.toolbar.light));
 }

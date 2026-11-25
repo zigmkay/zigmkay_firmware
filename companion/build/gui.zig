@@ -42,7 +42,7 @@ const fixtures = [_]struct { []const u8, []const u8 }{
     .{ "--offline-catalog-frames", "56" },
     .{ "--offline-status-frames", "24" },
     .{ "--offline-practice-frames", "3" },
-    .{ "--offline-tutor-frames", "112" },
+    .{ "--offline-tutor-frames", "124" },
     .{ "--offline-companion-frames", "9" },
     .{ "--offline-source-refresh-frames", "3" },
 };
@@ -92,7 +92,7 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     for (fixtures) |fixture| step.dependOn(&tests.addGuiFixture(b, app, &.{ fixture[0], fixture[1] }).step);
 
     // Renders the Tutor gallery again and rewrites the PNGs the docs show.
-    const gallery = tests.addGuiFixture(b, app, &.{ "--offline-tutor-frames", "112" });
+    const gallery = tests.addGuiFixture(b, app, &.{ "--offline-tutor-frames", "124" });
     gallery.setCwd(b.path("."));
     const converter = b.addExecutable(.{ .name = "doc-screenshots", .root_module = b.createModule(.{
         .root_source_file = b.path("tools/doc_screenshots.zig"),

@@ -23,6 +23,9 @@ pub const State = struct {
     layout_notice: @import("practice-ui").LayoutNotice = .none,
     /// Whether the gallery's pretend keyboard reports tap/hold decisions.
     tap_hold_support: desktop.practice_controller.TapHoldSupport = .unknown,
+    /// The content scale a gallery scene renders at instead of the fitted
+    /// one, as on a Retina display or with the editor zoomed.
+    content_scale: ?f32 = null,
 };
 
 /// Scripts that replace the project or the onboarding stage before a frame.
@@ -35,7 +38,7 @@ pub fn beforeFrame(app: *App) !void {
     if (app.mode.isTutorGallery()) try showTutor(app);
 }
 
-/// The tutor gallery renders 28 scenes for 4 frames each (2 Dark + 2 Light):
+/// The tutor gallery renders 31 scenes for 4 frames each (2 Dark + 2 Light):
 /// 0: Active Stage 2 · All letters (with populated confidences & focus key)
 /// 1: Stage 3 · Shift & capitals (opposite-hand Shift hold + tap bridge)
 /// 2: Stage 5 · Layers & combos (layer auto-preview / 2-key combo arc)
@@ -64,6 +67,9 @@ pub fn beforeFrame(app: *App) !void {
 /// 25: Person menu with two people and their progress (P1)
 /// 26: Refresh lesson for a slipped green letter, with the hover card of another (R)
 /// 27: Progress sheet resized larger, its body filling it down to the tap/hold keys
+/// 28: Scene 27 at content scale 2 (2560x1600), as on a Retina display
+/// 29: Test layout's empty captured field with its placeholder at content scale 2
+/// 30: Progress sheet scrolled to its Tap/hold keys at content scale 1.25 (1600x1000)
 fn showTutor(app: *App) !void {
     app.view.toolbar.light = app.count % 4 >= 2;
     const is_scene_start = (app.count == 1) or (app.count >= 4 and app.count % 4 == 0);
@@ -82,6 +88,11 @@ fn showTutor(app: *App) !void {
     app.tutor.view.progress_scroll = .{};
     app.tutor.view.test_field = .{};
     app.tutor.view.people.close();
+    app.fixture.content_scale = switch (scene) {
+        28, 29 => 2,
+        30 => 1.25,
+        else => null,
+    };
     // Notices belong to the scene that finishes a lesson.
     practice.event_len = 0;
 
@@ -232,7 +243,7 @@ fn showTutor(app: *App) !void {
             practice.events_at_us = now;
             app.tutor.view.forced_tooltip = 'a';
         },
-        17 => {
+        17, 30 => {
             try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
             try practice.start();
             app.tutor.view.sheet = .progress;
@@ -253,6 +264,11 @@ fn showTutor(app: *App) !void {
         6, 22, 23 => {
             try practice.choose(.{ .mode = .test_keys }, now);
             try showTestField(practice, &app.tutor.view, scene == 22);
+        },
+        29 => {
+            try practice.choose(.{ .mode = .test_keys }, now);
+            practice.test_keys.tap_hold_len = 0;
+            practice.test_keys.field.setText("");
         },
         24 => {
             // Scene 18's moved characters keep their statistics from here on.
@@ -281,7 +297,7 @@ fn showTutor(app: *App) !void {
             if (practice.lesson_refresh == null) return error.FixtureHasNoRefreshLesson;
             app.tutor.view.forced_tooltip = hover;
         },
-        27 => {
+        27, 28 => {
             try practice.choose(.{ .mode = .tutor, .stage = .all_letters, .guidance = .guided }, now);
             practice.lessons_since_refresh = 0;
             try practice.start();
@@ -788,6 +804,8 @@ pub fn resizeStatusWindow(app: *App) void {
         if (app.count == 61) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
         if (app.count == 93) _ = c.SDL_SetWindowSize(app.native.window, 960, 660);
         if (app.count == 97) _ = c.SDL_SetWindowSize(app.native.window, 1440, 940);
+        if (app.count == 113) _ = c.SDL_SetWindowSize(app.native.window, 2560, 1600);
+        if (app.count == 121) _ = c.SDL_SetWindowSize(app.native.window, 1600, 1000);
     }
     if (!app.mode.isStatus() or (app.count != 1 and app.count != 21 and app.count != 25)) return;
     const narrow = app.count == 21;
