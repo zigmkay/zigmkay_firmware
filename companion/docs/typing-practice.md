@@ -21,11 +21,14 @@ active board geometry, keymap layers, home-row modifiers, and 2-key combos.
 ### Key-confidence strip & focus-key unlocks
 
 Above the text stage, the **key-confidence strip** displays your unlock order.
-By default letters come in the order that forms the most English words early,
-limited to the letters your layout can type: **E S A R T L** first, then
-D I N G O P C U M H and the rest. **Home row first** in the Stages sheet starts
-with the home row of your layout instead; switching keeps every letter you
-have unlocked.
+By default the Tutor starts with six letters: as many from your layout's home
+row as still form at least 40 real English words, with both hands taking part
+and typing about the same amount; on Colemak that is **E S R T N O**, on QWERTY
+**S A L D I K**. Every later letter is the one that adds the most frequent
+words, preferring the hand with fewer letters, and every lesson picks its
+words so that both hands type about as much. **Home row first** in the Stages
+sheet unlocks the whole home row first instead; switching keeps every letter
+you have unlocked.
 
 - **Green keys** have reached your target speed (default **20 WPM**; Settings
   offers 15–45) with at least **28 of their last 30 presses right on the first
@@ -91,9 +94,10 @@ Click the **Stage** pill in the top bar to open the **Stages** sheet. All six
 stages are derived from your active layout and can be selected freely at any
 time:
 
-1. **Stage 1 · First letters** — The first letters of the letter order (E S A
-   R T L, or your home row with **Home row first**) as real words; once they
-   are green, the Tutor moves on to Stage 2 by itself.
+1. **Stage 1 · First letters** — The first letters of the letter order (for
+   example E S R T N O on Colemak, or your home row with **Home row first**)
+   as real words, around the weakest of them; once they are green, the Tutor
+   moves on to Stage 2 by itself.
 2. **Stage 2 · All letters** — Adaptive 26-letter progression with key
    confidence and focus-key unlocks.
 3. **Stage 3 · Shift & capitals** — Balanced 50/50 left- and right-hand

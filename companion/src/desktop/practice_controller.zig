@@ -10,6 +10,7 @@ const generator = @import("practice_generator.zig");
 const storage = @import("practice_storage.zig");
 const key_progress = @import("practice_key_progress.zig");
 const word_list = @import("practice_words.zig");
+const letter_order = @import("practice_letter_order.zig");
 
 pub const Digest = [32]u8;
 pub const Mode = enum { tutor, test_keys };
@@ -18,7 +19,7 @@ pub const GuidanceMode = storage.GuidanceMode;
 pub const ErrorMode = practice.ErrorMode;
 pub const LetterOrder = storage.LetterOrder;
 /// Letters unlocked from the start in the word-forming order.
-pub const first_letters: usize = 6;
+pub const first_letters: usize = letter_order.start_letters;
 
 pub const Config = struct {
     mode: Mode = .tutor,
@@ -808,6 +809,17 @@ pub const Controller = struct {
         try self.start();
     }
 
+    /// The letter the next lesson is built around. Stage 1 stays on the first
+    /// letters, so it focuses on the weakest of them when the learning focus
+    /// lies beyond.
+    pub fn lessonFocus(self: *const Controller) ?u21 {
+        const focus = self.learning.focus_cp;
+        if (self.config.stage != .home_row) return focus;
+        const first = self.learning.firstLetters();
+        if (focus) |cp| if (cp <= 'z' and std.mem.indexOfScalar(u8, first, @intCast(cp)) != null) return cp;
+        return self.learning.focusAmong(first) orelse focus;
+    }
+
     /// The letters of the bound layout in the order they unlock.
     pub fn letterOrder(self: *const Controller, buf: *[26]u8) []const u8 {
         return orderFor(if (self.profile_bound) &self.profile else null, self.config.letter_order, buf);
@@ -923,7 +935,7 @@ pub const Controller = struct {
             .word_count = if (self.config.weak_spot_active) generator.default_weak_spot_words else generator.default_round_words,
             .bigram = self.lesson_bigram,
             .unlocked_mask = self.learning.unlockedMask(),
-            .focus_cp = self.learning.focus_cp,
+            .focus_cp = self.lessonFocus(),
             .profile = profile_ptr,
             .learning = &self.learning,
             // Rotate through the punctuation and digit groups round by round.
@@ -1198,25 +1210,15 @@ pub const Controller = struct {
     }
 };
 
-/// The letters `profile` can type in the order they unlock: the ones that
-/// form the most English words first, or the home row first.
+/// The letters `profile` can type in the order they unlock: home-row start
+/// letters that form enough words with both hands, then the letters that add
+/// the most words; or the home row first.
 pub fn orderFor(profile: ?*const layout_profile.LayoutProfile, order: LetterOrder, buf: *[26]u8) []const u8 {
     const p = profile orelse return layout_profile.english_letter_frequency;
     if (p.unlock_len == 0) return layout_profile.english_letter_frequency;
     const typeable = p.unlockSlice();
     if (order == .home_row) return typeable;
-    var n: usize = 0;
-    for (word_list.english().letterOrder()) |ch| {
-        if (std.mem.indexOfScalar(u8, typeable, ch) == null) continue;
-        buf[n] = ch;
-        n += 1;
-    }
-    for (typeable) |ch| {
-        if (std.mem.indexOfScalar(u8, buf[0..n], ch) != null) continue;
-        buf[n] = ch;
-        n += 1;
-    }
-    return buf[0..n];
+    return letter_order.compute(word_list.english(), letter_order.inputFor(p), buf);
 }
 
 /// How many letters of an order of `len` letters are unlocked from the
@@ -1672,14 +1674,35 @@ test "letters come in the word-forming order and the home row is an option that 
     defer t.allocator.destroy(owner);
     owner.* = .init(@splat(1));
     _ = owner.bindProfile(alphabetProfile(0x47), null);
-    try t.expectEqualStrings("esartl", owner.learning.activeLetters());
-    try t.expectEqualStrings("esartl", owner.learning.firstLetters());
+    // The start letters stay on the home row while it forms enough words.
+    try t.expectEqualStrings("esarti", owner.learning.activeLetters());
+    try t.expectEqualStrings("esarti", owner.learning.firstLetters());
 
     try owner.dispatch(owner.action(.{ .set_letter_order = .home_row }), 0);
     // The home row comes first, and nothing unlocked before is locked again.
-    try t.expectEqualStrings("arstneiol", owner.learning.activeLetters());
+    try t.expectEqualStrings("arstneio", owner.learning.activeLetters());
     try t.expectEqualStrings("arstneio", owner.learning.firstLetters());
     try t.expectEqual(LetterOrder.home_row, owner.persisted.letter_order);
+}
+
+test "Stage 1 practises and names a focus among the first letters" {
+    const t = std.testing;
+    const owner = try t.allocator.create(Controller);
+    defer t.allocator.destroy(owner);
+    owner.* = .init(@splat(1));
+    // Letters beyond the first ones are unlocked and one of them is the focus.
+    _ = owner.bindProfile(alphabetProfile(0x49), .{ .unlocked_count = 9, .active_stage = 1, .focus_cp = 'd' });
+    const first = owner.learning.firstLetters();
+    try t.expectEqual(@as(?u21, 'd'), owner.learning.focus_cp);
+    const focus = owner.lessonFocus().?;
+    try t.expect(std.mem.indexOfScalar(u8, first, @intCast(focus)) != null);
+    try owner.start();
+    const reference = owner.session.reference[0..owner.session.reference_len];
+    try t.expect(std.mem.indexOfScalar(u21, reference, focus) != null);
+    try t.expect(std.mem.indexOfScalar(u21, reference, 'd') == null);
+    // Stage 2 practises the learning focus itself.
+    try owner.dispatch(owner.action(.{ .set_stage = .all_letters }), 0);
+    try t.expectEqual(@as(?u21, 'd'), owner.lessonFocus());
 }
 
 test "a save from before the word-forming order keeps its unlocked letters" {
@@ -1694,8 +1717,8 @@ test "a save from before the word-forming order keeps its unlocked letters" {
         .error_mode = .stop_on_error,
         .key_stats = &.{.{ .cp = 'q', .ema_ms = 300, .ema_acc = 1, .samples = 40 }},
     });
-    for ("arstneiod" ++ "esartl" ++ "q") |ch| try t.expect(owner.learning.isUnlocked(ch));
-    try t.expectEqualStrings("esartl", owner.learning.firstLetters());
+    for ("arstneiod" ++ "esarti" ++ "q") |ch| try t.expect(owner.learning.isUnlocked(ch));
+    try t.expectEqualStrings("esarti", owner.learning.firstLetters());
     try t.expectEqual(ErrorMode.forgive, owner.config.error_mode);
     // 'q' was green, so it counts as mastered and stays unlocked.
     try t.expect(owner.learning.getStat('q').?.mastered);

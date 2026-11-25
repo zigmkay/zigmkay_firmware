@@ -62,7 +62,7 @@ pub fn confidenceStrip(owner: *const control.Controller, theme: ui.Theme, bounds
 
     const arena = dvui.currentWindow().arena();
     const lm = &owner.learning;
-    const focus_cp = lm.focus_cp;
+    const focus_cp = owner.lessonFocus();
 
     // Header row: Active focus + stats + forecast (left), Target speed (right)
     const pad_x: f32 = 16;

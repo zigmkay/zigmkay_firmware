@@ -30,6 +30,9 @@ const typists = [_]Typist{
     .{ .name = "beginner", .interval_us = 900_000, .errors_per_mille = 200, .must_unlock_all = false },
 };
 
+/// The largest share of the letters of Stages 1 and 2 one hand may type.
+const max_hand_share_percent = 60;
+
 /// Rounds per stage. Stage 2 is where letters unlock, so it gets the most.
 const rounds_per_stage = [_]struct { control.Stage, usize }{
     .{ .home_row, 6 },
@@ -128,6 +131,10 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
     var now: u64 = 1_000_000;
     var rounds: u32 = 0;
     var full_unlock_round: ?u32 = null;
+    // Letters each hand typed in the lessons of Stages 1 and 2.
+    const hands = desktop.practice_letter_order.handsOf(&profile);
+    var left_letters: usize = 0;
+    var right_letters: usize = 0;
 
     for (rounds_per_stage) |plan| {
         const stage, const count = plan;
@@ -147,6 +154,28 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
                 const mask = owner.learning.unlockedMask();
                 for (reference) |cp| if (cp >= 'a' and cp <= 'z') {
                     if (mask & (@as(u32, 1) << @intCast(cp - 'a')) == 0) return error.LockedLetterInDrill;
+                };
+            }
+            if (stage == .home_row or stage == .all_letters) {
+                for (reference) |cp| if (cp >= 'a' and cp <= 'z') switch (hands[cp - 'a']) {
+                    .left => left_letters += 1,
+                    .right => right_letters += 1,
+                    .neutral => {},
+                };
+                // The focus the strip names is the letter the lesson practises.
+                if (owner.lesson_bigram == null) if (owner.lessonFocus()) |focus| {
+                    var words: usize = 0;
+                    var with_focus: usize = 0;
+                    var it = std.mem.splitScalar(u21, reference, ' ');
+                    while (it.next()) |word| {
+                        if (word.len == 0) continue;
+                        words += 1;
+                        if (std.mem.indexOfScalar(u21, word, focus) != null) with_focus += 1;
+                    }
+                    if (with_focus * 2 < words) {
+                        std.debug.print("stage {t} on {s}: only {d} of {d} words contain the focus {u}\n", .{ stage, entry.selector, with_focus, words, focus });
+                        return error.LessonIgnoresFocus;
+                    }
                 };
             }
 
@@ -193,10 +222,24 @@ fn learn(entry: catalog.Entry, typist: Typist) !void {
     try t.expectEqual(@as(usize, 0), resumed.bindProfile(profile, loaded.state));
     try t.expectEqual(owner.learning.unlockedMask(), resumed.learning.unlockedMask());
 
-    std.debug.print("tutor learner: {s: <28} {s: <8} {d} letters, all unlocked after {?d} of {d} rounds\n", .{
-        entry.selector, typist.name, owner.learning.unlock_len, full_unlock_round, rounds,
+    const lm = &owner.learning;
+    const typed = left_letters + right_letters;
+    std.debug.print("tutor learner: {s: <28} {s: <8} {d} letters ({s} first, then {s}), all unlocked after {?d} of {d} rounds, left hand {d}%\n", .{
+        entry.selector,
+        typist.name,
+        lm.unlock_len,
+        lm.firstLetters(),
+        lm.unlock_order[lm.firstLetters().len..lm.unlock_len],
+        full_unlock_round,
+        rounds,
+        if (typed > 0) left_letters * 100 / typed else 0,
     });
     if (typist.must_unlock_all and full_unlock_round == null) return error.FluentTypistNeverUnlockedAllLetters;
+    // Neither hand types much more than the other.
+    if (typed > 0 and @max(left_letters, right_letters) * 100 > typed * max_hand_share_percent) {
+        std.debug.print("{s}: left hand {d}, right hand {d} letters\n", .{ entry.selector, left_letters, right_letters });
+        return error.OneHandTypesMost;
+    }
 }
 
 /// One bundled keyboard with its default layout, as the Tutor sees it.

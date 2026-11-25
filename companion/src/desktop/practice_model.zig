@@ -561,7 +561,11 @@ pub const LearningModel = struct {
     /// green yet, breaking ties by fewest samples, then unlock order. Once
     /// all are green, the least confident of them.
     pub fn computeFocusKey(self: *const LearningModel) ?u21 {
-        const active = self.activeLetters();
+        return self.focusAmong(self.activeLetters());
+    }
+
+    /// The focus among `active` letters only, chosen as `computeFocusKey` does.
+    pub fn focusAmong(self: *const LearningModel, active: []const u8) ?u21 {
         if (active.len == 0) return null;
         var best_cp: u21 = active[0];
         var best_green = true;

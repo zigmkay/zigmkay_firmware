@@ -7,6 +7,7 @@ const practice = @import("practice.zig");
 const layout_profile = @import("practice_layout_profile.zig");
 const model = @import("practice_model.zig");
 const word_list = @import("practice_words.zig");
+const letter_order = @import("practice_letter_order.zig");
 
 /// Legacy sentence counts retained for compatibility until M2b removes the old controller mode.
 pub const sentence_counts = [_]usize{ 1, 3, 5, 10 };
@@ -21,6 +22,9 @@ pub const default_lesson_letters: usize = 100;
 /// words that fit, and mixes in pseudowords while fewer than `min_word_pool` fit.
 pub const max_word_pool: usize = 1000;
 pub const min_word_pool: usize = 15;
+/// Frequency-weighted draws per word of a lesson; the one that evens out the
+/// hands most is typed.
+const balance_draws: usize = 4;
 const boundary: usize = 26;
 const alphabet_size: usize = 27;
 
@@ -326,6 +330,17 @@ fn generateWordRound(buffer: []u8, req: DrillRequest) ![]const u8 {
         c.* = total;
     }
 
+    // Letters each hand types, to keep the hands even across a lesson.
+    var left_mask: u32 = 0;
+    var right_mask: u32 = 0;
+    if (req.profile) |p| for (letter_order.handsOf(p), 0..) |hand, i| switch (hand) {
+        .left => left_mask |= @as(u32, 1) << @intCast(i),
+        .right => right_mask |= @as(u32, 1) << @intCast(i),
+        .neutral => {},
+    };
+    var left_letters: i32 = 0;
+    var right_letters: i32 = 0;
+
     var writer: std.Io.Writer = .fixed(buffer);
     var letters: usize = 0;
     var count: usize = 0;
@@ -342,23 +357,45 @@ fn generateWordRound(buffer: []u8, req: DrillRequest) ![]const u8 {
             previous = null;
             continue;
         }
-        var pick: usize = 0;
-        for (0..3) |_| {
+        // A few frequency-weighted draws; the one that evens out the hands
+        // most wins, and never the previous word again.
+        var pick: ?usize = null;
+        var pick_imbalance: i32 = std.math.maxInt(i32);
+        for (0..balance_draws) |_| {
             const r = @as(f32, @floatFromInt(rng.next() >> 40)) / @as(f32, 1 << 24) * total;
-            pick = std.sort.lowerBound(f32, cumulative[0..pool_len], r, struct {
+            var cand = std.sort.lowerBound(f32, cumulative[0..pool_len], r, struct {
                 fn order(target: f32, item: f32) std.math.Order {
                     return std.math.order(target, item);
                 }
             }.order);
-            pick = @min(pick, pool_len - 1);
-            if (previous == null or pick != previous.? or pool_len == 1) break;
+            cand = @min(cand, pool_len - 1);
+            if (previous != null and cand == previous.? and pool_len > 1) continue;
+            const w = list.word(pool[cand]);
+            const imbalance: i32 = @intCast(@abs((left_letters + handLetters(w, left_mask)) -
+                (right_letters + handLetters(w, right_mask))));
+            if (imbalance < pick_imbalance) {
+                pick = cand;
+                pick_imbalance = imbalance;
+            }
         }
-        previous = pick;
-        const word = list.word(pool[pick]);
+        const chosen = pick orelse if (previous) |p| (p + 1) % pool_len else 0;
+        previous = chosen;
+        const word = list.word(pool[chosen]);
+        left_letters += handLetters(word, left_mask);
+        right_letters += handLetters(word, right_mask);
         try writer.writeAll(word);
         letters += word.len;
     }
     return writer.buffered();
+}
+
+/// How many letters of `word` lie in `hand_mask`.
+fn handLetters(word: []const u8, hand_mask: u32) i32 {
+    var n: i32 = 0;
+    for (word) |c| {
+        if (c >= 'a' and c <= 'z' and hand_mask & (@as(u32, 1) << @intCast(c - 'a')) != 0) n += 1;
+    }
+    return n;
 }
 
 fn fitsMask(ch: u8, mask: u32) bool {
