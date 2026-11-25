@@ -280,18 +280,14 @@ fn drawPopover(self: *Context, part: Part, anchor: dvui.Rect.Physical) !void {
         .w = w,
         .h = h,
     };
-    const popover = dvui.floatingWindow(@src(), .{ .resize = .none }, .{
-        .rect = rect,
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = self.theme.panel },
-        .color_border = .{ .color = ui.mix(self.theme.border, self.theme.text, 0.12) },
-        .border = .all(1),
-        .corners = .all(14),
-        .box_shadow = .{ .offset = .{ .x = 0, .y = 8 }, .fade = 24, .alpha = 0.35 },
-        .tag = "key.editor",
-    });
+    var frame = ui.frameOptions(self.theme.panel, 14, "key.editor");
+    frame.rect = rect;
+    frame.box_shadow = .{ .offset = .{ .x = 0, .y = 8 }, .fade = 24, .alpha = 0.35 };
+    const popover = dvui.floatingWindow(@src(), .{ .resize = .none }, frame);
     defer popover.deinit();
+    var edge = self.theme;
+    edge.border = ui.mix(self.theme.border, self.theme.text, 0.12);
+    defer ui.frameBorder(edge, rect.w, rect.h, 14);
     if (header(self, part, width)) {
         dropFocus();
         close(self.view);

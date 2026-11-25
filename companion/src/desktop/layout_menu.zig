@@ -66,17 +66,11 @@ pub fn draw(theme: ui.Theme, bounds: dvui.Rect, label: []const u8, choices: []co
         open.* = false;
         return null;
     }
-    const popup = dvui.floatingWindow(@src(), .{}, .{
-        .rect = rect,
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = theme.panel },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(12),
-        .tag = "layout.menu.popup",
-    });
+    var frame = ui.frameOptions(theme.panel, 12, "layout.menu.popup");
+    frame.rect = rect;
+    const popup = dvui.floatingWindow(@src(), .{}, frame);
     defer popup.deinit();
+    defer ui.frameBorder(theme, rect.w, rect.h, 12);
     var command: ?Command = null;
     var y: f32 = padding;
     var muted = theme;

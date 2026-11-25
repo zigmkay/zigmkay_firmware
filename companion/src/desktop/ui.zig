@@ -624,23 +624,45 @@ pub fn editDrawer(src: std.builtin.SourceLocation, t: Theme, width: f32) *dvui.F
     return drawer(src, t, .{ .x = (screen.w - w) / 2, .y = (screen.h - h) / 2, .w = w, .h = h }, true);
 }
 
-/// A modal sheet of `w` × `h` canvas units, centered in the window. Its
-/// children are placed in canvas units from its top left corner.
-pub fn sheet(src: std.builtin.SourceLocation, t: Theme, w: f32, h: f32, tag: []const u8) *dvui.FloatingWindowWidget {
+/// A floating window of `w` × `h` made with `frameOptions`, plus `padding`
+/// when it has any. `deinit` draws its border over the children and then
+/// ends the window.
+pub const Frame = struct {
+    window: *dvui.FloatingWindowWidget,
+    theme: Theme,
+    w: f32,
+    h: f32,
+    corner: f32,
+    padding: dvui.Rect = .{},
+
+    pub fn data(self: Frame) *dvui.WidgetData {
+        return self.window.data();
+    }
+
+    pub fn deinit(self: Frame) void {
+        frameEdge(self.theme, .{ .x = -self.padding.x, .y = -self.padding.y, .w = self.w, .h = self.h }, self.corner);
+        self.window.deinit();
+    }
+};
+
+/// A modal sheet of `w` × `h` canvas units, centered in the window and at
+/// least 16 units inside its edges. Its children are placed in canvas units
+/// from its top left corner.
+pub fn sheet(src: std.builtin.SourceLocation, t: Theme, w: f32, h: f32, tag: []const u8) Frame {
     const scale = dvui.parentGet().screenRectScale(.{}).s / dvui.windowNaturalScale();
     const screen = dvui.windowRect();
     const width = @min(w * scale, screen.w - 32);
     const height = @min(h * scale, screen.h - 32);
-    return dvui.floatingWindow(src, .{ .modal = true }, .{
-        .rect = .{ .x = (screen.w - width) / 2, .y = (screen.h - height) / 2, .w = width, .h = height },
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = t.panel },
-        .color_border = .{ .color = t.border },
-        .border = .all(1),
-        .corners = .all(14),
-        .tag = tag,
-    });
+    const corner: f32 = 14;
+    var window = frameOptions(t.panel, corner, tag);
+    window.rect = .{ .x = (screen.w - width) / 2, .y = (screen.h - height) / 2, .w = width, .h = height };
+    return .{
+        .window = dvui.floatingWindow(src, .{ .modal = true }, window),
+        .theme = t,
+        .w = width,
+        .h = height,
+        .corner = corner,
+    };
 }
 
 /// Options of a floating window whose children are placed from its top left
@@ -663,8 +685,14 @@ pub fn frameOptions(fill: dvui.Color, corner: f32, tag: []const u8) dvui.Options
 /// The 1-unit border of a `frameOptions` window of `w` × `h`, drawn over its
 /// children so that nothing reaching the edge covers it.
 pub fn frameBorder(t: Theme, w: f32, h: f32, corner: f32) void {
+    frameEdge(t, .{ .w = w, .h = h }, corner);
+}
+
+/// The 1-unit border of a `frameOptions` window, at `r` relative to where its
+/// children start: offset by minus the padding of a padded window.
+fn frameEdge(t: Theme, r: dvui.Rect, corner: f32) void {
     const edge = dvui.box(@src(), .{}, .{
-        .rect = .{ .w = w, .h = h },
+        .rect = r,
         .border = .all(1),
         .color_border = .{ .color = t.border },
         .corners = .all(corner),

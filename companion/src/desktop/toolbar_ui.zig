@@ -320,18 +320,12 @@ fn steps(frame: Frame) [3]Step {
 fn drawDetails(view: *View, activity: Activity, frame: Frame, theme: ui.Theme) void {
     const w: f32 = 600;
     const h: f32 = 380;
-    const popup = dvui.floatingWindow(@src(), .{ .modal = false }, .{
-        .rect = .{ .x = @max(16, dvui.windowRect().w - w - 24), .y = 108, .w = w, .h = h },
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = theme.panel },
-        .color_text = .{ .color = theme.text },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(12),
-        .tag = "editor.activity.details_panel",
-    });
+    var window = ui.frameOptions(theme.panel, 12, "editor.activity.details_panel");
+    window.rect = .{ .x = @max(16, dvui.windowRect().w - w - 24), .y = 108, .w = w, .h = h };
+    window.color_text = .{ .color = theme.text };
+    const popup = dvui.floatingWindow(@src(), .{ .modal = false }, window);
     defer popup.deinit();
+    defer ui.frameBorder(theme, w, h, 12);
     var muted = theme;
     muted.text = theme.muted;
     ui.label(theme, "Build and Flash activity", .{ .x = 20, .y = 18, .w = 480, .h = 26 }, 18);
