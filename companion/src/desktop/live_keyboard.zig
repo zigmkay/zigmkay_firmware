@@ -4,6 +4,7 @@ const cache = @import("label_cache.zig");
 const companion = @import("session");
 const protocol = @import("device-protocol");
 const model = @import("layout-model");
+const tap_hold = @import("practice_tap_hold.zig");
 
 pub const Frame = struct {
     labels: ?*const cache.LabelCache = null,
@@ -83,7 +84,10 @@ pub const Presenter = struct {
 /// Companion-owned overlay intent. The live session reports keyboard signal
 /// messages (`fromKeyboard`); the draft runner derives them on the host.
 pub const SignalKind = enum { log_toggle, overlay_toggle, shutdown };
-pub const Signal = struct { kind: SignalKind, pressed: bool };
+/// Which action of its key sent a signal. Keyboards that do not say are
+/// `unknown`, and the overlay falls back to judging the press duration.
+pub const SignalSource = enum { unknown, tap, hold };
+pub const Signal = struct { kind: SignalKind, pressed: bool, source: SignalSource = .unknown };
 pub const max_signals = 32;
 
 /// Converts keyboard signals from the live session, keeping at most `max_signals`.
@@ -96,12 +100,113 @@ pub fn fromKeyboard(buffer: *[max_signals]Signal, events: []const protocol.Signa
             .shutdown => .shutdown,
         },
         .pressed = event.pressed,
+        .source = switch (event.source) {
+            .unknown => .unknown,
+            .tap => .tap,
+            .hold => .hold,
+        },
     };
     return buffer[0..count];
 }
 
+/// A keyboard tap/hold decision as the Tutor classifies it.
+pub fn tapHoldDecision(event: protocol.TapHoldDecision) tap_hold.Decision {
+    return .{
+        .key_index = event.key_index,
+        .outcome = switch (event.outcome) {
+            .tap => .tap,
+            .hold => .hold,
+            .retro_tap => .retro_tap,
+        },
+        .reason = switch (event.reason) {
+            .released_within_term => .released_within_term,
+            .term_elapsed => .term_elapsed,
+            .permissive_hold => .permissive_hold,
+            .same_side_tap => .same_side_tap,
+            .released_after_term => .released_after_term,
+        },
+        .elapsed_ms = event.elapsed_ms,
+        .other_key = if (event.other_key) |other| other else null,
+        .tapping_term_ms = event.tapping_term_ms,
+        .layer = event.layer,
+        .combo = event.combo,
+    };
+}
+
+/// Tap/hold decisions received since the Tutor last took them, oldest
+/// first. When nobody takes them the oldest are dropped.
+pub const TapHoldQueue = struct {
+    pub const capacity = 64;
+    items: [capacity]tap_hold.Decision = undefined,
+    len: usize = 0,
+
+    pub fn add(self: *TapHoldQueue, events: []const protocol.TapHoldDecision) void {
+        for (events) |event| {
+            if (self.len == capacity) {
+                std.mem.copyForwards(tap_hold.Decision, self.items[0 .. capacity - 1], self.items[1..capacity]);
+                self.len -= 1;
+            }
+            self.items[self.len] = tapHoldDecision(event);
+            self.len += 1;
+        }
+    }
+
+    /// The queued decisions; they stay valid until the next `add` or `clear`.
+    pub fn slice(self: *const TapHoldQueue) []const tap_hold.Decision {
+        return self.items[0..self.len];
+    }
+
+    pub fn clear(self: *TapHoldQueue) void {
+        self.len = 0;
+    }
+};
+
+test "tap/hold decisions convert field by field and the queue keeps the newest" {
+    const t = std.testing;
+    const event = protocol.TapHoldDecision{
+        .key_index = 9,
+        .outcome = .retro_tap,
+        .reason = .released_after_term,
+        .elapsed_ms = 333,
+        .other_key = 4,
+        .tapping_term_ms = 190,
+        .layer = 2,
+        .combo = true,
+    };
+    try t.expectEqualDeep(tap_hold.Decision{
+        .key_index = 9,
+        .outcome = .retro_tap,
+        .reason = .released_after_term,
+        .elapsed_ms = 333,
+        .other_key = 4,
+        .tapping_term_ms = 190,
+        .layer = 2,
+        .combo = true,
+    }, tapHoldDecision(event));
+    inline for (@typeInfo(protocol.DecisionReason).@"enum".field_names) |name| {
+        const reason = @field(protocol.DecisionReason, name);
+        try t.expectEqual(@backingInt(reason), @backingInt(@field(tap_hold.model.TapHoldReason, name)));
+    }
+    var queue: TapHoldQueue = .{};
+    var events: [TapHoldQueue.capacity + 3]protocol.TapHoldDecision = undefined;
+    for (&events, 0..) |*e, i| e.* = .{ .key_index = @intCast(i), .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 1, .tapping_term_ms = 200 };
+    queue.add(events[0..2]);
+    queue.add(events[2..]);
+    try t.expectEqual(@as(usize, TapHoldQueue.capacity), queue.slice().len);
+    try t.expectEqual(@as(usize, 3), queue.slice()[0].key_index);
+    try t.expectEqual(@as(usize, TapHoldQueue.capacity + 2), queue.slice()[TapHoldQueue.capacity - 1].key_index);
+    queue.clear();
+    try t.expectEqual(@as(usize, 0), queue.slice().len);
+}
+
 /// Overlay requests never make an unverified draft visible. Hold state is
 /// transient and must be cleared on loss of coherent session state.
+///
+/// In `tap_hold` mode a signal from a key's tap action toggles the overlay on
+/// its press, and one from a hold action shows it while the hold lasts; one
+/// key can do both. A signal of unknown source (older firmware) toggles when
+/// released within `hold_ms` and is momentary otherwise. `hold` and `toggle`
+/// treat every signal alike.
 pub const Visibility = struct {
     mode: enum { toggle, hold, tap_hold } = .toggle,
     latched: bool = false,
@@ -123,6 +228,19 @@ pub const Visibility = struct {
         }
         for (signals) |signal| {
             if (signal.kind != .overlay_toggle) continue;
+            if (self.mode == .tap_hold) switch (signal.source) {
+                // However long the key stays down, a tap toggles once; its
+                // release only ends the tap action.
+                .tap => {
+                    if (signal.pressed) self.latched = !self.latched;
+                    continue;
+                },
+                .hold => {
+                    self.held = signal.pressed;
+                    continue;
+                },
+                .unknown => {},
+            };
             if (self.mode == .tap_hold) {
                 if (signal.pressed and !self.down) {
                     self.pressed_at = now;
@@ -149,6 +267,104 @@ pub const Visibility = struct {
 /// below the gesture threshold, even when all application windows are hidden.
 pub fn waitBudget(live_enabled: bool, busy: bool, resident_idle: bool) u32 {
     return if (live_enabled or busy) 10_000 else if (resident_idle) 500_000 else 250_000;
+}
+
+/// Decides when the frame loop builds a frame. Live monitoring wakes the
+/// loop every `waitBudget` to poll HID reports, but a wake builds a frame only
+/// when something may have changed: an SDL event, a changed live keyboard, a
+/// tray action, running work, the wake DVUI asked for, or the heartbeat that
+/// paces an editor without live monitoring as well.
+pub const Pacer = struct {
+    /// The longest time between frames of a visible window, the wait budget
+    /// of an editor without live monitoring.
+    pub const heartbeat_us: u64 = 250_000;
+
+    /// When the last frame was built, in microseconds of one monotonic clock.
+    drawn_us: u64 = 0,
+    /// When DVUI wants the next frame for its timers and animations; null
+    /// when it waits for events only.
+    wanted_us: ?u64 = null,
+
+    /// What a wake brought besides the passing time.
+    pub const Wake = struct {
+        /// SDL has an event.
+        event: bool = false,
+        /// The poll changed what the live keyboard presents.
+        live: bool = false,
+        /// The tray took an action.
+        tray: bool = false,
+        /// Jobs or flashing run and report progress on every poll.
+        busy: bool = false,
+    };
+
+    /// Records a built frame. `dvui_wait_us` is DVUI's wait time after it,
+    /// with `maxInt(u32)` for no timer.
+    pub fn drew(self: *Pacer, now_us: u64, dvui_wait_us: u32) void {
+        self.drawn_us = now_us;
+        self.wanted_us = if (dvui_wait_us == std.math.maxInt(u32)) null else now_us +| dvui_wait_us;
+    }
+
+    /// The next SDL wait: at most one poll interval, and never past the wake
+    /// DVUI asked for or the heartbeat.
+    pub fn timeout(self: Pacer, now_us: u64, poll_us: u32) u32 {
+        var until = self.drawn_us +| heartbeat_us;
+        if (self.wanted_us) |wanted| until = @min(until, wanted);
+        return @intCast(@min(poll_us, until -| now_us));
+    }
+
+    /// Whether a wake at `now_us` builds a frame.
+    pub fn due(self: Pacer, now_us: u64, wake: Wake) bool {
+        if (wake.event or wake.live or wake.tray or wake.busy) return true;
+        if (self.wanted_us) |wanted| if (now_us >= wanted) return true;
+        return now_us -| self.drawn_us >= heartbeat_us;
+    }
+};
+
+test "an idle live editor polls often but builds frames only on change" {
+    const t = std.testing;
+    const poll = waitBudget(true, false, false);
+    var pacer = Pacer{};
+    // A frame without DVUI timers: the loop polls every 10 ms and builds no
+    // frame until the heartbeat, about four frames a second instead of 100.
+    pacer.drew(1_000_000, std.math.maxInt(u32));
+    var now: u64 = 1_000_000;
+    var frames: usize = 0;
+    var polls: usize = 0;
+    while (now < 2_000_000) {
+        now += pacer.timeout(now, poll);
+        polls += 1;
+        if (pacer.due(now, .{})) {
+            frames += 1;
+            pacer.drew(now, std.math.maxInt(u32));
+        }
+    }
+    try t.expect(polls >= 100);
+    try t.expectEqual(@as(usize, 4), frames);
+    try t.expectEqual(@as(u32, 10_000), pacer.timeout(now, poll));
+
+    // Every cause of change builds the next frame at once.
+    pacer.drew(5_000_000, std.math.maxInt(u32));
+    try t.expect(!pacer.due(5_010_000, .{}));
+    try t.expect(pacer.due(5_010_000, .{ .event = true }));
+    try t.expect(pacer.due(5_010_000, .{ .live = true }));
+    try t.expect(pacer.due(5_010_000, .{ .tray = true }));
+    try t.expect(pacer.due(5_010_000, .{ .busy = true }));
+
+    // DVUI timers and animations get their frames on time.
+    pacer.drew(6_000_000, 33_000);
+    try t.expectEqual(@as(u32, 10_000), pacer.timeout(6_000_000, poll));
+    try t.expectEqual(@as(u32, 3_000), pacer.timeout(6_030_000, poll));
+    try t.expect(!pacer.due(6_030_000, .{}));
+    try t.expect(pacer.due(6_033_000, .{}));
+    // A wake DVUI asks for at once is not delayed by the poll interval.
+    pacer.drew(7_000_000, 0);
+    try t.expectEqual(@as(u32, 0), pacer.timeout(7_000_000, poll));
+    try t.expect(pacer.due(7_000_000, .{}));
+
+    // Without live monitoring the heartbeat keeps the former pace.
+    pacer.drew(8_000_000, std.math.maxInt(u32));
+    try t.expectEqual(@as(u32, 250_000), pacer.timeout(8_000_000, waitBudget(false, false, false)));
+    try t.expect(pacer.due(8_250_000, .{}));
 }
 
 test "live SDL wait budget preserves quick-tap timing with visible and hidden windows" {
@@ -197,6 +413,83 @@ test "quick taps latch while long holds restore preceding visibility" {
     try t.expect(visibility.updateAt(frame, &press, 2300));
     try t.expect(!visibility.updateAt(.{}, &.{}, 2400));
     try t.expect(!visibility.updateAt(frame, &release, 2450));
+}
+
+test "a tap source toggles on its press and a hold source shows while held" {
+    const t = std.testing;
+    var labels = try cache.LabelCache.init(t.allocator, 2, 3);
+    defer labels.deinit();
+    const frame = Frame{ .labels = &labels, .stale = false };
+    const tap_press = [_]Signal{.{ .kind = .overlay_toggle, .pressed = true, .source = .tap }};
+    const tap_release = [_]Signal{.{ .kind = .overlay_toggle, .pressed = false, .source = .tap }};
+    const hold_press = [_]Signal{.{ .kind = .overlay_toggle, .pressed = true, .source = .hold }};
+    const hold_release = [_]Signal{.{ .kind = .overlay_toggle, .pressed = false, .source = .hold }};
+    const tap = tap_press ++ tap_release;
+
+    // Tap only: every tap flips the overlay and it stays, even a long tap
+    // whose release comes well after `hold_ms`.
+    var visibility = Visibility{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &tap, 100));
+    try t.expect(visibility.updateAt(frame, &.{}, 5000));
+    try t.expect(!visibility.updateAt(frame, &tap_press, 5100));
+    try t.expect(!visibility.updateAt(frame, &tap_release, 5900));
+    try t.expect(visibility.updateAt(frame, &tap_press, 6000));
+    try t.expect(visibility.updateAt(frame, &tap_release, 6010));
+
+    // Hold only: shown while held, however short, and hidden on release.
+    visibility = .{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &hold_press, 100));
+    try t.expect(!visibility.updateAt(frame, &hold_release, 120));
+    try t.expect(visibility.updateAt(frame, &hold_press, 200));
+    try t.expect(visibility.updateAt(frame, &.{}, 3000));
+    try t.expect(!visibility.updateAt(frame, &hold_release, 3100));
+
+    // Tap then hold on one key: the hold keeps the latched overlay.
+    visibility = .{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &tap, 100));
+    try t.expect(visibility.updateAt(frame, &hold_press, 400));
+    try t.expect(visibility.updateAt(frame, &hold_release, 900));
+    try t.expect(!visibility.updateAt(frame, &tap, 1000));
+
+    // Hold then tap on one key: the hold peeks, the tap latches.
+    visibility = .{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &hold_press, 100));
+    try t.expect(!visibility.updateAt(frame, &hold_release, 200));
+    try t.expect(visibility.updateAt(frame, &tap, 300));
+    try t.expect(visibility.updateAt(frame, &hold_press, 600));
+    try t.expect(visibility.updateAt(frame, &hold_release, 700));
+
+    // Losing the session clears both.
+    visibility = .{ .mode = .tap_hold };
+    try t.expect(visibility.updateAt(frame, &(tap ++ hold_press), 100));
+    try t.expect(!visibility.updateAt(.{}, &.{}, 200));
+    try t.expect(!visibility.updateAt(frame, &.{}, 300));
+
+    // The explicit modes ignore the source.
+    var hold = Visibility{ .mode = .hold };
+    try t.expect(hold.update(frame, &tap_press));
+    try t.expect(!hold.update(frame, &tap_release));
+    var toggle = Visibility{};
+    try t.expect(toggle.update(frame, &hold_press));
+    try t.expect(toggle.update(frame, &hold_release));
+    try t.expect(!toggle.update(frame, &tap_press));
+}
+
+test "an unknown source keeps judging the press duration" {
+    const t = std.testing;
+    var labels = try cache.LabelCache.init(t.allocator, 2, 3);
+    defer labels.deinit();
+    const frame = Frame{ .labels = &labels, .stale = false };
+    const press = [_]Signal{.{ .kind = .overlay_toggle, .pressed = true, .source = .unknown }};
+    const release = [_]Signal{.{ .kind = .overlay_toggle, .pressed = false, .source = .unknown }};
+    var visibility = Visibility{ .mode = .tap_hold };
+    // A short press latches, a long one is momentary.
+    try t.expect(visibility.updateAt(frame, &press, 100));
+    try t.expect(visibility.updateAt(frame, &release, 100 + Visibility.hold_ms - 1));
+    try t.expect(visibility.updateAt(frame, &press, 1000));
+    try t.expect(!visibility.updateAt(frame, &release, 1100));
+    try t.expect(visibility.updateAt(frame, &press, 2000));
+    try t.expect(!visibility.updateAt(frame, &release, 2000 + Visibility.hold_ms));
 }
 
 test "verified visibility preserves releases and clears holds on stale or mismatched identity" {
@@ -305,11 +598,13 @@ test "hello and the first state promote the verified presentation atomically" {
 test "keyboard signals convert to overlay signals" {
     var buffer: [max_signals]Signal = undefined;
     const converted = fromKeyboard(&buffer, &.{
-        .{ .kind = .overlay_toggle, .pressed = true },
+        .{ .kind = .overlay_toggle, .pressed = true, .source = .hold },
+        .{ .kind = .overlay_toggle, .pressed = false, .source = .tap },
         .{ .kind = .shutdown, .pressed = false },
     });
     try std.testing.expectEqualSlices(Signal, &.{
-        .{ .kind = .overlay_toggle, .pressed = true },
-        .{ .kind = .shutdown, .pressed = false },
+        .{ .kind = .overlay_toggle, .pressed = true, .source = .hold },
+        .{ .kind = .overlay_toggle, .pressed = false, .source = .tap },
+        .{ .kind = .shutdown, .pressed = false, .source = .unknown },
     }, converted);
 }

@@ -7,7 +7,6 @@ const workers = @import("owned_worker.zig");
 const Model = @import("model.zig").Model;
 pub const Ticket = workers.Ticket;
 pub const Artifact = jobs.firmware.Manifest;
-pub const Runner = jobs.runner_artifact.Manifest;
 pub const Plan = struct { version: u16 = 1, config: Config };
 pub const Config = struct { board_id: [8]u8, build_board: []const u8, request: jobs.managed_build.Request };
 
@@ -18,6 +17,17 @@ pub const Request = struct {
     environment: std.process.Environ.Map,
     captured: [32]u8,
     generation: u64,
+    /// The compiler's output, set by `prepare` once the build process ended,
+    /// whether or not it produced firmware. Read it after the worker joined.
+    output: Output = .{},
+
+    /// The last `output_capacity` bytes of each stream, in the request's arena.
+    pub const Output = struct {
+        stderr: []const u8 = "",
+        stdout: []const u8 = "",
+        ran: bool = false,
+    };
+    pub const output_capacity = 64 * 1024;
 
     pub fn capture(
         model: *const Model,
@@ -150,9 +160,16 @@ pub const Request = struct {
         return request;
     }
 
-    pub fn prepare(self: *const Request, gpa: std.mem.Allocator, io: std.Io) !Prepared {
+    pub fn prepare(self: *Request, gpa: std.mem.Allocator, io: std.Io) !Prepared {
         const export_start = std.Io.Clock.awake.now(io);
         const request = try self.verifiedRequest(gpa, io, .create_export);
+        // A snapshot exported earlier is reused as is. Mark it used, so cache
+        // retention keeps it while this build reads it. Zig 0.17 cannot set a
+        // directory's times on Windows (it panics); there the accepted export
+        // and the newest ones are kept regardless.
+        if (@import("builtin").os.tag != .windows) {
+            std.Io.Dir.cwd().setTimestampsNow(io, self.file.path, .{}) catch {};
+        }
         std.log.info("build phase export_ms={d}", .{
             export_start.durationTo(std.Io.Clock.awake.now(io)).toMilliseconds(),
         });
@@ -165,6 +182,12 @@ pub const Request = struct {
         std.log.info("build phase child_wait_ms={d}", .{
             wait_start.durationTo(std.Io.Clock.awake.now(io)).toMilliseconds(),
         });
+        const a = self.arena.allocator();
+        self.output = .{
+            .stderr = try a.dupe(u8, tail(result.process.stderr, output_capacity)),
+            .stdout = try a.dupe(u8, tail(result.process.stdout, output_capacity)),
+            .ran = true,
+        };
         const output_path = std.fs.path.dirname(std.fs.path.dirname(job.command.uf2_path).?).?;
         var output = try std.Io.Dir.cwd().openDir(io, output_path, .{});
         defer output.close(io);
@@ -178,59 +201,32 @@ pub const Request = struct {
             defer file.close(io);
             try file.writeStreamingAll(io, log[1]);
         }
-        if (request.native_only) {
-            var runner = try job.finishNativeRunner(result, job.captured.inputs);
-            defer runner.deinit();
-            var runner_cache = try output.createDirPathOpen(io, "runners", .{});
-            defer runner_cache.close(io);
-            var frozen = try jobs.runner_artifact.freeze(gpa, io, runner_cache, runner, job.captured.inputs);
-            errdefer frozen.deinit();
-            return .{
-                .ticket = .{ .generation = self.generation, .snapshot = self.captured },
-                .manifest = null,
-                .runner = frozen,
-                .receipt = job.captured.receipt,
-                .expected_export_tree = request.expected_export_tree,
-            };
-        }
         var candidate = try job.finish(result, job.captured.inputs);
         errdefer candidate.deinit();
-        var runner = try job.finishRunner(job.captured.inputs);
-        defer runner.deinit();
         try jobs.sidecar.saveLock(gpa, io, output, candidate.inputs.lock, .create);
         try jobs.sidecar.saveReceipt(gpa, io, output, job.captured.receipt, .create);
-        var runner_cache = try output.createDirPathOpen(io, "runners", .{});
-        defer runner_cache.close(io);
-        var frozen_runner = try jobs.runner_artifact.freeze(
-            gpa,
-            io,
-            runner_cache,
-            runner,
-            job.captured.inputs,
-        );
-        errdefer frozen_runner.deinit();
-        try jobs.sidecar.saveRunner(gpa, io, output, frozen_runner, .create);
         try jobs.sidecar.saveManifest(gpa, io, output, candidate, .create);
         return .{
             .ticket = .{ .generation = self.generation, .snapshot = self.captured },
             .manifest = candidate,
-            .runner = frozen_runner,
             .receipt = job.captured.receipt,
             .expected_export_tree = request.expected_export_tree,
         };
     }
 };
 
+fn tail(bytes: []const u8, limit: usize) []const u8 {
+    return bytes[bytes.len - @min(bytes.len, limit) ..];
+}
+
 pub const Prepared = struct {
     ticket: Ticket,
     manifest: ?jobs.firmware.Manifest,
-    runner: ?Runner = null,
     receipt: jobs.build_context.Receipt,
     expected_export_tree: jobs.firmware.Digest = std.mem.zeroes(jobs.firmware.Digest),
 
     pub fn deinit(self: *Prepared) void {
         if (self.manifest) |*manifest| manifest.deinit();
-        if (self.runner) |*runner| runner.deinit();
         self.* = undefined;
     }
 
@@ -247,21 +243,17 @@ pub const Prepared = struct {
         if (!std.meta.eql(self.ticket, current) or
             !std.mem.eql(u8, &current.snapshot, &(try model.id()))) return error.StaleBuild;
         const manifest = self.manifest orelse return error.BuildAlreadyCompleted;
-        const runner = self.runner orelse return error.RunnerBuildNotCompleted;
         self.manifest = null;
-        self.runner = null;
-        return .{ .firmware = manifest, .runner = runner, .expected_export_tree = self.expected_export_tree };
+        return .{ .firmware = manifest, .expected_export_tree = self.expected_export_tree };
     }
 };
 
 pub const Bundle = struct {
     firmware: Artifact,
-    runner: Runner,
     expected_export_tree: jobs.firmware.Digest = std.mem.zeroes(jobs.firmware.Digest),
 
     pub fn deinit(self: *Bundle) void {
         self.firmware.deinit();
-        self.runner.deinit();
         self.* = undefined;
     }
 };

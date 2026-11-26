@@ -16,7 +16,7 @@ pub const Frame = struct {
     modifiers: layout.Modifiers = .{},
     pressed: []const bool,
     practicing: bool = false,
-    assistance: desktop.practice_controller.Assistance = .guided,
+    guidance: desktop.practice_controller.GuidanceMode = .guided,
     live: bool = false,
     active_layers: ?u16 = null,
     targets: ?[]const bool = null,
@@ -45,10 +45,10 @@ pub fn draw(model: *const desktop.model.Model, frame: Frame, light: bool) !void 
     if (bounds.w == 0 or bounds.h == 0) return;
     const neutral = try arena.alloc(bool, frame.labels.key_count);
     @memset(neutral, false);
-    // Practice without guided assistance shows neither presses nor targets.
-    const guided = frame.practicing and frame.assistance == .guided;
+    // Practice in Free mode shows neither presses nor targets.
+    const guided = frame.practicing and frame.guidance == .guided;
     const keys = try desktop.physical_view.plan(output, frame.geometry, frame.labels, frame.layer, frame.modifiers, bounds, .{
-        .pressed = if (frame.practicing and frame.assistance != .guided) neutral else frame.pressed,
+        .pressed = if (frame.practicing and frame.guidance == .free) neutral else frame.pressed,
         .active_layers = frame.active_layers,
         .targets = if (guided) frame.targets else null,
         .holds = if (guided) frame.holds else null,

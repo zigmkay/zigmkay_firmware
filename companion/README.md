@@ -48,21 +48,34 @@ keyboard icon in the tray.
   is not found, the editor asks you to enter it by hand. Auto-build compiles
   while you edit and never starts a transfer. The installed application carries
   its own Zig compiler, firmware sources and flash tools, so it builds offline.
+  The first build compiles the build tools once, about a minute on a recent
+  Mac; the editor starts it in the background shortly after launch and shows
+  it as **Preparing build caches**. A Build or Flash click in that time is
+  queued and runs when it ends. Later builds take seconds, and the caches stay
+  bounded ([details](docs/development.md#compiler-cache-warm-up-and-cleanup)).
+  The buttons show where the work stands: the next step glows, a working step
+  shimmers, and **Details** below the toolbar holds this session's build and
+  flash timeline and the compiler output of the last build.
 - **Live overlay.** A transparent, click-through overlay of your keyboard that
   follows the running layout's active layer, modifiers and pressed keys over a
   verified connection. Bind a key's tap or hold to **Show / hide companion**
-  (reserved signal `255`): a quick tap toggles the overlay, a longer press shows
-  it while held. Losing the connection hides it; editor changes stay a draft
-  until built and flashed.
+  (reserved signal `255`) or use `KC_COMPANION`: each tap toggles the overlay
+  and it stays that way, while a hold shows it only for as long as the key is
+  held. One tap/hold key can do both. Keyboards flashed before the signal
+  carried its source fall back to timing: a press shorter than 250 ms toggles,
+  a longer one shows the overlay while held. Losing the connection hides it;
+  editor changes stay a draft until built and flashed.
 - **Tray.** Close the editor and the application stays resident. The tray menu
   shows the device status and opens the editor, shows or hides the companion,
   binds the saved editor project to the live companion, zooms the editor and
   quits Zigmkay.
-- **Typing tutor.** Choose **Open tutor** in the editor. Before a test the tutor
-  shows your layout and highlights each key you press, so you can check a
-  freshly flashed layout key by key. Then run an English test of 1, 3, 5 or 10
-  sentences or one of three short Zig lessons, with words per minute and
-  accuracy. The tutor saves nothing between sessions; see the
+- **Typing tutor & Test keys.** Choose **Open tutor** in the editor for an
+  adaptive 6-stage typing tutor (real English words from the most word-forming
+  letters on, all letters with focus-key unlocks, opposite-hand Shift,
+  punctuation/numbers, layers & 2-key combos, and free text / Zig code) that
+  flows from lesson to lesson and forgives typos, with local per-profile
+  progress, or switch to **Test keys**
+  to verify switches, layers, holds, and combos unscored; see the
   [typing practice guide](docs/typing-practice.md).
 
 <table>
@@ -75,7 +88,7 @@ keyboard icon in the tray.
     <td align="center"><sub>Combos on the PCB schematic</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="../assets/screenshots/tutor.png" alt="Typing tutor during an English test at 47 WPM with the next key highlighted on the keyboard"></td>
+    <td width="50%"><img src="../assets/screenshots/tutor.png" alt="Adaptive typing tutor with key-confidence strip, 3-line text stage, and Tap/Hold split keyboard guidance"></td>
     <td width="50%"><img src="../assets/screenshots/companion-overlay.png" alt="Live companion overlay on the base layer of a Leonardo Keycaprio: home-row modifiers, layer holds on the thumbs and a verified running profile"></td>
   </tr>
   <tr>
@@ -178,3 +191,10 @@ Software Foundation, either version 2 of the License, or (at your option) any
 later version (`GPL-2.0-or-later`). See [LICENSE](LICENSE) for the version 2
 text. The firmware it compiles is licensed under the same terms. Imported
 dependencies keep their own license notices; see [NOTICE](NOTICE).
+
+The Tutor's word list, [src/desktop/tutor_words_en.txt](src/desktop/tutor_words_en.txt),
+is licensed CC BY-SA 4.0, which is compatible with GPL version 3 only. The
+application, which embeds the list, is therefore distributed under GPL version 3
+or (at your option) any later version (`GPL-3.0-or-later`); see
+[licenses/GPL-3.0.txt](licenses/GPL-3.0.txt). The sources keep their
+`GPL-2.0-or-later` grant, and the firmware does not contain the list.

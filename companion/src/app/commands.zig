@@ -19,6 +19,7 @@ const onboarding_flow = @import("onboarding_flow.zig");
 const screens = @import("screens.zig");
 const keyboard_onboarding = @import("onboarding-ui");
 const workers = @import("workers.zig");
+const build_status = @import("build_status.zig");
 
 const Command = @FieldType(editor.Result, "layout");
 
@@ -31,8 +32,8 @@ pub fn apply(app: *App, result: editor.Result, board: *const boards.OwnedBoard, 
         .effect => |effect| switch (effect) {
             .save, .save_close => |captured| try save(app, captured, effect == .save_close),
             .open => |target| open(app, target),
-            .build => |captured| try build(app, captured),
-            .flash => |captured| try Flash.request(app, captured, board, can_build),
+            .build => |captured| if (try build_status.queue(app, .build)) .proceed else try build(app, captured),
+            .flash => |captured| if (try build_status.queue(app, .flash)) .proceed else try Flash.request(app, captured, board, can_build),
             else => .proceed,
         },
     };
@@ -95,6 +96,13 @@ fn save(app: *App, captured: desktop.editor_dispatch.Request, close: bool) !App.
 fn open(app: *App, target: desktop.editor_dispatch.Open) App.Flow {
     switch (target) {
         .practice => {
+            // "Try it out" always opens Test layout first so the user can verify
+            // switches, layers, holds, and free-type before starting a Tutor round.
+            const now_us: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
+            app.tutor.controller.pause(now_us);
+            app.tutor.controller.config.mode = .test_keys;
+            app.tutor.view.sheet = .none;
+            app.tutor.view.settings_open = false;
             app.practicing = true;
             app.view.diagnostic = @splat(0);
         },
@@ -238,9 +246,7 @@ fn build(app: *App, captured: desktop.editor_dispatch.Request) !App.Flow {
     if (refuseWhileBusy(app)) return .next_frame;
     captured.validate(&app.model) catch |err| return reported(app, err);
     const plan = app.build.plan orelse return reported(app, error.MissingApplicationBundle);
-    const next_job = try std.math.add(u64, app.job_generation, 1);
-    app.jobs.build = workers.startBuild(app, plan.config, next_job) catch |err| return reported(app, err);
-    app.job_generation = next_job;
+    workers.beginBuild(app, plan.config, .click) catch |err| return reported(app, err);
     app.build.scheduler.manual(try app.model.id());
     app.view.diagnostic = @splat(0);
     return .proceed;

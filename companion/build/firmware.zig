@@ -6,7 +6,6 @@ const Deps = @import("Deps.zig");
 const Steps = @import("Steps.zig");
 const tests = @import("tests.zig");
 const fw_build = @import("../src/firmware/build.zig");
-const runner_build = @import("../src/runner/build.zig");
 
 /// Every firmware-area test root; `tests-reached` checks it against the wiring.
 pub const test_roots = [_][]const u8{ "tests/project_processor_contract.zig", "tools/usb_candidate.zig" };
@@ -32,9 +31,7 @@ pub fn add(s: *tests.Suite, mb: anytype, fixtures: tests.Fixtures) void {
     const cfg = s.cfg;
     const steps = s.steps;
     const h = s.mods.host.?;
-    if (cfg.project_export != null and cfg.project_board != null) {
-        steps.build_project.dependOn(&b.addInstallArtifact(runner_build.projectRunner(b, cfg.project_export.?, h.zigmkay, h.keycodes, h.layout, h.runner_protocol), .{}).step);
-    } else Steps.unavailable(b, steps.build_project, "build-project requires -Dproject-export=<absolute export> and -Dproject-board=<selector>");
+    if (cfg.project_export == null or cfg.project_board == null) Steps.unavailable(b, steps.build_project, "build-project requires -Dproject-export=<absolute export> and -Dproject-board=<selector>");
 
     const target = mb.ports.rp2xxx.boards.raspberrypi.pico.*;
     const sources = h.sources;

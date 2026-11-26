@@ -11,6 +11,10 @@ pub const Model = struct {
     undo_stack: std.ArrayList(p.snapshot.Loaded) = .empty,
     redo_stack: std.ArrayList(p.snapshot.Loaded) = .empty,
     saved_id: [32]u8,
+    /// The project digest of `current`. Every replacement of `current` goes
+    /// through `init`, `commit`, `undo` or `redo`, which keep it in step, so
+    /// `id` and `dirty` stay cheap enough to ask every frame.
+    current_id: [32]u8,
     layer: usize = 0,
     selected: []bool,
     primary: usize = 0,
@@ -33,13 +37,15 @@ pub const Model = struct {
         @memset(selected, false);
         var loaded = try p.snapshot.clone(gpa, initial);
         errdefer loaded.deinit();
+        const initial_id = try p.snapshot.projectDigest(gpa, loaded.snapshot, owned_board);
         var self = Model{
             .gpa = gpa,
             .board_arena = arena,
             .board = owned_board,
             .selected = selected,
             .current = loaded,
-            .saved_id = try p.snapshot.projectDigest(gpa, loaded.snapshot, owned_board),
+            .saved_id = initial_id,
+            .current_id = initial_id,
         };
         self.selected[self.primary] = true;
         return self;
@@ -59,13 +65,18 @@ pub const Model = struct {
         stack.clearRetainingCapacity();
     }
 
+    /// The cached project digest of the current snapshot. The error union is
+    /// kept for callers written against the former per-call digest.
     pub fn id(self: *const Model) ![32]u8 {
-        return p.snapshot.projectDigest(self.gpa, self.current.snapshot, self.board);
+        return self.current_id;
     }
 
     pub fn dirty(self: *const Model) bool {
-        const actual = self.id() catch return true;
-        return !std.mem.eql(u8, &actual, &self.saved_id);
+        return !std.mem.eql(u8, &self.current_id, &self.saved_id);
+    }
+
+    fn digest(self: *const Model, loaded: p.snapshot.Loaded) ![32]u8 {
+        return p.snapshot.projectDigest(self.gpa, loaded.snapshot, self.board);
     }
 
     pub fn document(self: *const Model) p.Document {
@@ -89,9 +100,8 @@ pub const Model = struct {
         // executable binding resolution separately from snapshot integrity.
         var next = try p.snapshot.clone(self.gpa, snapshot);
         errdefer next.deinit();
-        const old_id = try self.id();
-        const new_id = try p.snapshot.projectDigest(self.gpa, next.snapshot, self.board);
-        if (std.mem.eql(u8, &old_id, &new_id)) {
+        const new_id = try self.digest(next);
+        if (std.mem.eql(u8, &self.current_id, &new_id)) {
             next.deinit();
             return;
         }
@@ -101,21 +111,26 @@ pub const Model = struct {
             removed.deinit();
         }
         self.current = next;
+        self.current_id = new_id;
         self.clear(&self.redo_stack);
         self.layer = @min(self.layer, self.document().layers.len - 1);
     }
 
     pub fn undo(self: *Model) !void {
         if (self.undo_stack.items.len == 0) return;
+        const previous_id = try self.digest(self.undo_stack.getLast());
         try self.redo_stack.append(self.gpa, self.current);
         self.current = self.undo_stack.pop().?;
+        self.current_id = previous_id;
         self.layer = @min(self.layer, self.document().layers.len - 1);
     }
 
     pub fn redo(self: *Model) !void {
         if (self.redo_stack.items.len == 0) return;
+        const next_id = try self.digest(self.redo_stack.getLast());
         try self.undo_stack.append(self.gpa, self.current);
         self.current = self.redo_stack.pop().?;
+        self.current_id = next_id;
         self.layer = @min(self.layer, self.document().layers.len - 1);
     }
 
@@ -485,5 +500,61 @@ test "unknown historical callbacks remain editable and saved byte-exact but cann
     try model.open(t.io, tmp.dir);
     try t.expectEqualStrings(bytes, try p.snapshot.find(model.current.snapshot, 0, "rollercole.zig"));
     try t.expectEqualStrings("rollercole_v1", model.document().callbacks[0].binding);
+    try t.expect(!model.dirty());
+}
+
+test "the cached snapshot id follows every edit, undo, redo and open" {
+    const t = std.testing;
+    var initial = try p.profiles.create(t.allocator, .eurkey);
+    defer initial.deinit();
+    var model = try Model.init(t.allocator, p.profiles.board, initial.snapshot);
+    defer model.deinit();
+    const fresh = struct {
+        fn digest(m: *const Model) ![32]u8 {
+            return p.snapshot.projectDigest(t.allocator, m.current.snapshot, m.board);
+        }
+    }.digest;
+    const original = try model.id();
+    try t.expectEqual(try fresh(&model), original);
+    try t.expect(!model.dirty());
+
+    model.select(3, false);
+    try model.apply(null);
+    const edited = try model.id();
+    try t.expect(!std.mem.eql(u8, &original, &edited));
+    try t.expectEqual(try fresh(&model), edited);
+    try t.expect(model.dirty());
+
+    // A commit that changes nothing keeps history and the id.
+    try model.apply(null);
+    try t.expectEqual(edited, try model.id());
+    try t.expectEqual(@as(usize, 1), model.undo_stack.items.len);
+
+    try model.renameLayout("Renamed");
+    const renamed = try model.id();
+    try t.expectEqual(try fresh(&model), renamed);
+
+    try model.undo();
+    try t.expectEqual(edited, try model.id());
+    try model.undo();
+    try t.expectEqual(original, try model.id());
+    try t.expect(!model.dirty());
+    try model.undo();
+    try t.expectEqual(original, try model.id());
+    try model.redo();
+    try t.expectEqual(edited, try model.id());
+    try model.redo();
+    try t.expectEqual(renamed, try model.id());
+    try t.expectEqual(try fresh(&model), renamed);
+
+    var temporary = t.tmpDir(.{});
+    defer temporary.cleanup();
+    try model.save(t.io, temporary.dir);
+    try t.expect(!model.dirty());
+    try model.undo();
+    try t.expect(model.dirty());
+    try model.open(t.io, temporary.dir);
+    try t.expectEqual(renamed, try model.id());
+    try t.expectEqual(try fresh(&model), renamed);
     try t.expect(!model.dirty());
 }

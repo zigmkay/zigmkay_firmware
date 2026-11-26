@@ -1064,7 +1064,6 @@ test "build worker owns verified exports and accepts only the current editor pre
     var bundle_result = try candidate.takeBundle(&model, .{ .generation = 42, .snapshot = captured });
     defer bundle_result.deinit();
     const manifest = bundle_result.firmware;
-    try bundle_result.runner.verifyFile(t.allocator, t.io, manifest.inputs);
     try t.expectEqual(captured, manifest.inputs.project_digest);
     try t.expectEqual(.bundled, manifest.audit_mode);
     try t.expectEqual(model.document().profile_id, manifest.inputs.profile_id);

@@ -268,7 +268,7 @@ pub fn main(init: std.process.Init) !void {
     }
     const resources = try std.fs.path.join(a, &.{ args[4], layout });
     var assembly: Assembler = .{ .a = a, .io = init.io, .output = resources, .packages = args[3], .seen = .init(a), .legal_seen = .init(a), .prune = true };
-    for ([_][]const u8{ "LICENSE", "NOTICE" }) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, name }), try std.fs.path.join(a, &.{ "licenses/application", name }));
+    for ([_][]const u8{ "LICENSE", "NOTICE", "licenses/GPL-3.0.txt", "licenses/SCOWL-Copyright.txt" }) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, name }), try std.fs.path.join(a, &.{ "licenses/application", std.fs.path.basename(name) }));
     for (pins.license_hashes) |hash| try assembly.legalPackage(hash);
     try assembly.copy(compiler, "toolchain/zig" ++ if (@import("builtin").os.tag == .windows) ".exe" else "");
     try assembly.copyTree(try std.fs.path.join(a, &.{ distribution, "lib" }), "toolchain/lib", .{ .keep = keepToolchain });
@@ -286,7 +286,7 @@ pub fn main(init: std.process.Init) !void {
     try assembly.closure(pins.firmware_source);
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "build/build.zig.zon" }), .data = pins.manifest });
     assembly.hash.update(pins.manifest);
-    const manifest: jobs.application_bundle.Manifest = .{ .version = 2, .backend = if (builtin.os.tag == .windows) .windows_bootsel else .picotool, .id = assembly.hash.finalResult(), .firmware_revision = pins.firmware_revision, .wrapper_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[6], a, .limited(128 * 1024 * 1024))), .picotool_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[7], a, .limited(128 * 1024 * 1024))) };
+    const manifest: jobs.application_bundle.Manifest = .{ .version = 2, .backend = if (builtin.os.tag == .windows) .windows_bootsel else .picotool, .id = assembly.hash.finalResult(), .firmware_revision = pins.firmware_revision, .wrapper_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[6], a, .limited(128 * 1024 * 1024))), .picotool_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[7], a, .limited(128 * 1024 * 1024))), .compiler_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, compiler, a, .limited(512 * 1024 * 1024))) };
     var text: std.Io.Writer.Allocating = .init(a);
     try std.zon.stringify.serialize(manifest, .{}, &text.writer);
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "application.zon" }), .data = text.written() });

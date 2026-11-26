@@ -142,7 +142,8 @@ for the same firmware, written in Zig and living in [`companion/`](companion/).
   Zig toolchain and firmware sources.
 - **Live companion overlay.** A transparent, click-through overlay that follows
   the active layer, modifiers and pressed keys of a connected keyboard. Bind a
-  key to **Show / hide companion** to bring it up.
+  key to **Show / hide companion** to bring it up: a tap toggles it, a hold
+  shows it while held.
 - **Typing tutor.** Check a freshly flashed layout key by key, then run short
   English tests or Zig lessons with words per minute and accuracy.
 
@@ -156,7 +157,7 @@ for the same firmware, written in Zig and living in [`companion/`](companion/).
     <td align="center"><sub>Combos on the PCB schematic</sub></td>
   </tr>
   <tr>
-    <td width="50%"><img src="assets/screenshots/tutor.png" alt="Typing tutor during an English test at 47 WPM with the next key highlighted on the keyboard"></td>
+    <td width="50%"><img src="assets/screenshots/tutor.png" alt="Adaptive typing tutor with key-confidence strip, 3-line text stage, and Tap/Hold split keyboard guidance"></td>
     <td width="50%">
       <img src="assets/screenshots/companion-overlay.png" alt="Live companion overlay on the base layer of a Leonardo Keycaprio: home-row modifiers, layer holds on the thumbs and a verified running profile">
     </td>
@@ -264,4 +265,7 @@ inclusion. See [AI_USAGE.md](AI_USAGE.md).
 ZigMkay is free software, licensed under the GNU General Public License,
 version 2 or (at your option) any later version (`GPL-2.0-or-later`). See
 [LICENSE](LICENSE) for the version 2 text. Imported companion dependencies keep
-their own notices; see [companion/NOTICE](companion/NOTICE).
+their own notices; see [companion/NOTICE](companion/NOTICE). The companion
+application embeds a CC BY-SA 4.0 word list for the Tutor and is therefore
+distributed under GPL version 3 or later; see
+[companion/README.md](companion/README.md#license).

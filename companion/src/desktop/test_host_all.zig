@@ -1,8 +1,6 @@
 test {
-    _ = @import("text.zig");
     _ = @import("startup_project.zig");
     _ = @import("host_input.zig");
-    _ = @import("draft_input.zig");
     _ = @import("action_form.zig");
     _ = @import("profile_projects.zig");
     _ = @import("model.zig");

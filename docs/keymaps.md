@@ -102,7 +102,7 @@ custom id). Knob *n* uses slot 2*n* for clockwise and
 | Key | Effect |
 | --- | --- |
 | `core.KC_BOOT` | Reboots into the RP2040 USB bootloader for flashing |
-| `core.KC_COMPANION` | Toggles the companion overlay on the host |
+| `core.KC_COMPANION` | Toggles the companion overlay on the host with every tap |
 | `core.KC_SHUTDOWN_COMPANION` | Asks the companion application to quit |
 | `core.KC_PRINT_STATS` | Types processing statistics |
 

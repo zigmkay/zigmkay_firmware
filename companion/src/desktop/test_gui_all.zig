@@ -3,4 +3,8 @@ test {
     _ = @import("components/key.zig");
     _ = @import("onboarding_ui.zig");
     _ = @import("keyboard_ui.zig");
+    _ = @import("practice_keyboard_ui.zig");
+    _ = @import("practice_sheets_ui.zig");
+    _ = @import("practice_key_change_ui.zig");
+    _ = @import("practice_tap_hold_ui.zig");
 }

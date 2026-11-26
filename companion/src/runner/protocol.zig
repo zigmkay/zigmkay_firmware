@@ -35,7 +35,10 @@ pub fn parse(gpa: std.mem.Allocator, bytes: []const u8) !Input {
 /// session, so it derives the same signals from processor events and output
 /// commands. Keep both in step when the firmware rules change.
 pub const SignalKind = enum(u8) { log_toggle = 1, overlay_toggle = 2, shutdown = 3 };
-pub const Signal = struct { kind: SignalKind, pressed: bool };
+/// The action of its key a signal came from, as firmware reports it: hosts
+/// toggle on a tap and follow a hold.
+pub const SignalSource = enum(u8) { unknown = 0, tap = 1, hold = 2 };
+pub const Signal = struct { kind: SignalKind, pressed: bool, source: SignalSource = .unknown };
 
 fn customSignal(id: ?u8) ?SignalKind {
     return switch (id orelse return null) {
@@ -48,18 +51,18 @@ fn customSignal(id: ?u8) ?SignalKind {
 
 /// Reserved custom ids (0xFD..0xFF) on taps and holds, seen by `on_event`.
 pub fn eventSignal(event: core.ProcessorEvent) ?Signal {
-    const kind, const pressed = switch (event) {
-        .OnTapEnterAfter => |value| .{ customSignal(value.tap.custom), true },
-        .OnTapExitBefore => |value| .{ customSignal(value.tap.custom), false },
-        .OnHoldEnterAfter => |value| .{ customSignal(value.hold.custom), true },
-        .OnHoldExitBefore => |value| .{ customSignal(value.hold.custom), false },
+    const kind, const pressed, const source: SignalSource = switch (event) {
+        .OnTapEnterAfter => |value| .{ customSignal(value.tap.custom), true, .tap },
+        .OnTapExitBefore => |value| .{ customSignal(value.tap.custom), false, .tap },
+        .OnHoldEnterAfter => |value| .{ customSignal(value.hold.custom), true, .hold },
+        .OnHoldExitBefore => |value| .{ customSignal(value.hold.custom), false, .hold },
         else => return null,
     };
-    return .{ .kind = kind orelse return null, .pressed = pressed };
+    return .{ .kind = kind orelse return null, .pressed = pressed, .source = source };
 }
 
 /// KC_COMPANION (0xFE) and KC_SHUTDOWN_COMPANION (0xFF) keycodes, which
-/// firmware sends as ordinary key presses.
+/// firmware sends as ordinary key presses. Only tap actions carry keycodes.
 pub fn commandSignal(command: core.OutputCommand) ?Signal {
     const keycode, const pressed = switch (command) {
         .KeyCodePress => |value| .{ value, true },
@@ -71,5 +74,5 @@ pub fn commandSignal(command: core.OutputCommand) ?Signal {
         core.special_keycode_SHUTDOWN_COMPANION => .shutdown,
         else => return null,
     };
-    return .{ .kind = kind, .pressed = pressed };
+    return .{ .kind = kind, .pressed = pressed, .source = .tap };
 }

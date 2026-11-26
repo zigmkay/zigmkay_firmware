@@ -101,8 +101,6 @@ fn fakeBuild(init: std.process.Init, args: []const [:0]const u8, mode: []const u
     var bytes = uf2Block();
     if (std.mem.eql(u8, mode, "invalid")) bytes[0] = 0;
     try dir.writeFile(init.io, .{ .sub_path = "project.uf2", .data = &bytes });
-    if (std.mem.eql(u8, mode, "missing-runner")) return;
-    try installRunner(init, install);
 }
 
 /// One valid, empty UF2 block for an RP2040 flash address.
@@ -119,20 +117,4 @@ fn uf2Block() [512]u8 {
         .{ 508, 0x0ab16f30 },
     }) |entry| std.mem.writeInt(u32, bytes[entry[0]..][0..4], entry[1], .little);
     return bytes;
-}
-
-/// Installs a copy of this executable as the build's native runner.
-fn installRunner(init: std.process.Init, install: []const u8) !void {
-    const a = init.arena.allocator();
-    const bin_path = try std.fs.path.join(a, &.{ install, "bin" });
-    var bin = try std.Io.Dir.cwd().createDirPathOpen(init.io, bin_path, .{});
-    defer bin.close(init.io);
-    const own_path = try std.process.executablePathAlloc(init.io, a);
-    const own_bytes = try std.Io.Dir.cwd().readFileAlloc(init.io, own_path, a, .limited(64 * 1024 * 1024));
-    const runner_name = "project-runner" ++ if (@import("builtin").os.tag == .windows) ".exe" else "";
-    var runner = try bin.createFileAtomic(init.io, runner_name, .{});
-    defer runner.deinit(init.io);
-    try runner.file.writeStreamingAll(init.io, own_bytes);
-    try runner.file.setPermissions(init.io, .executable_file);
-    try runner.link(init.io);
 }

@@ -121,6 +121,12 @@ test "owned board arena remains valid for allocations after handoff" {
 /// Versioned, domain-separated selector identity: eight base32 ASCII characters
 /// from 40 digest bits, conforming to schema-1 protocol ID syntax.
 /// This identity belongs to offline catalog projects and is not a device ID.
+/// The catalog entry of a board selector, for showing a keyboard that is not
+/// connected.
+pub fn findEntry(selector: []const u8) ?*const catalog.Entry {
+    return catalog.find(selector);
+}
+
 pub fn boardId(selector: []const u8) [8]u8 {
     var hash = std.crypto.hash.sha2.Sha256.init(.{});
     hash.update("zigmkay-catalog-schema1-board-v1\x00");

@@ -10,6 +10,9 @@ pub const Manifest = struct {
     firmware_revision: []const u8,
     wrapper_hash: firmware.Digest,
     picotool_hash: firmware.Digest,
+    /// SHA-256 of the bundled compiler executable. Bundles that agree on it
+    /// share one compiler cache; older bundles without it keep their own.
+    compiler_hash: ?firmware.Digest = null,
 
     pub fn validate(self: Manifest) !void {
         if ((self.version != 1 and self.version != 2) or
