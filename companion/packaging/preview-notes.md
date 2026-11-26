@@ -22,8 +22,10 @@ Windows. It copies the validated UF2 directly and then waits for a coherent
 firmware identity. Transfer completion alone does not establish success and
 cannot provide picotool's flash read-back. Disconnect additional BOOTSEL devices.
 
-The typing tutor keeps no practice history. It neither reads nor changes a
-`typing-practice` history directory left by an earlier preview.
+The typing tutor saves its progress locally, per person and layout, in the
+`tutor` folder of the application data directory; there is no account or cloud
+sync. It neither reads nor changes a `typing-practice` history directory left
+by an earlier preview.
 
 `SHA256SUMS`, `release-metadata.json` and per-download metadata record provenance
 and hashes. `corresponding-source.tar.gz` contains this application and selected
