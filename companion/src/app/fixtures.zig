@@ -950,7 +950,7 @@ fn fillStatusActivity(app: *App) void {
     log.count = 0;
     log.utc_offset_s = 0;
     const start: i64 = (19 * 3600 + 42 * 60 + 40) * 1000;
-    log.add(start, .info, "App started · Zigmkay 0.2.1 (a4e5f3e)", .{});
+    log.add(start, .info, "App started · Zigmkay 0.3.0 (a4e5f3e)", .{});
     log.add(start + 400, .info, "Cache cleanup: removed 1 old entry", .{});
     log.add(start + 3000, .warn, "Preparing build caches · keycaprio_qwerty_0_7 · 7 of 14 cores", .{});
     const scene = statusScene(app);

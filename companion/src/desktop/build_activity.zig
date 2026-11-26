@@ -264,11 +264,11 @@ test "the timeline keeps the newest entries with local clock times" {
     var log: Log = .{ .utc_offset_s = 3600 };
     // 18:42:40 UTC, 19:42:40 at UTC+1.
     const start: i64 = (18 * 3600 + 42 * 60 + 40) * 1000;
-    log.add(start, .info, "App started · Zigmkay {s}", .{"0.2.1"});
+    log.add(start, .info, "App started · Zigmkay {s}", .{"0.3.0"});
     try testing.expectEqual(@as(usize, 1), log.count);
     var time: [8]u8 = undefined;
     try testing.expectEqualStrings("19:42:40", log.clock(&time, log.at(0).at_ms));
-    try testing.expectEqualStrings("App started · Zigmkay 0.2.1", log.at(0).text());
+    try testing.expectEqualStrings("App started · Zigmkay 0.3.0", log.at(0).text());
     for (0..max_entries + 5) |index| log.add(start + @as(i64, @intCast(index)), .ok, "entry {d}", .{index});
     try testing.expectEqual(@as(usize, max_entries), log.count);
     try testing.expectEqualStrings("entry 5", log.at(0).text());
