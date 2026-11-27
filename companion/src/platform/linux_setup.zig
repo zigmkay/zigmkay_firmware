@@ -121,6 +121,82 @@ fn outcome(term: std.process.Child.Term) Grant.State {
     };
 }
 
+/// Whether a StatusNotifierWatcher (the tray host) owns its session bus name,
+/// asked once through busctl, else gdbus, on a worker thread. This works with
+/// any ztray, including builds whose tray backend is a stub.
+pub const TrayProbe = struct {
+    state: std.atomic.Value(State) = .init(.idle),
+    thread: ?std.Thread = null,
+
+    pub const State = enum(u8) { idle, running, present, absent, unknown };
+
+    pub fn start(self: *TrayProbe, io: std.Io) void {
+        if (self.state.load(.acquire) != .idle) return;
+        self.state.store(.running, .release);
+        self.thread = std.Thread.spawn(.{}, run, .{ self, io }) catch {
+            self.state.store(.unknown, .release);
+            return;
+        };
+    }
+
+    /// true or false once answered; null before or when neither tool answers.
+    pub fn result(self: *const TrayProbe) ?bool {
+        return switch (self.state.load(.acquire)) {
+            .present => true,
+            .absent => false,
+            else => null,
+        };
+    }
+
+    pub fn join(self: *TrayProbe) void {
+        if (self.thread) |thread| thread.join();
+        self.thread = null;
+    }
+
+    fn run(self: *TrayProbe, io: std.Io) void {
+        const answer = ask(io, &busctl_argv, parseBusctl) orelse ask(io, &gdbus_argv, parseGdbus);
+        self.state.store(if (answer) |present| (if (present) .present else .absent) else .unknown, .release);
+    }
+};
+
+const watcher = "org.kde.StatusNotifierWatcher";
+const busctl_argv = [_][]const u8{ "busctl", "--user", "call", "org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", "s", watcher };
+const gdbus_argv = [_][]const u8{ "gdbus", "call", "--session", "--dest", "org.freedesktop.DBus", "--object-path", "/org/freedesktop/DBus", "--method", "org.freedesktop.DBus.NameHasOwner", watcher };
+
+fn ask(io: std.Io, argv: []const []const u8, parse: *const fn ([]const u8) ?bool) ?bool {
+    var buffer: [4096]u8 = undefined;
+    var allocator: std.heap.FixedBufferAllocator = .init(&buffer);
+    const reply = std.process.run(allocator.allocator(), io, .{ .argv = argv, .stdout_limit = .limited(256), .stderr_limit = .limited(1024) }) catch return null;
+    if (!reply.term.success()) return null;
+    return parse(reply.stdout);
+}
+
+/// busctl prints "b true" or "b false".
+fn parseBusctl(output: []const u8) ?bool {
+    const text = std.mem.trim(u8, output, " \n");
+    if (std.mem.eql(u8, text, "b true")) return true;
+    if (std.mem.eql(u8, text, "b false")) return false;
+    return null;
+}
+
+/// gdbus prints "(true,)" or "(false,)".
+fn parseGdbus(output: []const u8) ?bool {
+    const text = std.mem.trim(u8, output, " \n");
+    if (std.mem.eql(u8, text, "(true,)")) return true;
+    if (std.mem.eql(u8, text, "(false,)")) return false;
+    return null;
+}
+
+test "tray host answers of busctl and gdbus" {
+    const t = std.testing;
+    try t.expectEqual(@as(?bool, true), parseBusctl("b true\n"));
+    try t.expectEqual(@as(?bool, false), parseBusctl("b false\n"));
+    try t.expectEqual(@as(?bool, null), parseBusctl("Failed to connect to bus\n"));
+    try t.expectEqual(@as(?bool, true), parseGdbus("(true,)\n"));
+    try t.expectEqual(@as(?bool, false), parseGdbus("(false,)\n"));
+    try t.expectEqual(@as(?bool, null), parseGdbus(""));
+}
+
 pub const Desktop = enum { gnome, other };
 
 /// Classifies `XDG_CURRENT_DESKTOP`, a colon-separated list such as

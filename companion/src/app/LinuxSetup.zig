@@ -21,10 +21,12 @@ grant: setup.Grant = .{},
 access_closed: bool = false,
 access_marker_checked: bool = false,
 tray_closed: bool = false,
+tray_probe: setup.TrayProbe = .{},
 tray_marker_checked: bool = false,
 
 pub fn deinit(self: *LinuxSetup) void {
     self.grant.join();
+    self.tray_probe.join();
 }
 
 /// Draws at most one sheet over the frame. Device access comes first: the
@@ -93,8 +95,14 @@ fn pending(self: *LinuxSetup, app: *App) ?setup_ui.Notice {
             if (!self.access_closed) return .device_access;
         }
     }
-    if (self.tray_closed or !app.tray.installed) return null;
-    if (tray_backend.hostAvailable() orelse return null) return null;
+    if (self.tray_closed) return null;
+    // A ztray with trayHostAvailable answers directly; older pins, whose
+    // release builds have no tray at all, are answered by the bus probe.
+    const host = tray_backend.hostAvailable() orelse probed: {
+        self.tray_probe.start(app.io);
+        break :probed self.tray_probe.result() orelse return null;
+    };
+    if (host) return null;
     if (!self.tray_marker_checked) {
         self.tray_marker_checked = true;
         if (self.markerExists(app, tray_hint_marker)) self.tray_closed = true;
