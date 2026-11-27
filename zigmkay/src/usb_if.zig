@@ -2,6 +2,7 @@ const std = @import("std");
 const microzig = @import("microzig");
 
 const rp2xxx = microzig.hal;
+const peripherals = microzig.chip.peripherals;
 const usb = microzig.core.usb;
 const USB_Device = rp2xxx.usb.Polled(.{});
 
@@ -240,7 +241,18 @@ pub fn init() void {
     usb_device = .init();
 }
 
+const BufferControlMmio = microzig.mmio.Mmio(@TypeOf(peripherals.USB_DPRAM.EP0_IN_BUFFER_CONTROL).underlying_type);
+const buffer_control: *volatile [32]BufferControlMmio = @ptrCast(&peripherals.USB_DPRAM.EP0_IN_BUFFER_CONTROL);
+
 pub fn poll() void {
+    // The HAL does not clear the non-control endpoint buffers on a bus reset. A reset
+    // of an already configured device (host reboot, port reset) would leave them armed
+    // and trip the HAL's AVAILABLE spin-wait and asserts, hanging the keyboard until
+    // it is replugged. Zeroing them restores the power-up state. EP0 is left alone.
+    if (peripherals.USB.INTS.read().BUS_RESET != 0) {
+        peripherals.USB.BUFF_STATUS.raw = 0xffff_fffc;
+        for (buffer_control[2..]) |*bc| bc.write_raw(0);
+    }
     usb_device.poll(&usb_controller);
 }
 
@@ -275,6 +287,16 @@ pub fn send_raw_report(report: *const RawHidReport) void {
 pub fn try_send_raw_report(report: *const RawHidReport) bool {
     const drivers = usb_controller.drivers() orelse return false;
     return drivers.rawhid.send_report(report);
+}
+
+/// Reads and discards host-to-device reports (e.g. keyboard LEDs) on the HID interfaces
+/// that have an OUT endpoint but no consumer. Reading re-arms the endpoint; otherwise it
+/// NAKs forever after the first report and the host hangs on suspend.
+pub fn drain_unused_out_reports() void {
+    const drivers = usb_controller.drivers() orelse return;
+    _ = drivers.keyboard.receive_report();
+    _ = drivers.consumer.receive_report();
+    _ = drivers.mouse.receive_report();
 }
 
 /// Returns a report the host sent to the RAWHID interface, if one arrived.
