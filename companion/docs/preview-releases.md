@@ -69,11 +69,13 @@ does not need a separate libfuse2 package. If the kernel cannot mount FUSE:
 
 Both forms use the same persistent user-data directories. Keep the extracted
 directory intact. Neither form installs system rules silently. When a keyboard is
-found but its hidraw node cannot be opened, the editor shows the narrowly scoped
-[udev rules](../packaging/linux/70-zigmkay.rules) and offers **Allow access**, which
-runs `pkexec tee /etc/udev/rules.d/70-zigmkay.rules` with exactly that text on
-stdin: polkit asks for the administrator password, the editor never sees it, and
-nothing keeps running as root. The rules let a local logged-in user access the
+found but its hidraw node cannot be opened, the editor prompts the user with
+**Allow access**, **Not now**, **Don't ask again**, and a **Learn more** link to
+[linux-permissions.md](linux-permissions.md). Clicking **Allow access** runs
+`pkexec tee /etc/udev/rules.d/70-zigmkay.rules` with the bundled
+[udev rules](../packaging/linux/70-zigmkay.rules) on stdin: polkit asks for the
+administrator password, the editor never sees it, and nothing keeps running as
+root. The rules let a local logged-in user access the
 companion HID interface (FAFA:00F0) and RP2040 ROM BOOTSEL USB interface
 (2E8A:0003). Without polkit, install them by hand:
 

@@ -8,6 +8,9 @@ const std = @import("std");
 
 pub const rule_path = "/etc/udev/rules.d/70-zigmkay.rules";
 
+/// Repository guide explaining why Linux needs a udev rule and how to install it manually.
+pub const learn_more_url: [:0]const u8 = "https://github.com/zigmkay/zigmkay_firmware/blob/main/companion/docs/linux-permissions.md";
+
 /// packaging/linux/70-zigmkay.rules, the same file the bundle ships, with
 /// LF line ends even when a Windows checkout converted it to CRLF.
 pub const udev_rule: []const u8 = lf: {
@@ -144,6 +147,8 @@ test "the effective rule grants only Zigmkay and RP2040 devices to the local ses
     }
     try t.expect(std.mem.startsWith(u8, manual_command, "echo 'SUBSYSTEM==\"hidraw\""));
     try t.expect(std.mem.endsWith(u8, manual_command, "' \\\n  | sudo tee /etc/udev/rules.d/70-zigmkay.rules"));
+    try t.expect(std.mem.startsWith(u8, learn_more_url, "https://"));
+    try t.expect(std.mem.endsWith(u8, learn_more_url, "companion/docs/linux-permissions.md"));
 }
 
 test "pkexec outcomes" {

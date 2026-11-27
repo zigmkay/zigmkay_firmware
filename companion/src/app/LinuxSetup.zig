@@ -2,6 +2,7 @@
 //! interactive Linux sessions show them; fixtures and other systems never do.
 const std = @import("std");
 const builtin = @import("builtin");
+const Backend = @import("dvui_backend");
 const setup = @import("linux-setup");
 const setup_ui = @import("linux-setup-ui");
 const tray_backend = @import("native-tray");
@@ -10,12 +11,15 @@ const cli = @import("cli.zig");
 
 const LinuxSetup = @This();
 
+/// Marks the keyboard access prompt as dismissed for good, in the configuration directory.
+const access_dismissed_marker = "linux-access-prompt-dismissed";
 /// Marks the tray hint as dismissed for good, in the configuration directory.
 const tray_hint_marker = "linux-tray-hint-dismissed";
 
 grant: setup.Grant = .{},
-/// The access sheet stays closed after "Not now" until this run ends.
+/// The access sheet stays closed after "Not now" until this run ends, or permanently after "Don't ask again".
 access_closed: bool = false,
+access_marker_checked: bool = false,
 tray_closed: bool = false,
 tray_marker_checked: bool = false,
 
@@ -38,13 +42,22 @@ pub fn draw(self: *LinuxSetup, app: *App) void {
     switch (action) {
         .none => {},
         .grant => self.grant.start(app.io),
+        .learn_more => if (app.frame_limit == null) {
+            _ = Backend.c.SDL_OpenURL(setup.learn_more_url.ptr);
+        },
         .close => switch (notice) {
             .device_access => self.access_closed = true,
             .tray_host => self.tray_closed = true,
         },
-        .dismiss_forever => {
-            self.tray_closed = true;
-            self.rememberTrayDismissal(app);
+        .dismiss_forever => switch (notice) {
+            .device_access => {
+                self.access_closed = true;
+                self.rememberDismissal(app, access_dismissed_marker);
+            },
+            .tray_host => {
+                self.tray_closed = true;
+                self.rememberDismissal(app, tray_hint_marker);
+            },
         },
     }
 }
@@ -70,12 +83,21 @@ fn drawScene(app: *App) void {
 }
 
 fn pending(self: *LinuxSetup, app: *App) ?setup_ui.Notice {
-    if (!self.access_closed and (self.grant.current() != .idle or permissionDenied(app))) return .device_access;
+    if (!self.access_closed) {
+        if (self.grant.current() != .idle) return .device_access;
+        if (permissionDenied(app)) {
+            if (!self.access_marker_checked) {
+                self.access_marker_checked = true;
+                if (self.markerExists(app, access_dismissed_marker)) self.access_closed = true;
+            }
+            if (!self.access_closed) return .device_access;
+        }
+    }
     if (self.tray_closed or !app.tray.installed) return null;
     if (tray_backend.hostAvailable() orelse return null) return null;
     if (!self.tray_marker_checked) {
         self.tray_marker_checked = true;
-        if (self.trayDismissed(app)) self.tray_closed = true;
+        if (self.markerExists(app, tray_hint_marker)) self.tray_closed = true;
     }
     return if (self.tray_closed) null else .tray_host;
 }
@@ -87,21 +109,21 @@ fn permissionDenied(app: *const App) bool {
         driver.transport_error.? == error.HidPermissionDenied;
 }
 
-fn markerPath(app: *const App, buffer: []u8) ?[]const u8 {
+fn markerPath(app: *const App, name: []const u8, buffer: []u8) ?[]const u8 {
     const owned = app.user_paths orelse return null;
-    return std.fmt.bufPrint(buffer, "{s}/{s}", .{ owned.paths.config, tray_hint_marker }) catch null;
+    return std.fmt.bufPrint(buffer, "{s}/{s}", .{ owned.paths.config, name }) catch null;
 }
 
-fn trayDismissed(_: *LinuxSetup, app: *const App) bool {
+fn markerExists(_: *LinuxSetup, app: *const App, name: []const u8) bool {
     var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = markerPath(app, &buffer) orelse return false;
+    const path = markerPath(app, name, &buffer) orelse return false;
     std.Io.Dir.accessAbsolute(app.io, path, .{}) catch return false;
     return true;
 }
 
-fn rememberTrayDismissal(_: *LinuxSetup, app: *App) void {
+fn rememberDismissal(_: *LinuxSetup, app: *App, name: []const u8) void {
     var buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = markerPath(app, &buffer) orelse return;
+    const path = markerPath(app, name, &buffer) orelse return;
     if (std.fs.path.dirname(path)) |directory| std.Io.Dir.cwd().createDirPath(app.io, directory) catch return;
     const file = std.Io.Dir.createFileAbsolute(app.io, path, .{}) catch return;
     file.close(app.io);
