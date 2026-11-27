@@ -1,6 +1,8 @@
 //! BOOTSEL policy with injected enumeration and I/O. No native calls in tests.
 const std = @import("std");
 
+/// Windows volume identity; `bootsel_linux.zig` defines its own. `transfer`
+/// accepts either through a `same` method.
 pub const Volume = struct {
     /// Fully qualified volume GUID root, including its trailing backslash.
     root: [64]u16,
@@ -16,6 +18,51 @@ pub const Volume = struct {
 pub fn isRp2040UsbIdentity(id: []const u16) bool {
     const prefix = std.unicode.utf8ToUtf16LeStringLiteral("USB\\VID_2E8A&PID_0003\\");
     return std.mem.startsWith(u16, id, prefix) and id.len > prefix.len and id[prefix.len] != 0;
+}
+
+/// Linux sysfs `idVendor`/`idProduct` file contents of the RP2040 ROM.
+pub fn isRp2040UsbIds(vendor: []const u8, product: []const u8) bool {
+    return std.mem.eql(u8, std.mem.trim(u8, vendor, " \n"), "2e8a") and
+        std.mem.eql(u8, std.mem.trim(u8, product, " \n"), "0003");
+}
+
+/// The mount point of block device `dev` ("major:minor") in /proc/self/mountinfo
+/// text, unescaped into `out`. Null if it is not mounted, mounted more than
+/// once, or the path does not fit.
+pub fn mountPoint(mountinfo: []const u8, dev: []const u8, out: []u8) ?[]const u8 {
+    var found: ?[]const u8 = null;
+    var lines = std.mem.tokenizeScalar(u8, mountinfo, '\n');
+    while (lines.next()) |line| {
+        // id parent major:minor root mount-point ...
+        var fields = std.mem.tokenizeScalar(u8, line, ' ');
+        _ = fields.next() orelse continue;
+        _ = fields.next() orelse continue;
+        const device = fields.next() orelse continue;
+        const root = fields.next() orelse continue;
+        const point = fields.next() orelse continue;
+        if (!std.mem.eql(u8, device, dev) or !std.mem.eql(u8, root, "/")) continue;
+        if (found != null) return null;
+        found = point;
+    }
+    return unescapeMount(found orelse return null, out);
+}
+
+/// Decodes the octal escapes (\040 and friends) of a mountinfo path.
+fn unescapeMount(escaped: []const u8, out: []u8) ?[]const u8 {
+    var i: usize = 0;
+    var n: usize = 0;
+    while (i < escaped.len) : (n += 1) {
+        if (n == out.len) return null;
+        if (escaped[i] == '\\' and i + 4 <= escaped.len) {
+            out[n] = std.fmt.parseInt(u8, escaped[i + 1 .. i + 4], 8) catch return null;
+            i += 4;
+        } else {
+            out[n] = escaped[i];
+            i += 1;
+        }
+    }
+    if (n == 0 or out[0] != '/') return null;
+    return out[0..n];
 }
 
 pub fn validateInfo(bytes: []const u8) !void {
@@ -40,7 +87,7 @@ pub fn unique(volumes: []const Volume) !?Volume {
 pub fn transfer(
     gpa: std.mem.Allocator,
     ops: anytype,
-    captured: Volume,
+    captured: anytype,
     bytes: []const u8,
     expected: [32]u8,
 ) !void {
@@ -152,4 +199,27 @@ test "injected transfer validates bytes and identity before opening; no retries"
         try t.expectError(err, transfer(t.allocator, &failed, volume, &bytes, hash));
         try t.expect(failed.closed and failed.opened == 1 and failed.written < 512);
     }
+}
+
+test "Linux BOOTSEL identity and mount lookup" {
+    const t = std.testing;
+    try t.expect(isRp2040UsbIds("2e8a\n", "0003\n"));
+    try t.expect(!isRp2040UsbIds("2e8a\n", "000f\n"));
+    try t.expect(!isRp2040UsbIds("1234\n", "0003\n"));
+    const mountinfo =
+        "22 1 0:21 / / rw,relatime - btrfs /dev/nvme0n1p2 rw\n" ++
+        "88 22 8:17 / /run/media/conni/RPI-RP2 rw,nosuid - vfat /dev/sdb1 rw\n" ++
+        "89 22 8:33 / /media/lisa\\040smith/RPI-RP2 rw - vfat /dev/sdc1 rw\n" ++
+        "90 22 8:49 /sub /mnt/bind rw - vfat /dev/sdd1 rw\n" ++
+        "91 22 8:65 / /mnt/a rw - vfat /dev/sde1 rw\n" ++
+        "92 22 8:65 / /mnt/b rw - vfat /dev/sde1 rw\n";
+    var out: [256]u8 = undefined;
+    try t.expectEqualStrings("/run/media/conni/RPI-RP2", mountPoint(mountinfo, "8:17", &out).?);
+    try t.expectEqualStrings("/media/lisa smith/RPI-RP2", mountPoint(mountinfo, "8:33", &out).?);
+    // Bind mounts of a subdirectory, missing and doubly mounted devices are rejected.
+    try t.expect(mountPoint(mountinfo, "8:49", &out) == null);
+    try t.expect(mountPoint(mountinfo, "8:1", &out) == null);
+    try t.expect(mountPoint(mountinfo, "8:65", &out) == null);
+    var small: [4]u8 = undefined;
+    try t.expect(mountPoint(mountinfo, "8:17", &small) == null);
 }

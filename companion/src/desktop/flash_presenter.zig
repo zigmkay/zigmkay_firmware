@@ -165,7 +165,7 @@ pub fn view(owner: *const controller.Controller, session_token: ?u32) View {
                 "Using the selected BOOTSEL target. Waiting for the managed transfer to start.",
             .verifying => "Verification has not been confirmed yet. Do not disconnect the device.",
             .rebooting => "The transfer is still in progress; reboot is not live reconnection.",
-            .reconnecting => if (owner.transfer_backend == .windows_bootsel) "Copy completed without flash read-back. Live identity is still unconfirmed." else "The flash tool completed. Live identity is still unconfirmed.",
+            .reconnecting => if (owner.transfer_backend == .bootsel_copy) "Copy completed without flash read-back. Live identity is still unconfirmed." else "The flash tool completed. Live identity is still unconfirmed.",
             .ready => "A new coherent live session matches the expected firmware identity.",
             .cancelling => "Cancellation is pending until the managed job exits. Device contents may already have changed.",
             .cancelled => "Cancellation does not restore the previous firmware.",

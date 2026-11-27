@@ -68,16 +68,17 @@ does not need a separate libfuse2 package. If the kernel cannot mount FUSE:
 ```
 
 Both forms use the same persistent user-data directories. Keep the extracted
-directory intact. Neither form installs system rules silently. When a keyboard is
-found but its hidraw node cannot be opened, the editor prompts the user with
-**Allow access**, **Not now**, **Don't ask again**, and a **Learn more** link to
+directory intact. Flashing needs no system rule: the editor copies the UF2 onto
+the RPI-RP2 volume that udisks2 mounts for the desktop user. Neither form installs
+system rules silently. When a keyboard is found but its hidraw node cannot be
+opened, the editor prompts the user with **Allow access**, **Not now**,
+**Don't ask again**, and a **Learn more** link to
 [linux-permissions.md](linux-permissions.md). Clicking **Allow access** runs
 `pkexec tee /etc/udev/rules.d/70-zigmkay.rules` with the bundled
-[udev rules](../packaging/linux/70-zigmkay.rules) on stdin: polkit asks for the
+[udev rule](../packaging/linux/70-zigmkay.rules) on stdin: polkit asks for the
 administrator password, the editor never sees it, and nothing keeps running as
-root. The rules let a local logged-in user access the
-companion HID interface (FAFA:00F0) and RP2040 ROM BOOTSEL USB interface
-(2E8A:0003). Without polkit, install them by hand:
+root. The rule lets a local logged-in user access the companion HID interface
+(FAFA:00F0). Without polkit, install it by hand:
 
 ```sh
 sudo install -m 0644 squashfs-root/usr/share/zigmkay/70-zigmkay.rules /etc/udev/rules.d/70-zigmkay.rules
@@ -86,11 +87,13 @@ sudo udevadm control --reload-rules
 
 Reconnect the keyboard after either installation. The `uaccess` rules grant an active local
 session access; remote/headless users need an administrator's explicit device
-access policy. Linux and macOS retain picotool. Windows uses its built-in BOOTSEL
-mass-storage driver and the bundled Zig transfer helper, with no WinUSB setup.
-It rejects multiple matching devices, verifies USB ancestry plus `INFO_UF2.TXT`,
-revalidates GUID/serial/disk/USB identity, checks frozen UF2 bytes and hash, and
-writes directly to a GUID-qualified destination. Cancellation stops and joins
+access policy. macOS retains picotool. Windows and Linux copy onto the BOOTSEL
+mass-storage volume with the bundled Zig transfer helper, with no WinUSB setup or
+udev rule. It rejects multiple matching devices, verifies USB ancestry plus
+`INFO_UF2.TXT`, revalidates the volume identity (Windows: GUID/serial/disk/USB;
+Linux: block device, USB device, serial and mount point), checks frozen UF2 bytes
+and hash, and writes directly to the verified volume. On Linux an unmounted volume
+is mounted once with `udisksctl mount`. Cancellation stops and joins
 the helper; discovery and transfer are bounded, with no automatic retry. Copying
 completes the transfer; only the existing coherent live firmware handshake
 completes flashing. There is no mass-storage byte-for-byte flash read-back.

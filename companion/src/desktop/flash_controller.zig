@@ -580,13 +580,13 @@ test "Windows copy completion rejects incorrect live firmware identity" {
         .selection_revision = controller.selection_revision,
     } });
     var result = successfulResult();
-    result.backend = .windows_bootsel;
+    result.backend = .bootsel_copy;
     _ = try controller.receive(.{ .managed_result = .{
         .operation_id = controller.operation_id,
         .result = &result,
     } }, 100);
     try t.expectEqual(Phase.reconnecting, controller.phase);
-    try t.expectEqual(jobs.flash_inputs.Backend.windows_bootsel, controller.transfer_backend);
+    try t.expectEqual(jobs.flash_inputs.Backend.bootsel_copy, controller.transfer_backend);
     var wrong = test_identity;
     wrong.digest[0] ^= 1;
     _ = try controller.receive(.{ .reconnected = .{

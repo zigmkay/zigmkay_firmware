@@ -275,8 +275,8 @@ pub fn main(init: std.process.Init) !void {
     try assembly.copy(try std.fs.path.join(a, &.{ distribution, "LICENSE" }), "licenses/Zig.txt");
     for (runtime_closure) |name| try assembly.copy(try std.fs.path.join(a, &.{ repository, runtime_source_root, name }), try std.fs.path.join(a, &.{ "build/" ++ runtime_source_root, name }));
     try assembly.copy(try std.fs.path.join(a, &.{ repository, "runtime/build.zig" }), "build/build.zig");
-    if (builtin.os.tag == .windows) {
-        try assembly.copy(args[6], "tools/bootsel-transfer.exe");
+    if (builtin.os.tag == .windows or builtin.os.tag == .linux) {
+        try assembly.copy(args[6], jobs.application_bundle.bootsel_helper);
     } else {
         try assembly.copy(args[6], "tools/picotool_flash");
         try assembly.copy(args[7], "tools/picotool");
@@ -286,7 +286,7 @@ pub fn main(init: std.process.Init) !void {
     try assembly.closure(pins.firmware_source);
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "build/build.zig.zon" }), .data = pins.manifest });
     assembly.hash.update(pins.manifest);
-    const manifest: jobs.application_bundle.Manifest = .{ .version = 2, .backend = if (builtin.os.tag == .windows) .windows_bootsel else .picotool, .id = assembly.hash.finalResult(), .firmware_revision = pins.firmware_revision, .wrapper_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[6], a, .limited(128 * 1024 * 1024))), .picotool_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[7], a, .limited(128 * 1024 * 1024))), .compiler_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, compiler, a, .limited(512 * 1024 * 1024))) };
+    const manifest: jobs.application_bundle.Manifest = .{ .version = 2, .backend = if (builtin.os.tag == .windows or builtin.os.tag == .linux) .bootsel_copy else .picotool, .id = assembly.hash.finalResult(), .firmware_revision = pins.firmware_revision, .wrapper_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[6], a, .limited(128 * 1024 * 1024))), .picotool_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, args[7], a, .limited(128 * 1024 * 1024))), .compiler_hash = jobs.firmware.digest(try std.Io.Dir.cwd().readFileAlloc(init.io, compiler, a, .limited(512 * 1024 * 1024))) };
     var text: std.Io.Writer.Allocating = .init(a);
     try std.zon.stringify.serialize(manifest, .{}, &text.writer);
     try std.Io.Dir.cwd().writeFile(init.io, .{ .sub_path = try std.fs.path.join(a, &.{ resources, "application.zon" }), .data = text.written() });

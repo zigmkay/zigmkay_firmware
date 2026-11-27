@@ -54,7 +54,7 @@ pub fn add(s: *tests.Suite, catalog_export: ?*Compile) Tools {
     });
     release.root_module.addOptions("release-options", core.release_options);
     install(s, release);
-    const bootsel = if (b.graph.host.result.os.tag == .windows)
+    const bootsel = if (bootselCopyHost(b))
         b.addExecutable(.{ .name = "bootsel-transfer", .root_module = s.mods.root("tools/bootsel_transfer.zig", core.bootsel_tool) })
     else
         null;
@@ -95,6 +95,14 @@ pub fn add(s: *tests.Suite, catalog_export: ?*Compile) Tools {
         s.steps.analyze_keymap.dependOn(&b.addInstallArtifact(analyzer, .{}).step);
     } else Steps.unavailable(b, s.steps.analyze_keymap, "analyze-keymap requires -Dimport-root=<absolute captured source directory>");
     return .{ .bootsel = bootsel };
+}
+
+/// Windows and Linux flash by copying onto the BOOTSEL volume.
+fn bootselCopyHost(b: *std.Build) bool {
+    return switch (b.graph.host.result.os.tag) {
+        .windows, .linux => true,
+        else => false,
+    };
 }
 
 fn install(s: *tests.Suite, exe: *Compile) void {

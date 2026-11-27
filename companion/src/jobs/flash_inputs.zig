@@ -6,7 +6,9 @@ pub const Digest = firmware.Digest;
 /// The picotool pin of the firmware's zigmkay package.
 pub const picotool_revision = @import("firmware-pins").picotool_revision;
 pub const picotool_package_hash = @import("firmware-pins").picotool_package_hash;
-pub const Backend = enum { picotool, windows_bootsel };
+/// `bootsel_copy`: Windows and Linux copy the UF2 onto the mounted RPI-RP2
+/// volume (`tools/bootsel_transfer.zig`); macOS flashes with picotool.
+pub const Backend = enum { picotool, bootsel_copy };
 
 pub const Record = struct {
     version: u16 = 1,
@@ -308,7 +310,7 @@ test "tools provenance and frozen artifact reject edits stale requests and cance
     try std.testing.expectEqual(Backend.picotool, parsed.record.backend);
     var backend_record = parsed.record;
     backend_record.version = 2;
-    backend_record.backend = .windows_bootsel;
+    backend_record.backend = .bootsel_copy;
     backend_record.picotool_path = backend_record.wrapper_path;
     backend_record.picotool_hash = backend_record.wrapper_hash;
     var backend_tools = try Tools.clone(gpa, backend_record);
@@ -318,7 +320,7 @@ test "tools provenance and frozen artifact reject edits stale requests and cance
     var backend_parsed = try Tools.parse(gpa, backend_bytes);
     defer backend_parsed.deinit();
     try backend_parsed.verify(gpa, io);
-    try std.testing.expectEqual(Backend.windows_bootsel, backend_parsed.record.backend);
+    try std.testing.expectEqual(Backend.bootsel_copy, backend_parsed.record.backend);
     backend_record.version = 1;
     try std.testing.expectError(error.UnsupportedToolsVersion, backend_record.validate());
     var unsupported = parsed.record;
