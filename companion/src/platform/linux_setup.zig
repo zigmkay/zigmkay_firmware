@@ -8,8 +8,17 @@ const std = @import("std");
 
 pub const rule_path = "/etc/udev/rules.d/70-zigmkay.rules";
 
-/// packaging/linux/70-zigmkay.rules, the same file the bundle ships.
-pub const udev_rule: []const u8 = @embedFile("udev-rule");
+/// packaging/linux/70-zigmkay.rules, the same file the bundle ships, with
+/// LF line ends even when a Windows checkout converted it to CRLF.
+pub const udev_rule: []const u8 = lf: {
+    @setEvalBranchQuota(100_000);
+    const raw = @embedFile("udev-rule");
+    var out: []const u8 = "";
+    for (raw) |byte| {
+        if (byte != '\r') out = out ++ .{byte};
+    }
+    break :lf out;
+};
 
 /// The command the access button runs. The rule arrives on stdin; tee
 /// replaces the file, so repeating the grant is harmless.
