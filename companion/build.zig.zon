@@ -1,6 +1,6 @@
 .{
     .name = .zigmkay_companion,
-    .version = "0.3.0",
+    .version = "0.3.1",
     .fingerprint = 0xf34c18ab8685e700,
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
