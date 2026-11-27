@@ -111,9 +111,28 @@ fn waitForLabel(io: std.Io, allocator: std.mem.Allocator, label: []const u8) ![]
     }
 }
 
+/// Reads a procfs virtual file whose reported stat size is 0.
+fn readProcFile(io: std.Io, allocator: std.mem.Allocator, path: []const u8, max_bytes: usize) ![]u8 {
+    const file = try std.Io.Dir.openFileAbsolute(io, path, .{});
+    defer file.close(io);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(allocator);
+    var chunk: [4096]u8 = undefined;
+    while (true) {
+        const n = file.readStreaming(io, &.{&chunk}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        if (n == 0) break;
+        if (out.items.len + n > max_bytes) return error.StreamTooLong;
+        try out.appendSlice(allocator, chunk[0..n]);
+    }
+    return out.toOwnedSlice(allocator);
+}
+
 /// The mount point of block device `source` (e.g. /dev/sdb1), if it is mounted.
 fn mountPointOf(io: std.Io, allocator: std.mem.Allocator, source: []const u8) !?[]const u8 {
-    const mountinfo = std.Io.Dir.cwd().readFileAlloc(io, "/proc/self/mountinfo", allocator, .limited(4 * 1024 * 1024)) catch return null;
+    const mountinfo = readProcFile(io, allocator, "/proc/self/mountinfo", 4 * 1024 * 1024) catch return null;
     defer allocator.free(mountinfo);
     var buffer: [std.fs.max_path_bytes]u8 = undefined;
     const mount_point = mountPointIn(mountinfo, source, &buffer) orelse return null;

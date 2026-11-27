@@ -114,9 +114,28 @@ fn inspect(io: std.Io, gpa: std.mem.Allocator, name: []const u8, mountinfo: []co
     return volume;
 }
 
+/// Reads a procfs virtual file whose reported stat size is 0.
+fn readProcFile(io: std.Io, gpa: std.mem.Allocator, path: []const u8, max_bytes: usize) ![]u8 {
+    const file = try std.Io.Dir.openFileAbsolute(io, path, .{});
+    defer file.close(io);
+    var out: std.ArrayList(u8) = .empty;
+    errdefer out.deinit(gpa);
+    var chunk: [4096]u8 = undefined;
+    while (true) {
+        const n = file.readStreaming(io, &.{&chunk}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => return err,
+        };
+        if (n == 0) break;
+        if (out.items.len + n > max_bytes) return error.StreamTooLong;
+        try out.appendSlice(gpa, chunk[0..n]);
+    }
+    return out.toOwnedSlice(gpa);
+}
+
 pub fn discover(io: std.Io) !?Volume {
     const gpa = std.heap.page_allocator;
-    const mountinfo = std.Io.Dir.cwd().readFileAlloc(io, "/proc/self/mountinfo", gpa, .limited(4 * 1024 * 1024)) catch
+    const mountinfo = readProcFile(io, gpa, "/proc/self/mountinfo", 4 * 1024 * 1024) catch
         return error.VolumeEnumerationFailed;
     defer gpa.free(mountinfo);
     var dir = std.Io.Dir.openDirAbsolute(io, sys_block, .{ .iterate = true }) catch return error.VolumeEnumerationFailed;
