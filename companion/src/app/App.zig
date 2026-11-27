@@ -161,7 +161,7 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     if (frame_limit == null or mode.is(.build)) try app.loadUserPaths();
     if (mode.live()) |live| if (live.project) |path| try app.openLiveProject(path);
 
-    app.source = if (frame_limit == null) Source.init() else null;
+    app.source = if (frame_limit == null or mode.is(.host_layout)) Source.init() else null;
     errdefer if (app.source) |*source| source.deinit();
     app.captions = try app.captionsFor(&app.model, "Offline launch fixture");
     errdefer app.captions.deinit();

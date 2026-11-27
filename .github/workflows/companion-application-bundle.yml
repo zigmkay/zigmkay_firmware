@@ -400,6 +400,7 @@ jobs:
                 "${sandbox[@]}" --setenv LD_LIBRARY_PATH "$root/usr/lib" "$target/check" "$root/usr/share/zigmkay" "$target/cache/zigmkay" all
               done
               "${sandbox[@]}" "$root/AppRun" --offline-build-frames 30000
+              timeout 60 "${sandbox[@]}" "$root/AppRun" --offline-host-layout-frames 3
               rm -rf "$target/cache/zigmkay"
             done
           else
@@ -410,6 +411,9 @@ jobs:
               "${sandbox[@]}" --setenv LD_LIBRARY_PATH "$mount/usr/lib" "$target/check" "$mount/usr/share/zigmkay" "$target/cache/zigmkay" representative
             done
             "${sandbox[@]}" "$mount/AppRun" --offline-build-frames 30000
+            # Normal startup translates every label through the host XKB keymap;
+            # the frame fixtures above use the fixed US translator instead.
+            timeout 60 "${sandbox[@]}" "$mount/AppRun" --offline-host-layout-frames 3
             "${sandbox[@]}" --setenv LD_LIBRARY_PATH "$target/install/squashfs-root/usr/lib" "$target/check" "$target/install/squashfs-root/usr/share/zigmkay" "$target/cache/zigmkay" lk8
             "${sandbox[@]}" "$target/install/squashfs-root/AppRun" --offline-build-frames 30000
           fi

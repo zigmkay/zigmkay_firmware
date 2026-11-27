@@ -103,6 +103,10 @@ pub const Fixture = struct {
     pub const Kind = union(enum) {
         /// `--offline-frames`
         launch,
+        /// `--offline-host-layout-frames`: the launch fixture with labels
+        /// translated through the OS keyboard layout instead of the fixed US
+        /// translator. Still offline: keyboards are never monitored.
+        host_layout,
         onboarding,
         catalog,
         status,
@@ -215,6 +219,7 @@ fn parseFixture(args: []const [:0]const u8, environment: Environment) Error!Fixt
 fn parseKind(flag: []const u8) error{Usage}!Fixture.Kind {
     const map = std.StaticStringMap(Fixture.Kind).initComptime(.{
         .{ "--offline-frames", .launch },
+        .{ "--offline-host-layout-frames", .host_layout },
         .{ "--offline-onboarding-frames", .onboarding },
         .{ "--offline-catalog-frames", .catalog },
         .{ "--offline-status-frames", .status },
@@ -271,6 +276,8 @@ test "physical flash requires explicit authorization" {
 test "fixture modes keep their frame bounds and video requirements" {
     const t = std.testing;
     try expectFixture(.{ .kind = .launch, .frames = 3 }, &.{ "app", "--offline-frames", "3" }, dummy_video);
+    try expectFixture(.{ .kind = .host_layout, .frames = 3 }, &.{ "app", "--offline-host-layout-frames", "3" }, dummy_video);
+    try t.expectError(error.DummyVideoRequired, parse(&.{ "app", "--offline-host-layout-frames", "3" }, .{}));
     try expectFixture(.{ .kind = .drawers, .frames = 24 }, &.{ "app", "--offline-drawers-frames", "24" }, dummy_video);
     try expectFixture(.{ .kind = .build, .frames = 30_000 }, &.{ "app", "--offline-build-frames", "30000" }, dummy_video);
     try expectFixture(.{ .kind = .tutor, .frames = 124 }, &.{ "app", "--offline-tutor-frames", "124" }, dummy_video);
