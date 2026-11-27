@@ -136,12 +136,17 @@ fn deviceAccess(theme: ui.Theme, grant: setup.Grant.State) Action {
     ui.divider(theme, .{ .x = 0, .y = footer_divider_y, .w = access_width, .h = 1 }, 0x5eee);
 
     const buttons_y = height - 56;
-    const busy = grant == .running or grant == .installed;
+    if (grant == .installed) {
+        if (ui.iconButton(theme, null, "Done", "linux.setup.access.later", .{ .x = access_width - 168, .y = buttons_y, .w = 140, .h = 38 }, true))
+            return .close;
+        return .none;
+    }
+    const busy = grant == .running;
     if (!busy) {
         if (ghostButton(theme, "Don't ask again", "linux.setup.access.never", .{ .x = left - 8, .y = buttons_y, .w = 152, .h = 38 }))
             return .dismiss_forever;
     }
-    if (ui.button(theme, if (grant == .installed) "Done" else "Not now", "linux.setup.access.later", .{ .x = access_width - 356, .y = buttons_y, .w = 140, .h = 38 }))
+    if (ui.button(theme, "Not now", "linux.setup.access.later", .{ .x = access_width - 356, .y = buttons_y, .w = 140, .h = 38 }))
         return .close;
     if (ui.iconButtonEnabled(theme, null, "Allow access", "linux.setup.access.grant", .{ .x = access_width - 204, .y = buttons_y, .w = 176, .h = 38 }, true, !busy))
         return .grant;

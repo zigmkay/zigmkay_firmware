@@ -272,6 +272,13 @@ pub const Session = struct {
         return effect;
     }
 
+    pub fn reconnectPermissionDenied(self: *Session, now: u64) !Effect {
+        const watch = self.reconnect orelse return error.NotWatchingReconnect;
+        const effect = try self.owner.receive(.{ .reconnect_permission_denied = watch.operation.id }, now);
+        self.applyEffect(effect);
+        return effect;
+    }
+
     pub fn cancel(self: *Session) !Effect {
         const effect = try self.owner.dispatch(.cancel);
         if (effect == .cancel_managed) _ = self.runtime.cancel(effect.cancel_managed);

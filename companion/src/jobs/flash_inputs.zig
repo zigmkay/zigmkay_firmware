@@ -106,9 +106,14 @@ pub const Tools = struct {
 
     pub fn verify(self: Tools, gpa: std.mem.Allocator, io: std.Io) !void {
         try self.validate();
-        if (!std.mem.eql(u8, &self.record.wrapper_hash, &try fileHash(gpa, io, self.record.wrapper_path)))
+        const wrapper_hash = try fileHash(gpa, io, self.record.wrapper_path);
+        if (!std.mem.eql(u8, &self.record.wrapper_hash, &wrapper_hash))
             return error.WrapperChanged;
-        if (!std.mem.eql(u8, &self.record.picotool_hash, &try fileHash(gpa, io, self.record.picotool_path)))
+        const picotool_hash = if (std.mem.eql(u8, self.record.wrapper_path, self.record.picotool_path))
+            wrapper_hash
+        else
+            try fileHash(gpa, io, self.record.picotool_path);
+        if (!std.mem.eql(u8, &self.record.picotool_hash, &picotool_hash))
             return error.PicotoolChanged;
     }
 
@@ -165,6 +170,18 @@ pub const Frozen = struct {
         try request.validate();
         if (!std.mem.eql(u8, &self.build_key, &firmware.key(current))) return error.StaleBuild;
         try self.tools.verify(gpa, io);
+        try self.verifyArtifact(gpa, io, current, request);
+    }
+
+    fn verifyArtifact(
+        self: Frozen,
+        gpa: std.mem.Allocator,
+        io: std.Io,
+        current: firmware.Inputs,
+        request: Request,
+    ) !void {
+        try request.validate();
+        if (!std.mem.eql(u8, &self.build_key, &firmware.key(current))) return error.StaleBuild;
         const name = std.fmt.bytesToHex(self.uf2_hash, .lower);
         const basename = std.fs.path.basename(self.path);
         if (basename.len != name.len + 4 or
@@ -225,7 +242,7 @@ pub fn freeze(
         .uf2_hash = validated.uf2_hash,
         .uf2_size = validated.uf2_size,
     };
-    try frozen.verify(gpa, io, current, request);
+    try frozen.verifyArtifact(gpa, io, current, request);
     return frozen;
 }
 
