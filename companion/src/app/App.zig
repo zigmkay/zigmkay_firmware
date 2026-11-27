@@ -15,6 +15,7 @@ const editor = @import("editor-frame-ui");
 const keyboard_onboarding = @import("onboarding-ui");
 const dialog = @import("folder-dialog");
 const window_placement = @import("window-placement");
+const single_instance = @import("single-instance");
 const Source = @import("input-source").Source;
 const installed = @import("app-paths");
 const tray_backend = @import("native-tray");
@@ -103,6 +104,9 @@ captions: Captions,
 native: Backend,
 window: dvui.Window,
 tray: tray_backend.NativeTray,
+/// The claim of the running application; a later start asks it to show the
+/// editor (`tray_menu.handle`). Null for fixtures.
+instance: ?*single_instance.Instance = null,
 life: desktop.tray_lifecycle.Lifecycle,
 companion: CompanionOverlay = .{},
 events: Events,

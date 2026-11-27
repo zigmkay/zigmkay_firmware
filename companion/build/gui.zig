@@ -20,6 +20,7 @@ pub const test_roots = [_][]const u8{
 pub const deferred_test_files = [_][]const u8{
     "tests/desktop_vectors.zig",
     "src/platform/window_placement.zig",
+    "src/platform/single_instance.zig",
     "src/desktop/application_icons.zig",
     "src/platform/events.zig",
     "tests/editor_frame.zig",

@@ -381,6 +381,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
     const sdl_only = dupe(b, &.{.{ .name = "sdl3-c", .module = sdl }});
     const placement = b.createModule(.{ .root_source_file = b.path("src/platform/window_placement.zig"), .target = t, .imports = sdl_only });
     const folder_dialog = b.createModule(.{ .root_source_file = b.path("src/platform/folder_dialog.zig"), .target = t, .imports = sdl_only });
+    const single_instance = b.createModule(.{ .root_source_file = b.path("src/platform/single_instance.zig"), .target = t });
     const fonts = b.createModule(.{ .root_source_file = b.path("src/desktop/fonts.zig"), .target = t, .imports = dvui_only });
     const inter = deps.inter.?;
     fonts.addAnonymousImport("inter-regular", .{ .root_source_file = inter.path("extras/ttf/Inter-Regular.ttf") });
@@ -556,6 +557,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
             .{ .name = "native-events", .module = events },
             .{ .name = "folder-dialog", .module = folder_dialog },
             .{ .name = "window-placement", .module = placement },
+            .{ .name = "single-instance", .module = single_instance },
             .{ .name = "editor-fonts", .module = fonts },
             .{ .name = "flash-ui", .module = flash_ui },
             .{ .name = "app-paths", .module = app_paths },

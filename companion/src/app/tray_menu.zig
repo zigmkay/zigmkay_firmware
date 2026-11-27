@@ -7,15 +7,16 @@ const project = @import("project");
 const App = @import("App.zig");
 const LiveKeyboard = @import("LiveKeyboard.zig");
 
-/// Applies a tray menu action; whether there was one.
+/// Applies a tray menu action, or a later start's request to show the
+/// editor; whether there was one.
 pub fn handle(app: *App) bool {
+    if (app.instance) |instance| if (instance.takeShowRequest()) {
+        showEditor(app);
+        return true;
+    };
     const action = app.tray.poll() orelse return false;
     switch (action) {
-        .open_editor => {
-            app.life.action(action);
-            _ = Backend.c.SDL_ShowWindow(app.native.window);
-            _ = Backend.c.SDL_RaiseWindow(app.native.window);
-        },
+        .open_editor => showEditor(app),
         .toggle_companion => {
             app.life.action(action);
             if (app.live.visibility.mode != .hold and app.live.verified()) app.live.visibility.latched = app.life.companion_visible;
@@ -25,6 +26,14 @@ pub fn handle(app: *App) bool {
         .zoom_out, .zoom_in, .zoom_reset => app.life.action(action),
     }
     return true;
+}
+
+fn showEditor(app: *App) void {
+    app.life.action(.open_editor);
+    if (Backend.c.SDL_GetWindowFlags(app.native.window) & Backend.c.SDL_WINDOW_MINIMIZED != 0)
+        _ = Backend.c.SDL_RestoreWindow(app.native.window);
+    _ = Backend.c.SDL_ShowWindow(app.native.window);
+    _ = Backend.c.SDL_RaiseWindow(app.native.window);
 }
 
 /// Binds the live session to the project saved at the editor's project path.
