@@ -5,7 +5,7 @@
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .ztray = .{
-            .url = "git+https://github.com/StaffinityAI/ztray.git#d3b2016d1f1d7a6dd7894b6b2cbf3c46f76ccc26",
+            .url = "git+https://github.com/StaffinityAI/ztray.git#822ce812a804910fcef8f193d2d0ead292dcef21",
             .hash = "ztray-0.1.0-dev.1-HZHL7PzUBwAQO1_tPR2O2qnHZFpmOCeuaCvHRte9hX_q",
             .lazy = true,
         },
