@@ -39,6 +39,7 @@ pub const deferred_test_files = [_][]const u8{
 const fixtures = [_]struct { []const u8, []const u8 }{
     .{ "--offline-frames", "3" },
     .{ "--offline-host-layout-frames", "3" },
+    .{ "--offline-linux-setup-frames", "8" },
     .{ "--offline-onboarding-frames", "24" },
     .{ "--offline-catalog-frames", "56" },
     .{ "--offline-status-frames", "68" },

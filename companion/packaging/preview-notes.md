@@ -14,8 +14,10 @@ Developer ID, notarization or Authenticode signature.
 On Linux, make the AppImage executable with `chmod +x Zigmkay-*.AppImage`.
 If FUSE mounting is unavailable, run `./Zigmkay-*.AppImage --appimage-extract`,
 then `./squashfs-root/AppRun`. The static runtime does not require libfuse2.
-See the bundled `usr/share/zigmkay/70-zigmkay.rules` and the repository's preview
-documentation for manual Linux device permissions.
+On Linux the editor offers to install its udev rule (`usr/share/zigmkay/70-zigmkay.rules`)
+through the system password dialog when it finds a keyboard it may not open; see
+the repository's preview documentation for the manual way. GNOME shows the tray
+icon only with the AppIndicator extension; the editor explains this once.
 
 Windows flashing uses the RP2040 BOOTSEL USB mass-storage driver supplied with
 Windows. It copies the validated UF2 directly and then waits for a coherent

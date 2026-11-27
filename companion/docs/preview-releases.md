@@ -68,17 +68,21 @@ does not need a separate libfuse2 package. If the kernel cannot mount FUSE:
 ```
 
 Both forms use the same persistent user-data directories. Keep the extracted
-directory intact. Neither form installs system rules automatically. To allow a
-local logged-in user to access the companion HID interface (FAFA:00F0) and RP2040
-ROM BOOTSEL USB interface (2E8A:0003), inspect and install the narrowly scoped
-[udev rules](../packaging/linux/70-zigmkay.rules):
+directory intact. Neither form installs system rules silently. When a keyboard is
+found but its hidraw node cannot be opened, the editor shows the narrowly scoped
+[udev rules](../packaging/linux/70-zigmkay.rules) and offers **Allow access**, which
+runs `pkexec tee /etc/udev/rules.d/70-zigmkay.rules` with exactly that text on
+stdin: polkit asks for the administrator password, the editor never sees it, and
+nothing keeps running as root. The rules let a local logged-in user access the
+companion HID interface (FAFA:00F0) and RP2040 ROM BOOTSEL USB interface
+(2E8A:0003). Without polkit, install them by hand:
 
 ```sh
 sudo install -m 0644 squashfs-root/usr/share/zigmkay/70-zigmkay.rules /etc/udev/rules.d/70-zigmkay.rules
 sudo udevadm control --reload-rules
 ```
 
-Reconnect the keyboard after reloading. The `uaccess` rules grant an active local
+Reconnect the keyboard after either installation. The `uaccess` rules grant an active local
 session access; remote/headless users need an administrator's explicit device
 access policy. Linux and macOS retain picotool. Windows uses its built-in BOOTSEL
 mass-storage driver and the bundled Zig transfer helper, with no WinUSB setup.

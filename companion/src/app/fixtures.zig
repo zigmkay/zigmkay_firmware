@@ -9,6 +9,7 @@ const project = @import("project");
 const keyboard_onboarding = @import("onboarding-ui");
 const editor = @import("editor-frame-ui");
 const App = @import("App.zig");
+const LinuxSetup = @import("LinuxSetup.zig");
 const Tutor = @import("Tutor.zig");
 const source_refresh_fixture = @import("source_refresh_fixture.zig");
 
@@ -1045,6 +1046,16 @@ pub fn capture(app: *App) !void {
     }
     if (app.mode.isTutorGallery() and app.count % 2 == 0) try captureTutor(app);
     if (app.mode.isOnboarding() or app.mode.is(.catalog)) try captureOnboarding(app);
+    if (app.mode.is(.linux_setup)) try captureLinuxSetup(app);
+}
+
+fn captureLinuxSetup(app: *App) !void {
+    if (!LinuxSetup.sceneSettled(app)) return;
+    const scene = LinuxSetup.scene(app);
+    if (dvui.tagGet(if (scene < 2) "linux.setup.access" else "linux.setup.tray") == null) return error.LinuxSetupNotDrawn;
+    app.window.endRendering(.{ .manage_backend = false });
+    const path = try std.fmt.allocPrintSentinel(app.window.arena(), ".zig-cache/linux-setup/{d}.bmp", .{scene}, 0);
+    try screenshot(app, path, error.LinuxSetupScreenshotRead, error.LinuxSetupScreenshotSave);
 }
 
 fn captureTutor(app: *App) !void {

@@ -26,6 +26,7 @@ const Captions = @import("Captions.zig");
 const CompanionOverlay = @import("CompanionOverlay.zig");
 const Events = @import("Events.zig");
 const Flash = @import("Flash.zig");
+const LinuxSetup = @import("LinuxSetup.zig");
 const LiveKeyboard = @import("LiveKeyboard.zig");
 const OfflineTranslator = @import("OfflineTranslator.zig");
 const Tutor = @import("Tutor.zig");
@@ -119,6 +120,8 @@ job_generation: u64 = 0,
 jobs: workers.Jobs = .{},
 build: Build = .{},
 flash: Flash = .{},
+/// Linux device access and tray hint sheets.
+linux_setup: LinuxSetup = .{},
 fixture: fixtures.State = .{},
 /// The Build and Flash timeline of this session and the last compiler output.
 activity: desktop.build_activity.Log = .{},
@@ -214,6 +217,7 @@ pub fn deinit(app: *App) void {
     app.activity.deinit(app.gpa);
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.flash.deinit();
+    app.linux_setup.deinit();
     if (app.build.resources) |*resources| resources.deinit();
     if (app.build.tools) |*tools| tools.deinit();
     app.jobs.cancel();
@@ -404,7 +408,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     // tutor aligned with the exact pixel edge, including on Retina displays.
     if (app.window.data().rect.w > 0) app.window.natural_scale = app.window.rect_pixels.w / app.window.data().rect.w;
     if (!app.fonts_installed and (app.frame_limit == null or app.mode.isTutorGallery() or app.mode.isStatus() or app.mode.isDrawers() or
-        app.mode.isOnboarding() or app.mode.is(.catalog)))
+        app.mode.isOnboarding() or app.mode.is(.catalog) or app.mode.is(.linux_setup)))
     {
         try editor_fonts.install(app.gpa, app.io);
         app.fonts_installed = true;
@@ -424,6 +428,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     const practice = try Tutor.prepareFrame(app, board);
     var screen = try screens.draw(app, board, practice, can_build, now_us);
     const flash_panel = Flash.drawPanel(app);
+    app.linux_setup.draw(app);
     try Flash.startTrial(app, can_build, &screen.rendered);
     try fixtures.requestBuild(app, can_build, &screen.rendered);
     try CompanionOverlay.update(app, board, practice);

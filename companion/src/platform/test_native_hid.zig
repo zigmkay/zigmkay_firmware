@@ -121,3 +121,21 @@ test "native hint open read and write failures remain explicit" {
     native.close();
     try std.testing.expectError(error.HidNotOpen, native.read(&bytes));
 }
+
+test "an enumerated hidraw node without access asks for the udev rule" {
+    if (@import("builtin").os.tag != .linux) return error.SkipZigTest;
+    // A readable-by-root-only node stands in for /dev/hidraw* without uaccess.
+    const node = "/etc/shadow";
+    // Running as root nothing is denied; elsewhere the node may be missing.
+    if (std.Io.Dir.accessAbsolute(std.testing.io, node, .{ .read = true, .write = true })) |_| {
+        return error.SkipZigTest;
+    } else |err| if (err != error.AccessDenied) return error.SkipZigTest;
+    Sdl.reset();
+    Sdl.a.path = node;
+    Sdl.open_ok = false;
+    var native = hid.Native(Sdl){ .io = std.testing.io };
+    try std.testing.expectError(error.HidPermissionDenied, native.discover(null));
+    // Other open failures of an accessible or missing node stay generic.
+    Sdl.a.path = "/nonexistent/hidraw0";
+    try std.testing.expectError(error.HidOpenFailed, native.discover(null));
+}

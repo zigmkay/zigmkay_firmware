@@ -96,6 +96,13 @@ pub const Editor = struct {
     pub const Visibility = enum { tap_hold, hold, toggle };
 };
 
+/// The scenes of `--offline-linux-setup-frames`, shared with the app.
+pub const LinuxSetupScenes = struct {
+    pub const count = 4;
+    /// A sheet fades in on its first frame; each scene is captured on its second.
+    pub const frames_per_scene = 2;
+};
+
 pub const Fixture = struct {
     kind: Kind,
     frames: usize,
@@ -103,6 +110,9 @@ pub const Fixture = struct {
     pub const Kind = union(enum) {
         /// `--offline-frames`
         launch,
+        /// `--offline-linux-setup-frames`: screenshots of the Linux device
+        /// access and tray sheets, one scene per frame, on every platform.
+        linux_setup,
         /// `--offline-host-layout-frames`: the launch fixture with labels
         /// translated through the OS keyboard layout instead of the fixed US
         /// translator. Still offline: keyboards are never monitored.
@@ -130,6 +140,7 @@ pub const Fixture = struct {
                 .tutor, .native_tutor => 124,
                 .companion => 9,
                 .practice, .native_tray, .source_refresh => 3,
+                .linux_setup => LinuxSetupScenes.count * LinuxSetupScenes.frames_per_scene,
                 .build => 2,
                 else => 1,
             };
@@ -220,6 +231,7 @@ fn parseKind(flag: []const u8) error{Usage}!Fixture.Kind {
     const map = std.StaticStringMap(Fixture.Kind).initComptime(.{
         .{ "--offline-frames", .launch },
         .{ "--offline-host-layout-frames", .host_layout },
+        .{ "--offline-linux-setup-frames", .linux_setup },
         .{ "--offline-onboarding-frames", .onboarding },
         .{ "--offline-catalog-frames", .catalog },
         .{ "--offline-status-frames", .status },

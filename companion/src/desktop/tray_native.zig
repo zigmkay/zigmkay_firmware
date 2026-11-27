@@ -74,3 +74,12 @@ pub const Native = struct {
 };
 
 pub const NativeTray = lifecycle.Tray(Native);
+
+/// Whether the desktop displays the installed tray icon; null while unknown.
+/// Linux asks ztray for a StatusNotifierWatcher (stock GNOME has none).
+pub fn hostAvailable() ?bool {
+    if (builtin.os.tag != .linux) return true;
+    // ztray pins before trayHostAvailable cannot tell.
+    if (!@hasDecl(ztray, "trayHostAvailable")) return null;
+    return ztray.trayHostAvailable();
+}

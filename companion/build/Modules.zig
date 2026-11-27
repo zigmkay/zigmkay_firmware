@@ -72,6 +72,8 @@ pub const Host = struct {
     session_test_deps: []const Import,
     live_adapter: *Module,
     native_hid: *Module,
+    /// Linux device access and tray setup (src/platform/linux_setup.zig).
+    linux_setup: *Module,
     /// The curated profile's callback source in the firmware package.
     rollercole_source: std.Build.LazyPath,
     /// Callback handler of the all-actions runner fixture.
@@ -89,6 +91,7 @@ pub const Host = struct {
     runner_test_deps: []const Import,
     import_fixture_deps: []const Import,
     native_hid_only: []const Import,
+    linux_setup_deps: []const Import,
     project_only: []const Import,
 };
 
@@ -237,6 +240,9 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         .{ .name = "companion-model", .module = session },
     }) });
     const native_hid = b.createModule(.{ .root_source_file = b.path("src/platform/native_hid.zig"), .imports = dupe(b, &.{.{ .name = "live-adapter", .module = live_adapter }}) });
+    // The rule text the access dialog installs is the file the bundle ships.
+    const linux_setup_deps = dupe(b, &.{.{ .name = "udev-rule", .module = b.createModule(.{ .root_source_file = b.path("packaging/linux/70-zigmkay.rules") }) }});
+    const linux_setup = b.createModule(.{ .root_source_file = b.path("src/platform/linux_setup.zig"), .imports = linux_setup_deps });
     const catalog_project = b.createModule(.{ .root_source_file = b.path("src/firmware/catalog_project.zig"), .target = t, .optimize = o, .imports = dupe(b, &.{
         .{ .name = "catalog", .module = catalog },
         .{ .name = "project", .module = project },
@@ -300,6 +306,7 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         }),
         .live_adapter = live_adapter,
         .native_hid = native_hid,
+        .linux_setup = linux_setup,
         .rollercole_source = rollercoleSource(firmware),
         .runner_callback_fixture = b.createModule(.{ .root_source_file = b.path("src/runner/callback_fixture.zig"), .imports = zigmkay_only }),
         .input_tests = initInputTests(b, keycodes, keymap, input_source),
@@ -338,6 +345,7 @@ fn initHost(b: *std.Build, cfg: Config, core: Core, firmware: *std.Build.Depende
         }),
         .import_fixture_deps = dupe(b, &.{ .{ .name = "keymap-importer", .module = importer }, .{ .name = "project", .module = project } }),
         .native_hid_only = dupe(b, &.{.{ .name = "native-hid", .module = native_hid }}),
+        .linux_setup_deps = linux_setup_deps,
     };
 }
 
@@ -393,6 +401,11 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
         .{ .name = "dvui", .module = dvui },
         .{ .name = "editor-ui", .module = ui },
         .{ .name = "flash-presenter", .module = core.flash_presenter },
+    }) });
+    const linux_setup_ui = b.createModule(.{ .root_source_file = b.path("src/desktop/linux_setup_ui.zig"), .target = t, .imports = dupe(b, &.{
+        .{ .name = "dvui", .module = dvui },
+        .{ .name = "editor-ui", .module = ui },
+        .{ .name = "linux-setup", .module = host.linux_setup },
     }) });
     const tray = deps.ztray.?.module("ztray");
     native.linuxPaths(b, tray, t);
@@ -552,6 +565,8 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
             .{ .name = "onboarding-ui", .module = onboarding_ui },
             .{ .name = "native-hid", .module = host.native_hid },
             .{ .name = "live-adapter", .module = host.live_adapter },
+            .{ .name = "linux-setup", .module = host.linux_setup },
+            .{ .name = "linux-setup-ui", .module = linux_setup_ui },
             .{ .name = "release-options", .module = core.release_options.createModule() },
         })),
         .usb_acceptance_deps = dupe(b, &.{

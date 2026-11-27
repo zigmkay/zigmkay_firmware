@@ -237,6 +237,7 @@ pub fn addHost(s: *Suite, fixtures: *Fixtures) void {
     addProject(s, h);
 
     _ = s.unit(step, .core, "src/platform/test_native_hid.zig", h.native_hid_only);
+    _ = s.unit(step, .core, "src/platform/linux_setup.zig", h.linux_setup_deps);
     _ = s.unit(step, .core, "src/firmware/protocol.zig", h.zigmkay_only);
     _ = s.unit(step, .core, "src/session/root.zig", h.session_deps);
     _ = s.unit(step, .core, "src/session/test_all.zig", h.session_test_deps);
