@@ -177,13 +177,16 @@ pub fn parallelism(cpu_count: usize, background: bool) u16 {
     return @intCast(std.math.clamp(wanted, 2, 12));
 }
 
-/// Platform-aware parallelism for `zig build -j`. On Windows, Zig 0.17's LLVM
-/// backend sporadically crashes (exit code 5 / broken bitcode) when many
-/// compile steps run concurrently, so cap Windows builds at 2 parallel jobs.
+/// Platform-aware parallelism for `zig build -j`. Windows builds run at most
+/// eight steps at once: with twelve, Zig 0.17's LLVM backend sporadically
+/// failed (exit code 5, broken bitcode) on a 24-thread laptop, while two made
+/// a cold warm-up on a 16-thread laptop take 7.5 minutes instead of 1.5.
 pub fn parallelismFor(os: std.Target.Os.Tag, cpu_count: usize, background: bool) u16 {
     const count = parallelism(cpu_count, background);
-    return if (os == .windows) @min(count, 2) else count;
+    return if (os == .windows) @min(count, windows_limit) else count;
 }
+
+const windows_limit = 8;
 
 pub fn hostParallelism(background: bool) u16 {
     return parallelismFor(builtin.os.tag, std.Thread.getCpuCount() catch 2, background);
@@ -211,8 +214,10 @@ test "parallelism leaves a core to the editor and bounds the warm-up" {
     try std.testing.expectEqual(@as(u16, 2), parallelism(2, true));
     try std.testing.expectEqual(@as(u16, 4), parallelism(8, true));
     try std.testing.expectEqual(@as(u16, 7), parallelism(15, true));
-    try std.testing.expectEqual(@as(u16, 2), parallelismFor(.windows, 24, false));
-    try std.testing.expectEqual(@as(u16, 2), parallelismFor(.windows, 24, true));
+    try std.testing.expectEqual(@as(u16, 8), parallelismFor(.windows, 24, false));
+    try std.testing.expectEqual(@as(u16, 8), parallelismFor(.windows, 24, true));
+    try std.testing.expectEqual(@as(u16, 8), parallelismFor(.windows, 16, true));
+    try std.testing.expectEqual(@as(u16, 3), parallelismFor(.windows, 4, false));
     try std.testing.expectEqual(@as(u16, 12), parallelismFor(.linux, 24, false));
     try std.testing.expectEqual(@as(u16, 12), parallelismFor(.macos, 24, false));
     try std.testing.expect(hostParallelism(false) >= 2);
