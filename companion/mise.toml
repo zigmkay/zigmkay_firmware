@@ -7,6 +7,12 @@ hide = true
 run = "bash {{config_root}}/tools/mise/preflight.sh"
 run_windows = "exit 0"
 
+[tasks."preflight:desktop"]
+description = "Check that the system libraries the native GUI build links are installed (Linux: xkbcommon, dbus-1, pkg-config)"
+hide = true
+run = "bash {{config_root}}/tools/mise/preflight.sh --desktop"
+run_windows = "exit 0"
+
 [tasks.test]
 depends = ["preflight"]
 description = "Run all offline companion tests"
@@ -26,31 +32,31 @@ description = "Run subprocess, flash-job, traversal and release tooling tests wi
 run = "zig build test-jobs -j4"
 
 [tasks."desktop:check"]
-depends = ["preflight"]
+depends = ["preflight:desktop"]
 description = "Compile the native editor, GUI dependencies and smoke probes without launching or accessing devices"
 dir = "{{config_root}}"
 run = "zig build check -Ddesktop -j4"
 
 [tasks.editor]
-depends = ["preflight"]
+depends = ["preflight:desktop"]
 dir = "{{config_root}}"
 description = "Launch the editor and automatically connect to the keyboard"
 run = "zig build run -Dbundle -j4"
 
 [tasks."editor:build"]
-depends = ["preflight"]
+depends = ["preflight:desktop"]
 dir = "{{config_root}}"
 description = "Assemble the complete offline editor and companion without launching"
 run = "zig build bundle -Dbundle -j4"
 
 [tasks."editor:test"]
-depends = ["preflight"]
+depends = ["preflight:desktop"]
 dir = "{{config_root}}"
 description = "Run offline GUI launch, onboarding, tutor, draft, source-refresh and companion fixtures"
 run = "zig build test-desktop -Ddesktop -j4"
 
 [tasks.companion]
-depends = ["preflight"]
+depends = ["preflight:desktop"]
 dir = "{{config_root}}"
 description = "Start the resident companion and automatically connect to the keyboard"
 run = "zig build run -Dbundle -j4 -- --background"
