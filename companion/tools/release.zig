@@ -282,6 +282,10 @@ fn linuxLibraries(io: std.Io, root: []const u8) !void {
     try std.Io.Dir.cwd().createDirPath(io, try join(&.{ root, "usr/share/X11" }));
     _ = try run(io, &.{ "cp", "-R", "/usr/share/X11/xkb", try join(&.{ root, "usr/share/X11/xkb" }) });
     try linuxSource(io, root, "/usr/share/X11/xkb/rules/evdev", &source_packages);
+    // The bundled libxkbcommon and libX11 must read Compose tables of their own
+    // vintage: newer host tables use keysyms they reject on every load.
+    _ = try run(io, &.{ "cp", "-R", "/usr/share/X11/locale", try join(&.{ root, "usr/share/X11/locale" }) });
+    try linuxSource(io, root, "/usr/share/X11/locale/compose.dir", &source_packages);
 }
 
 fn fetch(io: std.Io, url: []const u8, expected: []const u8, destination: []const u8, executable: bool) !void {

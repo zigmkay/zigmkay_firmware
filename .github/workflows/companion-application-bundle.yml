@@ -127,7 +127,7 @@ jobs:
         run: |
           sed -n 's/^deb /deb-src /p' /etc/apt/sources.list | sudo tee /etc/apt/sources.list.d/zigmkay-source.list
           sudo apt-get update
-          sudo apt-get install -y libxkbcommon-dev libdbus-1-dev libx11-dev libudev-dev bubblewrap file binutils xkb-data
+          sudo apt-get install -y libxkbcommon-dev libdbus-1-dev libx11-dev libudev-dev bubblewrap file binutils xkb-data libx11-data
           # The AppImage bundles system libraries, and `release package` collects
           # their exact sources with `apt-get source`. The archive serves only the
           # newest source of a package, so a library the runner image installed

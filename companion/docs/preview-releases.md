@@ -40,10 +40,10 @@ the runtime is supplied with `--runtime-file`, avoiding appimagetool's default
 latest-runtime download. Tool pins must be reviewed together with their sources.
 
 Linux packaging requires Ubuntu 22.04 build libraries, `readelf`, `ldd`, `curl`,
-`tar`, `xkb-data`, and enabled `deb-src` package indexes. It inspects every shipped
-ELF executable/shared library, including Zig and helpers; bundles non-baseline
-dependencies and SDL native backends, XKB data and library notices; and rejects
-GLIBC requirements above 2.35. glibc, its loader and graphics-driver libraries
+`tar`, `xkb-data`, `libx11-data`, and enabled `deb-src` package indexes. It
+inspects every shipped ELF executable/shared library, including Zig and helpers;
+bundles non-baseline dependencies and SDL native backends, XKB layout and Compose
+data and library notices; and rejects GLIBC requirements above 2.35. glibc, its loader and graphics-driver libraries
 remain system-provided. Exact installed source package versions are downloaded
 into the corresponding-source directory. macOS rejects non-system dynamic
 dependencies. Windows inspects ordinary and delay-loaded PE imports for every

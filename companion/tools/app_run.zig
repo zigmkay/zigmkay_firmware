@@ -9,6 +9,7 @@ pub fn main(init: std.process.Init) !void {
     const libraries = try std.fs.path.join(a, &.{ root, "usr/lib" });
     try init.environ_map.put("LD_LIBRARY_PATH", libraries);
     try init.environ_map.put("XKB_CONFIG_ROOT", try std.fs.path.join(a, &.{ root, "usr/share/X11/xkb" }));
+    try init.environ_map.put("XLOCALEDIR", try std.fs.path.join(a, &.{ root, "usr/share/X11/locale" }));
     const original = try init.minimal.args.toSlice(a);
     const args = try a.alloc([]const u8, original.len);
     args[0] = application;
