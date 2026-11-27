@@ -27,7 +27,7 @@ pub const State = struct {
     /// Whether the gallery's pretend keyboard reports tap/hold decisions.
     tap_hold_support: desktop.practice_controller.TapHoldSupport = .unknown,
     /// The content scale a gallery scene renders at instead of the fitted
-    /// one, as on a Retina display or with the editor zoomed.
+    /// one, as on a Retina display.
     content_scale: ?f32 = null,
 };
 

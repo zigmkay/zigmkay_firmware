@@ -23,7 +23,6 @@ pub fn handle(app: *App) bool {
         },
         .quit => app.events.quit = true,
         .bind_saved_project => bindSavedProject(app),
-        .zoom_out, .zoom_in, .zoom_reset => app.life.action(action),
     }
     return true;
 }

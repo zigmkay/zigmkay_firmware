@@ -49,10 +49,6 @@ pub const Native = struct {
                 .enabled = state.live_mode,
             } },
             .separator,
-            .{ .action = .{ .title = "Zoom Out Editor", .action_id = @backingInt(Action.zoom_out) } },
-            .{ .action = .{ .title = "Zoom In Editor", .action_id = @backingInt(Action.zoom_in) } },
-            .{ .action = .{ .title = "Reset Editor Zoom", .action_id = @backingInt(Action.zoom_reset) } },
-            .separator,
             .{ .action = .{ .title = "Quit Zigmkay", .action_id = @backingInt(Action.quit) } },
         };
         if (builtin.os.tag == .macos)
