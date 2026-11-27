@@ -177,8 +177,16 @@ pub fn parallelism(cpu_count: usize, background: bool) u16 {
     return @intCast(std.math.clamp(wanted, 2, 12));
 }
 
+/// Platform-aware parallelism for `zig build -j`. On Windows, Zig 0.17's LLVM
+/// backend sporadically crashes (exit code 5 / broken bitcode) when many
+/// compile steps run concurrently, so cap Windows builds at 2 parallel jobs.
+pub fn parallelismFor(os: std.Target.Os.Tag, cpu_count: usize, background: bool) u16 {
+    const count = parallelism(cpu_count, background);
+    return if (os == .windows) @min(count, 2) else count;
+}
+
 pub fn hostParallelism(background: bool) u16 {
-    return parallelism(std.Thread.getCpuCount() catch 2, background);
+    return parallelismFor(builtin.os.tag, std.Thread.getCpuCount() catch 2, background);
 }
 
 test "the cache key separates compilers and keeps a stable name" {
@@ -203,6 +211,10 @@ test "parallelism leaves a core to the editor and bounds the warm-up" {
     try std.testing.expectEqual(@as(u16, 2), parallelism(2, true));
     try std.testing.expectEqual(@as(u16, 4), parallelism(8, true));
     try std.testing.expectEqual(@as(u16, 7), parallelism(15, true));
+    try std.testing.expectEqual(@as(u16, 2), parallelismFor(.windows, 24, false));
+    try std.testing.expectEqual(@as(u16, 2), parallelismFor(.windows, 24, true));
+    try std.testing.expectEqual(@as(u16, 12), parallelismFor(.linux, 24, false));
+    try std.testing.expectEqual(@as(u16, 12), parallelismFor(.macos, 24, false));
     try std.testing.expect(hostParallelism(false) >= 2);
 }
 
