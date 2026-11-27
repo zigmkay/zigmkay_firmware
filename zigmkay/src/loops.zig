@@ -136,6 +136,7 @@ fn run_primary_internal(
         // Execute actions: send usb commands to the host
         try usb_command_executor.HouseKeepAndProcessCommands(&usb_command_queue, current_time);
 
+        usb_if.drain_unused_out_reports();
         if (usb_if.receive_raw_report()) |report| {
             if (companion_session.receive(&report) == .enter_bootloader) rp2xxx.rom.reset_to_usb_boot();
         }
