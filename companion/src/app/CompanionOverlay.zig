@@ -149,17 +149,19 @@ fn applyMode(app: *App, window: *Backend.c.SDL_Window) void {
     const self = &app.companion;
     const id = Backend.c.SDL_GetWindowID(window);
     if (self.view.applied_window != id) {
-        const requested = self.view.overlay;
-        companion_window.mode(window, requested) catch |err| {
-            self.view.unavailable = requested;
-            if (app.frame_limit != null) {
-                self.view.overlay = false;
-                companion_window.mode(window, false) catch {};
-            } else {
-                app.view.report(err);
-                app.life.companion_visible = false;
-                _ = Backend.c.SDL_HideWindow(window);
-            }
+        companion_window.mode(window, self.view.overlay) catch |err| {
+            // Without overlay support the companion stays useful as a normal
+            // window; it is hidden only when even that cannot be restored.
+            if (self.view.overlay) std.log.warn("Companion overlay unavailable: {t}; showing a normal window", .{err});
+            self.view.overlay = false;
+            companion_window.mode(window, false) catch |fallback| {
+                self.view.unavailable = true;
+                if (app.frame_limit == null) {
+                    app.view.report(fallback);
+                    app.life.companion_visible = false;
+                    _ = Backend.c.SDL_HideWindow(window);
+                }
+            };
         };
         self.view.applied_window = id;
     }

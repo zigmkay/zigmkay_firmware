@@ -174,6 +174,11 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     app.captions = try app.captionsFor(&app.model, "Offline launch fixture");
     errdefer app.captions.deinit();
     if (builtin.os.tag == .linux) _ = Backend.c.SDL_SetHint(Backend.c.SDL_HINT_APP_ID, "zigmkay");
+    // Wayland gives ordinary windows no always-on-top, position or input
+    // pass-through, so the companion overlay needs X11. Prefer XWayland when
+    // the session offers it; SDL_VIDEODRIVER still overrides this hint.
+    if (builtin.os.tag == .linux and frame_limit == null and std.c.getenv("DISPLAY") != null)
+        _ = Backend.c.SDL_SetHint(Backend.c.SDL_HINT_VIDEO_DRIVER, "x11,wayland");
     // Closing the editor window hides it while the tray keeps the app
     // resident (`handleWindowRequests`). SDL would otherwise also post a quit
     // when the last visible window closes, and the app would quit.
