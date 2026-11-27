@@ -5,9 +5,6 @@ pub const Action = enum(i32) {
     open_editor = 1,
     toggle_companion = 2,
     quit = 3,
-    zoom_out = 4,
-    zoom_in = 5,
-    zoom_reset = 6,
     bind_saved_project = 7,
 };
 
@@ -26,16 +23,12 @@ pub const Lifecycle = struct {
     companion_visible: bool = true,
     editor_visible: bool = false,
     quit_requested: bool = false,
-    editor_scale: f32 = 1.0,
 
     pub fn action(self: *Lifecycle, value: Action) void {
         switch (value) {
             .open_editor => self.editor_visible = true,
             .toggle_companion => self.companion_visible = !self.companion_visible,
             .quit => self.quit_requested = true,
-            .zoom_out => self.editor_scale = @max(0.5, self.editor_scale - 0.1),
-            .zoom_in => self.editor_scale = @min(1.5, self.editor_scale + 0.1),
-            .zoom_reset => self.editor_scale = 1.0,
             .bind_saved_project => {}, // Application owns saved-project IO and live negotiation.
         }
     }
@@ -135,17 +128,6 @@ const Fake = struct {
         self.counters.shutdowns += 1;
     }
 };
-
-test "editor zoom is bounded and reset preserves resident document lifetime" {
-    var life = Lifecycle{ .resident = true, .editor_visible = true };
-    for (0..20) |_| life.action(.zoom_out);
-    try std.testing.expectEqual(@as(f32, 0.5), life.editor_scale);
-    for (0..20) |_| life.action(.zoom_in);
-    try std.testing.expectEqual(@as(f32, 1.5), life.editor_scale);
-    life.action(.zoom_reset);
-    try std.testing.expectEqual(@as(f32, 1), life.editor_scale);
-    try std.testing.expect(life.keepRunning() and !life.quit_requested);
-}
 
 test "resident lifecycle hides both windows, reopens, and cancels quit" {
     var life = Lifecycle{ .resident = true, .editor_visible = true };

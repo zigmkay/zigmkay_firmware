@@ -118,7 +118,7 @@ pub fn draw(owner: *const Controller, input: Input) !?policy.controller.Intent {
         if (diagnostics.truncated) paragraph("Job output was truncated. Copy diagnostics for what remains.", 13, theme.muted, false, 8);
     }
     const terminal = switch (owner.phase) {
-        .ready, .failed, .cancelled, .reconnect_timeout, .stale => true,
+        .ready, .flashed_unverified, .failed, .cancelled, .reconnect_timeout, .stale => true,
         else => false,
     };
     if (terminal) paragraph("Press Flash once to try again.", 13, theme.muted, false, 9);

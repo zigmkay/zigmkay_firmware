@@ -282,6 +282,10 @@ fn logFlash(app: *App, phase: Phase) void {
             app.build.status.flashed_ms = awakeMs(app);
             log(app, .ok, "Flashed · the keyboard reconnected with this layout", .{});
         },
+        .flashed_unverified => {
+            app.build.status.flashed_ms = awakeMs(app);
+            log(app, .ok, "Flashed · keyboard restarted (allow Linux access to verify live)", .{});
+        },
         .cancelled => log(app, .warn, "Flash cancelled", .{}),
         .stale => log(app, .warn, "Flash stopped · the layout changed", .{}),
         .failed => log(app, .err, "Flash failed · {s}", .{if (app.flash.failure) |err| @errorName(err) else "see the flash window"}),
@@ -340,6 +344,7 @@ fn stateInput(app: *App, can_build: bool) !flow.Input {
 }
 
 fn flashState(app: *const App, now: u64) flow.Flash {
+    if (app.flash.prep != null) return .{ .working = .preparing };
     const phase = app.flash.phase() orelse return if (app.flash.failure != null and app.flash.pending == null) .failed else .idle;
     return switch (phase) {
         .idle, .cancelled, .stale => .idle,
@@ -349,7 +354,7 @@ fn flashState(app: *const App, now: u64) flow.Flash {
         .rebooting => .{ .working = .restarting },
         .reconnecting => .{ .working = .reconnecting },
         .cancelling => .{ .working = .cancelling },
-        .ready => .{ .done = now -| (app.build.status.flashed_ms orelse now) },
+        .ready, .flashed_unverified => .{ .done = now -| (app.build.status.flashed_ms orelse now) },
         .failed, .reconnect_timeout => .failed,
     };
 }

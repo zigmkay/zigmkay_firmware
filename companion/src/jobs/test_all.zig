@@ -1,4 +1,5 @@
 test {
+    _ = @import("child_job.zig");
     _ = @import("package_manifest.zig");
     _ = @import("source_files.zig");
     _ = @import("target_lock.zig");

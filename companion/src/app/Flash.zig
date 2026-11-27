@@ -22,6 +22,8 @@ const Phase = desktop.flash_controller.Phase;
 const Watch = @FieldType(desktop.flash_controller.Effect, "watch_reconnect");
 
 session: ?flash_session.Session = null,
+/// Background preparation (tool verification + UF2 freeze) so Flash never blocks the UI thread.
+prep: ?*PrepWorker = null,
 panel: bool = false,
 details_open: bool = false,
 failure: ?anyerror = null,
@@ -37,7 +39,82 @@ trial_start: ?i128 = null,
 
 pub const Pending = struct { snapshot: [32]u8, generation: u64 };
 
+const PrepWorker = struct {
+    gpa: std.mem.Allocator,
+    io: std.Io,
+    snapshot: [32]u8,
+    generation: u64,
+    manifest_bytes: []u8,
+    request: desktop.build_worker.Request,
+    tree: jobs_api.firmware.Digest,
+    tools: jobs_api.flash_inputs.Tools,
+    cache_base: ?[]u8,
+    now_ms: u64,
+    owns_inputs: bool = true,
+    done: std.atomic.Value(bool) = .init(false),
+    thread: ?std.Thread = null,
+    session: ?flash_session.Session = null,
+    err: ?anyerror = null,
+
+    fn run(self: *PrepWorker) void {
+        defer self.done.store(true, .release);
+        self.work() catch |err| {
+            self.err = err;
+        };
+    }
+
+    fn work(self: *PrepWorker) !void {
+        var manifest = try jobs_api.firmware.Manifest.parse(self.gpa, self.manifest_bytes);
+        defer manifest.deinit();
+        var session = try flash_session.Session.init(
+            self.gpa,
+            self.io,
+            self.snapshot,
+            self.generation,
+            manifest,
+            self.request,
+            self.tree,
+            self.tools,
+        );
+        self.owns_inputs = false;
+        errdefer session.deinit();
+        try session.prepare(self.now_ms);
+        try session.built(manifest, self.now_ms);
+        if (self.cache_base) |base| {
+            var cache = try std.Io.Dir.cwd().createDirPathOpen(self.io, base, .{});
+            defer cache.close(self.io);
+            var directory = try cache.createDirPathOpen(self.io, "flash", .{});
+            defer directory.close(self.io);
+            const path = try directory.realPathFileAlloc(self.io, ".", self.gpa);
+            defer self.gpa.free(path);
+            try session.freeze(manifest, directory, path, self.now_ms);
+        }
+        try session.selectUniqueBootsel();
+        self.session = session;
+    }
+
+    fn deinit(self: *PrepWorker) void {
+        if (self.thread) |thread| thread.join();
+        if (self.session) |*session| session.deinit();
+        if (self.owns_inputs) {
+            self.request.deinit();
+            self.tools.deinit();
+        }
+        self.gpa.free(self.manifest_bytes);
+        if (self.cache_base) |base| self.gpa.free(base);
+        self.gpa.destroy(self);
+    }
+};
+
+fn stopPrep(self: *Flash) void {
+    if (self.prep) |worker| {
+        worker.deinit();
+        self.prep = null;
+    }
+}
+
 pub fn deinit(self: *Flash) void {
+    self.stopPrep();
     if (self.session) |*session| session.deinit();
 }
 
@@ -57,12 +134,13 @@ pub fn phase(self: *const Flash) ?Phase {
 
 /// Whether a session runs that a new Flash click must not replace.
 pub fn active(self: *const Flash) bool {
+    if (self.prep != null) return true;
     const current = self.phase() orelse return false;
     return !finished(current);
 }
 
 pub fn idle(self: *const Flash) bool {
-    return self.session == null and self.pending == null and self.retained_view == null;
+    return self.session == null and self.prep == null and self.pending == null and self.retained_view == null;
 }
 
 pub fn failed(self: *const Flash) bool {
@@ -72,6 +150,7 @@ pub fn failed(self: *const Flash) bool {
 
 /// Drops the session and its outcome for a new automatic build.
 pub fn discard(self: *Flash) void {
+    self.stopPrep();
     if (self.session) |*previous| previous.deinit();
     self.session = null;
     self.cancelConfirmation();
@@ -98,6 +177,7 @@ pub fn buildSucceeded(self: *Flash, model: *const desktop.model.Model, generatio
             self.advance = true;
         } else self.pending = null;
     }
+    self.stopPrep();
     if (self.session) |*previous| previous.deinit();
     self.session = null;
 }
@@ -106,12 +186,12 @@ pub fn buildSucceeded(self: *Flash, model: *const desktop.model.Model, generatio
 /// waiting for the keyboard, or a session before its outcome. A finished
 /// session stays for its outcome panel but needs no frames of its own.
 pub fn working(self: *const Flash) bool {
-    return self.pending != null or self.retained_view != null or self.active();
+    return self.pending != null or self.prep != null or self.retained_view != null or self.active();
 }
 
 fn finished(value: Phase) bool {
     return switch (value) {
-        .ready, .failed, .cancelled, .reconnect_timeout, .stale => true,
+        .ready, .flashed_unverified, .failed, .cancelled, .reconnect_timeout, .stale => true,
         else => false,
     };
 }
@@ -169,7 +249,7 @@ pub fn monitorTrial(app: *App) !App.Flow {
             std.log.info("Physical flash ready in {d} ms", .{elapsed_ms});
             return .stop;
         },
-        .failed, .stale, .cancelled, .reconnect_timeout => {
+        .flashed_unverified, .failed, .stale, .cancelled, .reconnect_timeout => {
             std.log.err("Physical flash terminated after {d} ms: {t}; error={s}; runtime={s}", .{
                 elapsed_ms,
                 session.owner.phase,
@@ -204,10 +284,11 @@ pub fn startTrial(app: *App, can_build: bool, rendered: *editor.Result) !void {
     rendered.* = .{ .effect = try flash_request.dispatch(&app.owner, &app.model) };
 }
 
-/// Advances the session by one frame: invalidation, the confirmation gate,
-/// the managed transfer and the reconnect to the flashed firmware.
+/// Advances the session by one frame: background preparation, invalidation,
+/// the confirmation gate, the managed transfer and the reconnect to the flashed firmware.
 pub fn step(app: *App, now_us: u64) !void {
     const flash = &app.flash;
+    pollPrep(app);
     const session = if (flash.session) |*value| value else return;
     const generation = app.build.generation;
     if (flash.retained_view != null) {
@@ -310,8 +391,49 @@ fn bindReconnect(app: *App, session: *flash_session.Session, watch: Watch) !void
     std.log.info("Flash reconnect binding prepared for operation {d}", .{watch.operation.id});
 }
 
+fn pollPrep(app: *App) void {
+    const flash = &app.flash;
+    const worker = flash.prep orelse return;
+    if (!worker.done.load(.acquire)) return;
+    flash.prep = null;
+    if (worker.thread) |thread| {
+        thread.join();
+        worker.thread = null;
+    }
+    const err = worker.err;
+    var ready_session = worker.session;
+    worker.session = null;
+    worker.deinit();
+    if (err) |failure| {
+        if (ready_session) |*s| s.deinit();
+        flash.fail(&app.view, failure);
+        return;
+    }
+    var session = ready_session orelse {
+        flash.fail(&app.view, error.StaleFlashRequest);
+        return;
+    };
+    if (!(session.matchesModel(&app.model, app.build.generation) catch false)) {
+        session.deinit();
+        flash.fail(&app.view, error.StaleFlashRequest);
+        return;
+    }
+    if (flash.session) |*old| old.deinit();
+    flash.session = session;
+    const active_session = &flash.session.?;
+    const shown = active_session.view(app.live.coherentToken());
+    const bound = snapshotOf(active_session, shown, app.build.generation);
+    if (!shown.can_confirm or !flash.gate.confirm(bound, bound)) {
+        flash.fail(&app.view, error.StaleFlashRequest);
+    } else flash.retained_view = shown;
+}
+
 fn acceptReconnect(app: *App, session: *flash_session.Session, watch: Watch, now_us: u64) void {
     const driver = if (app.live.driver) |*value| value else return;
+    if (driver.status == .transport_error and driver.transport_error != null and driver.transport_error.? == error.HidPermissionDenied) {
+        _ = session.reconnectPermissionDenied(now_us / 1000) catch |err| app.flash.fail(&app.view, err);
+        return;
+    }
     const identity = driver.session.expected;
     const token = driver.session.token;
     const new_session = if (session.owner.previous_session_token) |previous| token != previous else true;
@@ -369,6 +491,10 @@ pub fn request(app: *App, captured: desktop.editor_dispatch.Request, board: *con
         flash.failure = null;
         flash.panel = false;
     }
+    if (flash.prep != null) {
+        flash.panel = true;
+        return .next_frame;
+    }
     if (flash.session) |*previous| {
         // A second click authorizes a new operation only after a terminal
         // outcome; an active transfer is never restarted.
@@ -413,12 +539,12 @@ pub fn request(app: *App, captured: desktop.editor_dispatch.Request, board: *con
         app.view.report(error.FlashAlreadyInProgress);
         return .next_frame;
     }
-    const session = openSession(app, tools, plan.config, try app.model.id()) orelse return .next_frame;
+    if (!startPrep(app, tools, plan.config, try app.model.id())) return .next_frame;
     if (flash.session) |*old| old.deinit();
-    flash.session = session;
+    flash.session = null;
     flash.panel = true;
     flash.failure = null;
-    flash.advance = true;
+    flash.advance = false;
     app.view.diagnostic = @splat(0);
     return .proceed;
 }
@@ -428,31 +554,68 @@ fn reportConfigurationChanged(app: *App) App.Flow {
     return .proceed;
 }
 
-/// Admits a session for the current build of `snapshot`. Failures are reported.
-fn openSession(
+/// Starts background tool verification and artifact freezing so the UI never stalls.
+fn startPrep(
     app: *App,
     tools: jobs_api.flash_inputs.Tools,
     config: desktop.build_worker.Config,
     snapshot: [32]u8,
-) ?flash_session.Session {
+) bool {
     var captured = desktop.build_worker.Request.capture(&app.model, config, app.environ_map, app.build.generation) catch |err| {
         app.view.report(err);
-        return null;
+        return false;
     };
     var cloned = jobs_api.flash_inputs.Tools.clone(app.gpa, tools.record) catch |err| {
         captured.deinit();
         app.view.report(err);
-        return null;
+        return false;
     };
     const build = &app.build;
     const artifact = build.artifact.?;
-    const session = flash_session.Session.init(app.gpa, app.io, snapshot, build.generation, artifact, captured, build.tree, cloned);
-    return session catch |err| {
+    const manifest_bytes = artifact.serialize(app.gpa) catch |err| {
         captured.deinit();
         cloned.deinit();
         app.view.report(err);
-        return null;
+        return false;
     };
+    const cache_base = if (cacheBase(app, artifact)) |base|
+        app.gpa.dupe(u8, base) catch |err| {
+            app.gpa.free(manifest_bytes);
+            captured.deinit();
+            cloned.deinit();
+            app.view.report(err);
+            return false;
+        }
+    else
+        null;
+    const worker = app.gpa.create(PrepWorker) catch |err| {
+        if (cache_base) |base| app.gpa.free(base);
+        app.gpa.free(manifest_bytes);
+        captured.deinit();
+        cloned.deinit();
+        app.view.report(err);
+        return false;
+    };
+    worker.* = .{
+        .gpa = app.gpa,
+        .io = app.io,
+        .snapshot = snapshot,
+        .generation = build.generation,
+        .manifest_bytes = manifest_bytes,
+        .request = captured,
+        .tree = build.tree,
+        .tools = cloned,
+        .cache_base = cache_base,
+        .now_ms = @intCast(@max(0, app.native.nanoTime()) / std.time.ns_per_ms),
+    };
+    worker.thread = std.Thread.spawn(.{}, PrepWorker.run, .{worker}) catch |err| {
+        worker.deinit();
+        app.view.report(err);
+        return false;
+    };
+    app.flash.stopPrep();
+    app.flash.prep = worker;
+    return true;
 }
 
 /// Runs after the frame was displayed: admission, preparation and the frozen
@@ -486,10 +649,11 @@ fn admitPending(app: *App, pending: Flash.Pending) void {
     flash.pending = null;
     const tools = app.build.tools orelse return;
     const plan = app.build.plan orelse return;
-    flash.session = openSession(app, tools, plan.config, pending.snapshot) orelse return;
+    if (!startPrep(app, tools, plan.config, pending.snapshot)) return;
+    if (flash.session) |*old| old.deinit();
+    flash.session = null;
     flash.panel = true;
     flash.failure = null;
-    flash.advance = true;
 }
 
 /// Prepares, freezes and selects the session, then confirms the view the

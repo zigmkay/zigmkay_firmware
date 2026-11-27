@@ -177,7 +177,12 @@ const RawHid = usb.drivers.hid.InterruptDriver(.{
     .subclass = .Unspecified,
     .protocol = .NoneRequired,
     .report_descriptor = &.{
-        .{ .global_usage_page = @fromBackingInt(@intCast(0xFF31)) }, // Vendor Page 0xFF31
+        // MicroZig encodes UsagePage as signed i32 with the smallest signed
+        // integer width that fits. Casting 0xFF31 via i16 (-207) emits a
+        // spec-compliant 2-byte Usage Page item (0x06, 0x31, 0xFF); a positive
+        // i32 would emit a 4-byte item (0x07) that Windows hidparse.sys drops
+        // to Usage Page 0x0000.
+        .{ .global_usage_page = @fromBackingInt(@as(i16, @bitCast(@as(u16, 0xFF31)))) }, // Vendor Page 0xFF31
         .{ .local_usage = 0x0074 }, // Usage 0x0074
         .{ .main_collection = .Application },
         // Input: 32 bytes
@@ -202,6 +207,11 @@ const RawHid = usb.drivers.hid.InterruptDriver(.{
     .OutReport = RawHidReport,
 });
 
+comptime {
+    if (!std.mem.startsWith(u8, RawHid.report_descriptor, &.{ 0x06, 0x31, 0xFF, 0x09, 0x74 }))
+        @compileError("RawHID report descriptor must start with a 2-byte Usage Page 0xFF31 (0x06 0x31 0xFF) and Usage 0x74");
+}
+
 pub var usb_device: USB_Device = undefined;
 
 pub const ControllerType = usb.DeviceController(.{
@@ -212,7 +222,7 @@ pub const ControllerType = usb.DeviceController(.{
     // Keep this in sync with descriptor-set changes. Hosts cache HID report
     // descriptors by device identity, so changing the revision forces them to
     // enumerate newly added interfaces such as RawHID.
-    .bcd_device = .v1_10,
+    .bcd_device = .v1_11,
     .serial = "00000001",
     .max_supported_packet_size = USB_Device.max_supported_packet_size,
     .configurations = &.{.{

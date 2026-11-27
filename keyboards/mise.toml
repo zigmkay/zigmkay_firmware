@@ -3,6 +3,10 @@
 #
 # Values typed by the user reach the shell only through mise's usage_*
 # environment variables, quoted, so the shell expands nothing inside them.
+#
+# The completion commands are KDL raw strings (#"..."#): {{config_root}} is a
+# Windows path with backslashes there, which a quoted KDL string would read as
+# escapes and reject.
 
 [tasks.test]
 description = "Compile every keyboard and run the keyboard regression tests (no device access)"
@@ -12,7 +16,7 @@ run = "zig build test"
 description = "Build the firmware of one keyboard into zig-out/firmware"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
-complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+complete "keyboard" run=#"awk -F'"' '/\.name = /{print $2}' {{config_root}}/boards.zig"#
 flag "--keymap <keymap>" help="Keymap file to build instead of the keyboard's own, relative to keyboards/, such as local/lk8/keymap.zig"
 '''
 run = 'zig build "-Dkeyboard=$usage_keyboard" ${usage_keymap:+"-Dkeymap=$usage_keymap"}'
@@ -22,7 +26,7 @@ run_windows = 'zig build "-Dkeyboard=%usage_keyboard%" {% if usage.keymap %}"-Dk
 description = "Build and flash one keyboard with the host default (Windows/Linux: mounted volume, otherwise picotool)"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
-complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+complete "keyboard" run=#"awk -F'"' '/\.name = /{print $2}' {{config_root}}/boards.zig"#
 flag "--keymap <keymap>" help="Keymap file to build instead of the keyboard's own, relative to keyboards/, such as local/lk8/keymap.zig"
 '''
 run = 'zig build flash "-Dkeyboard=$usage_keyboard" ${usage_keymap:+"-Dkeymap=$usage_keymap"}'
@@ -32,7 +36,7 @@ run_windows = 'zig build flash "-Dkeyboard=%usage_keyboard%" {% if usage.keymap 
 description = "Build and flash one keyboard with picotool"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
-complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+complete "keyboard" run=#"awk -F'"' '/\.name = /{print $2}' {{config_root}}/boards.zig"#
 flag "--keymap <keymap>" help="Keymap file to build instead of the keyboard's own, relative to keyboards/, such as local/lk8/keymap.zig"
 '''
 run = 'zig build flash_pt "-Dkeyboard=$usage_keyboard" ${usage_keymap:+"-Dkeymap=$usage_keymap"}'
@@ -42,7 +46,7 @@ run_windows = 'zig build flash_pt "-Dkeyboard=%usage_keyboard%" {% if usage.keym
 description = "Build and flash one keyboard through the mounted RP2 bootloader volume"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
-complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+complete "keyboard" run=#"awk -F'"' '/\.name = /{print $2}' {{config_root}}/boards.zig"#
 flag "--mount <mount>" help="Mount point or volume label (default: RPI-RP2)"
 flag "--keymap <keymap>" help="Keymap file to build instead of the keyboard's own, relative to keyboards/, such as local/lk8/keymap.zig"
 '''
@@ -53,7 +57,7 @@ run_windows = 'zig build flash_mount "-Dkeyboard=%usage_keyboard%" {% if usage.m
 description = "Copy a keyboard's default keymap into keyboards/local/<name>/, which Git ignores, to edit and build"
 usage = '''
 arg "<keyboard>" help="Keyboard name from boards.zig, such as lk8"
-complete "keyboard" run="awk -F'\"' '/\\.name = /{print $2}' {{config_root}}/boards.zig"
+complete "keyboard" run=#"awk -F'"' '/\.name = /{print $2}' {{config_root}}/boards.zig"#
 arg "[name]" help="Folder name under keyboards/local/ (default: the keyboard name)"
 '''
 run = 'zig build keymap-new -- "$usage_keyboard" ${usage_name:+"$usage_name"}'

@@ -67,8 +67,7 @@ keyboard icon in the tray.
   editor changes stay a draft until built and flashed.
 - **Tray.** Close the editor and the application stays resident. The tray menu
   shows the device status and opens the editor, shows or hides the companion,
-  binds the saved editor project to the live companion, zooms the editor and
-  quits Zigmkay.
+  binds the saved editor project to the live companion and quits Zigmkay.
 - **Typing tutor & Test keys.** Choose **Open tutor** in the editor for an
   adaptive 6-stage typing tutor (real English words from the most word-forming
   letters on, all letters with focus-key unlocks, opposite-hand Shift,

@@ -191,8 +191,14 @@ const Clock = struct {
     now_ms: u64,
     animate: bool,
 
-    /// About 30 frames per second while something moves.
+    /// About 30 frames per second for the short pulse of a next step.
     const frame_us = 33_000;
+    /// Work that can last minutes sweeps at ten frames per second: every
+    /// frame redraws the whole editor, which at 30 frames per second kept a
+    /// full core busy on Windows while the compiler needed it.
+    const work_frame_us = 100_000;
+    /// The background warm-up only tints its button, four times a second.
+    const warmup_frame_us = 250_000;
     /// The next step pulses this long after it became the next step, then
     /// keeps a steady highlight.
     const pulse_ms = 7200;
@@ -219,7 +225,9 @@ const Clock = struct {
         const pulsing = (state.build.style == .next and self.now_ms -| view.build_motion.since_ms < pulse_ms) or
             (state.flash.style == .next and self.now_ms -| view.flash_motion.since_ms < pulse_ms);
         const id = dvui.parentGet().extendId(@src(), 0);
-        if (self.animate and (state.working() or pulsing)) {
+        if (self.animate and state.working()) {
+            dvui.timer(id, if (state.tone == .preparing) warmup_frame_us else work_frame_us);
+        } else if (self.animate and pulsing) {
             dvui.timer(id, frame_us);
         } else if (state.working()) {
             dvui.timer(id, 1_000_000);

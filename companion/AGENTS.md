@@ -6,7 +6,9 @@ plans, handovers or other repositories. Publishing and device access require sep
 
 - Keep first-party application packages, utilities, generators and tests here
   and implement them in Zig. Another implementation language requires explicit
-  user permission. Preserve existing imported C bridges without expanding them.
+  user permission. Keep C bridges as small as possible: extend one only where
+  Zig cannot reach the needed system API, and only after explicit user
+  permission.
 - Use exactly Zig 0.17.0, pinned in `.zigversion`, for production code, build
   logic, utilities, generators and tests. Verify the selected compiler; do not
   downgrade Zig to work around dependency compatibility.

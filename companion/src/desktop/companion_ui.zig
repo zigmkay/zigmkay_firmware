@@ -112,6 +112,12 @@ fn drawKey(key: desktop.physical_view.DrawKey, theme: ui.Theme, layer: usize) !v
     });
 }
 
+/// Caption ids of the title. Key captions in the same window use their u16
+/// key id, so the title's ids lie above that range; ids 1 and 2 collided
+/// with the captions of keys 1 and 2 ("duplicate widget id").
+const title_name_id: usize = std.math.maxInt(u16) + 1;
+const title_source_id: usize = std.math.maxInt(u16) + 2;
+
 /// The shown layer and the label source on an opaque pill: a dot in the layer
 /// color, the layer name, then the source in muted text.
 fn drawTitle(theme: ui.Theme, layer_name: []const u8, source: []const u8, layer: usize, width: f32) void {
@@ -145,13 +151,13 @@ fn drawTitle(theme: ui.Theme, layer_name: []const u8, source: []const u8, layer:
         .secondary = theme.muted,
         .size = 15,
         .align_x = 0,
-        .id_extra = 1,
+        .id_extra = title_name_id,
     });
     ui.caption(source, .{ .x = 48 + name_size.w + 12, .y = 2, .w = @max(1, pill_w - 62 - name_size.w), .h = 22 }, .{
         .color = theme.muted,
         .secondary = theme.muted,
         .size = 12,
         .align_x = 0,
-        .id_extra = 2,
+        .id_extra = title_source_id,
     });
 }

@@ -49,10 +49,6 @@ pub const Native = struct {
                 .enabled = state.live_mode,
             } },
             .separator,
-            .{ .action = .{ .title = "Zoom Out Editor", .action_id = @backingInt(Action.zoom_out) } },
-            .{ .action = .{ .title = "Zoom In Editor", .action_id = @backingInt(Action.zoom_in) } },
-            .{ .action = .{ .title = "Reset Editor Zoom", .action_id = @backingInt(Action.zoom_reset) } },
-            .separator,
             .{ .action = .{ .title = "Quit Zigmkay", .action_id = @backingInt(Action.quit) } },
         };
         if (builtin.os.tag == .macos)
@@ -74,3 +70,12 @@ pub const Native = struct {
 };
 
 pub const NativeTray = lifecycle.Tray(Native);
+
+/// Whether the desktop displays the installed tray icon; null while unknown.
+/// Linux asks ztray for a StatusNotifierWatcher (stock GNOME has none).
+pub fn hostAvailable() ?bool {
+    if (builtin.os.tag != .linux) return true;
+    // ztray pins before trayHostAvailable cannot tell.
+    if (!@hasDecl(ztray, "trayHostAvailable")) return null;
+    return ztray.trayHostAvailable();
+}

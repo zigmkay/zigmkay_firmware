@@ -1,4 +1,7 @@
-//! Passive transparent macOS overlay. Production callers hide unsupported modes.
+//! Passive transparent overlay: borderless, always on top, never focused and
+//! click-through. macOS uses Cocoa, Windows extended window styles and Linux
+//! an empty X11 input shape (X11 or XWayland; Wayland has no such window).
+//! Callers fall back to a normal window where a mode is unsupported.
 const std = @import("std");
 const builtin = @import("builtin");
 const sdl = @import("dvui_backend").c;
@@ -50,6 +53,91 @@ fn cocoaOverlay(window: *sdl.SDL_Window) !void {
         ) & (1 | 256) != (1 | 256)) return error.CompanionWindowModeUnavailable;
 }
 
+/// Lets pointer input pass through to the windows below, or restores it.
+fn clickThrough(window: *sdl.SDL_Window, enabled: bool) !void {
+    switch (builtin.os.tag) {
+        // Unchanged macOS behaviour: Cocoa state is applied for the overlay only.
+        .macos => if (enabled) try cocoaOverlay(window),
+        .windows => try win32.clickThrough(window, enabled),
+        .linux => try x11.clickThrough(window, enabled),
+        else => if (enabled) return error.CompanionClickThroughUnavailable,
+    }
+}
+
+const win32 = struct {
+    const gwl_exstyle: c_int = -20;
+    const ws_ex_transparent: isize = 0x00000020;
+    const ws_ex_toolwindow: isize = 0x00000080;
+    const ws_ex_layered: isize = 0x00080000;
+    const ws_ex_noactivate: isize = 0x08000000;
+    /// Layered plus transparent makes Windows route pointer input past the
+    /// window; tool and no-activate keep it out of Alt+Tab and the taskbar.
+    const overlay_styles = ws_ex_transparent | ws_ex_toolwindow | ws_ex_layered | ws_ex_noactivate;
+    const lwa_alpha: u32 = 2;
+
+    extern "user32" fn GetWindowLongPtrW(hwnd: *anyopaque, index: c_int) callconv(.winapi) isize;
+    extern "user32" fn SetWindowLongPtrW(hwnd: *anyopaque, index: c_int, value: isize) callconv(.winapi) isize;
+    extern "user32" fn SetLayeredWindowAttributes(hwnd: *anyopaque, key: u32, alpha: u8, flags: u32) callconv(.winapi) c_int;
+
+    fn clickThrough(window: *sdl.SDL_Window, enabled: bool) !void {
+        const hwnd = sdl.SDL_GetPointerProperty(
+            sdl.SDL_GetWindowProperties(window),
+            sdl.SDL_PROP_WINDOW_WIN32_HWND_POINTER,
+            null,
+        ) orelse return error.CompanionClickThroughUnavailable;
+        const before = GetWindowLongPtrW(hwnd, gwl_exstyle);
+        const wanted = if (enabled) before | overlay_styles else before & ~overlay_styles;
+        if (wanted != before) _ = SetWindowLongPtrW(hwnd, gwl_exstyle, wanted);
+        // A layered window stays invisible until its attributes are set; full
+        // alpha keeps the renderer's per-pixel transparency as SDL draws it.
+        if (enabled and SetLayeredWindowAttributes(hwnd, 0, 255, lwa_alpha) == 0)
+            return error.CompanionClickThroughUnavailable;
+        const applied = GetWindowLongPtrW(hwnd, gwl_exstyle) & overlay_styles;
+        if (applied != (if (enabled) overlay_styles else 0)) return error.CompanionClickThroughUnavailable;
+    }
+};
+
+const x11 = struct {
+    const shape_input: c_int = 2;
+    const shape_set: c_int = 0;
+    const unsorted: c_int = 0;
+    const Combine = *const fn (?*anyopaque, c_ulong, c_int, c_int, c_int, ?*anyopaque, c_int, c_int, c_int) callconv(.c) void;
+    const CombineMask = *const fn (?*anyopaque, c_ulong, c_int, c_int, c_int, c_ulong, c_int) callconv(.c) void;
+    const Flush = *const fn (?*anyopaque) callconv(.c) c_int;
+
+    /// libXext and libX11 as SDL loads them: from the bundle or the system.
+    var library: ?struct { ext: std.DynLib, x: std.DynLib } = null;
+
+    fn load() !@TypeOf(library.?) {
+        if (library) |loaded| return loaded;
+        var ext = std.DynLib.open("libXext.so.6") catch return error.CompanionClickThroughUnavailable;
+        errdefer ext.close();
+        const x = std.DynLib.open("libX11.so.6") catch return error.CompanionClickThroughUnavailable;
+        library = .{ .ext = ext, .x = x };
+        return library.?;
+    }
+
+    /// An empty input shape sends every pointer event to the window below;
+    /// resetting the shape to None restores normal input.
+    fn clickThrough(window: *sdl.SDL_Window, enabled: bool) !void {
+        const props = sdl.SDL_GetWindowProperties(window);
+        const display = sdl.SDL_GetPointerProperty(props, sdl.SDL_PROP_WINDOW_X11_DISPLAY_POINTER, null) orelse
+            return if (enabled) error.CompanionClickThroughUnavailable else {};
+        const xwindow: c_ulong = @intCast(sdl.SDL_GetNumberProperty(props, sdl.SDL_PROP_WINDOW_X11_WINDOW_NUMBER, 0));
+        if (xwindow == 0) return error.CompanionClickThroughUnavailable;
+        var loaded = try load();
+        const flush = loaded.x.lookup(Flush, "XFlush") orelse return error.CompanionClickThroughUnavailable;
+        if (enabled) {
+            const combine = loaded.ext.lookup(Combine, "XShapeCombineRectangles") orelse return error.CompanionClickThroughUnavailable;
+            combine(display, xwindow, shape_input, 0, 0, null, 0, shape_set, unsorted);
+        } else {
+            const combine = loaded.ext.lookup(CombineMask, "XShapeCombineMask") orelse return error.CompanionClickThroughUnavailable;
+            combine(display, xwindow, shape_input, 0, 0, 0, shape_set);
+        }
+        _ = flush(display);
+    }
+};
+
 pub fn overlayRect(usable: sdl.SDL_Rect, width: c_int, height: c_int) sdl.SDL_Rect {
     const w = @max(1, @min(width, usable.w));
     const h = @max(1, @min(height, usable.h));
@@ -66,15 +154,18 @@ pub fn mode(window: *sdl.SDL_Window, overlay: bool) !void {
     const bordered = sdl.SDL_SetWindowBordered(window, !overlay);
     const top = sdl.SDL_SetWindowAlwaysOnTop(window, overlay);
     const focus = sdl.SDL_SetWindowFocusable(window, !overlay);
+    const pass = clickThrough(window, overlay);
     if (!bordered or !top or !focus) return error.CompanionWindowModeUnavailable;
+    // X11 applies window manager state asynchronously.
+    _ = sdl.SDL_SyncWindow(window);
     // SDL can return success without changing flags when a driver lacks the
     // requested operation. Confirm the actual mode before reporting support.
     const mask = sdl.SDL_WINDOW_BORDERLESS | sdl.SDL_WINDOW_ALWAYS_ON_TOP | sdl.SDL_WINDOW_NOT_FOCUSABLE;
     if ((sdl.SDL_GetWindowFlags(window) & mask) != (if (overlay) mask else 0))
         return error.CompanionWindowModeUnavailable;
+    try pass;
     if (!overlay) return;
     if (sdl.SDL_GetWindowFlags(window) & sdl.SDL_WINDOW_TRANSPARENT == 0) return error.CompanionTransparencyUnavailable;
-    try cocoaOverlay(window);
     var usable: sdl.SDL_Rect = undefined;
     if (!sdl.SDL_GetDisplayUsableBounds(sdl.SDL_GetDisplayForWindow(window), &usable))
         return error.CompanionDisplayBoundsUnavailable;

@@ -176,7 +176,7 @@ fn inspect(root: [64]u16) !policy.Volume {
     return .{ .root = root, .serial = serial, .disk = number.disk, .usb_identity = usb };
 }
 
-pub fn discover() !?policy.Volume {
+pub fn discover(_: std.Io) !?policy.Volume {
     var root: [64]u16 = @splat(0);
     const search = FindFirstVolumeW(&root, root.len);
     if (search == w.INVALID_HANDLE_VALUE) return error.VolumeEnumerationFailed;
@@ -207,9 +207,9 @@ pub const Ops = struct {
         if (std.Io.Clock.awake.now(self.io).toMilliseconds() >= self.deadline) return error.TransferTimeout;
     }
 
-    pub fn revalidate(_: *Ops, volume: policy.Volume) !policy.Volume {
+    pub fn revalidate(self: *Ops, volume: policy.Volume) !policy.Volume {
         // Re-enumeration rejects a second device arriving during discovery.
-        const current = try discover() orelse return error.DeviceDisappeared;
+        const current = try discover(self.io) orelse return error.DeviceDisappeared;
         if (!volume.same(current)) return error.BootselVolumeChanged;
         return current;
     }

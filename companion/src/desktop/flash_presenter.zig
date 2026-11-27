@@ -5,7 +5,7 @@ pub const Action = enum { prepare, build, freeze, select, confirm, cancel, reset
 
 pub fn blocksAutoBuild(phase: ?controller.Phase) bool {
     return if (phase) |value| switch (value) {
-        .idle, .ready, .failed, .cancelled, .reconnect_timeout, .stale => false,
+        .idle, .ready, .flashed_unverified, .failed, .cancelled, .reconnect_timeout, .stale => false,
         else => true,
     } else false;
 }
@@ -14,6 +14,7 @@ test "completed and invalidated Flash sessions allow the next automatic build" {
     const t = std.testing;
     for ([_]controller.Phase{
         .ready,
+        .flashed_unverified,
         .failed,
         .cancelled,
         .reconnect_timeout,
@@ -149,6 +150,7 @@ pub fn view(owner: *const controller.Controller, session_token: ?u32) View {
             .rebooting => "Reboot requested; waiting for the flash job to finish",
             .reconnecting => "Flash job finished; waiting for a matching live device",
             .ready => "Matching firmware reconnected",
+            .flashed_unverified => "Firmware flashed · allow keyboard access to verify live",
             .cancelling => "Cancelling; waiting for the flash job to exit",
             .cancelled => "Operation cancelled; check device state before retrying",
             .stale => "Project changed; this artifact cannot be flashed",
@@ -165,8 +167,9 @@ pub fn view(owner: *const controller.Controller, session_token: ?u32) View {
                 "Using the selected BOOTSEL target. Waiting for the managed transfer to start.",
             .verifying => "Verification has not been confirmed yet. Do not disconnect the device.",
             .rebooting => "The transfer is still in progress; reboot is not live reconnection.",
-            .reconnecting => if (owner.transfer_backend == .windows_bootsel) "Copy completed without flash read-back. Live identity is still unconfirmed." else "The flash tool completed. Live identity is still unconfirmed.",
+            .reconnecting => if (owner.transfer_backend == .bootsel_copy) "Copy completed without flash read-back. Live identity is still unconfirmed." else "The flash tool completed. Live identity is still unconfirmed.",
             .ready => "A new coherent live session matches the expected firmware identity.",
+            .flashed_unverified => "The firmware was copied and the keyboard restarted, but Linux permissions block live verification.",
             .cancelling => "Cancellation is pending until the managed job exits. Device contents may already have changed.",
             .cancelled => "Cancellation does not restore the previous firmware.",
             .stale => "Prepare and build again to use the changed project.",

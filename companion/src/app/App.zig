@@ -14,6 +14,8 @@ const boards = @import("catalog-project");
 const editor = @import("editor-frame-ui");
 const keyboard_onboarding = @import("onboarding-ui");
 const dialog = @import("folder-dialog");
+const window_placement = @import("window-placement");
+const single_instance = @import("single-instance");
 const Source = @import("input-source").Source;
 const installed = @import("app-paths");
 const tray_backend = @import("native-tray");
@@ -26,6 +28,7 @@ const Captions = @import("Captions.zig");
 const CompanionOverlay = @import("CompanionOverlay.zig");
 const Events = @import("Events.zig");
 const Flash = @import("Flash.zig");
+const LinuxSetup = @import("LinuxSetup.zig");
 const LiveKeyboard = @import("LiveKeyboard.zig");
 const OfflineTranslator = @import("OfflineTranslator.zig");
 const Tutor = @import("Tutor.zig");
@@ -101,6 +104,9 @@ captions: Captions,
 native: Backend,
 window: dvui.Window,
 tray: tray_backend.NativeTray,
+/// The claim of the running application; a later start asks it to show the
+/// editor (`tray_menu.handle`). Null for fixtures.
+instance: ?*single_instance.Instance = null,
 life: desktop.tray_lifecycle.Lifecycle,
 companion: CompanionOverlay = .{},
 events: Events,
@@ -119,6 +125,8 @@ job_generation: u64 = 0,
 jobs: workers.Jobs = .{},
 build: Build = .{},
 flash: Flash = .{},
+/// Linux device access and tray hint sheets.
+linux_setup: LinuxSetup = .{},
 fixture: fixtures.State = .{},
 /// The Build and Flash timeline of this session and the last compiler output.
 activity: desktop.build_activity.Log = .{},
@@ -161,11 +169,16 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     if (frame_limit == null or mode.is(.build)) try app.loadUserPaths();
     if (mode.live()) |live| if (live.project) |path| try app.openLiveProject(path);
 
-    app.source = if (frame_limit == null) Source.init() else null;
+    app.source = if (frame_limit == null or mode.is(.host_layout)) Source.init() else null;
     errdefer if (app.source) |*source| source.deinit();
     app.captions = try app.captionsFor(&app.model, "Offline launch fixture");
     errdefer app.captions.deinit();
     if (builtin.os.tag == .linux) _ = Backend.c.SDL_SetHint(Backend.c.SDL_HINT_APP_ID, "zigmkay");
+    // Wayland gives ordinary windows no always-on-top, position or input
+    // pass-through, so the companion overlay needs X11. Prefer XWayland when
+    // the session offers it; SDL_VIDEODRIVER still overrides this hint.
+    if (builtin.os.tag == .linux and frame_limit == null and std.c.getenv("DISPLAY") != null)
+        _ = Backend.c.SDL_SetHint(Backend.c.SDL_HINT_VIDEO_DRIVER, "x11,wayland");
     // Closing the editor window hides it while the tray keeps the app
     // resident (`handleWindowRequests`). SDL would otherwise also post a quit
     // when the last visible window closes, and the app would quit.
@@ -183,6 +196,12 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
         .persist_window_geometry = false,
     });
     errdefer app.native.deinit();
+    // The default size is larger than the usable area of small or highly
+    // scaled displays (a 2560x1600 laptop at 200% leaves 1504 px above the
+    // taskbar), so keep the first editor window on screen.
+    if (frame_limit == null and !mode.background())
+        window_placement.place(app.native.window, true) catch |err|
+            std.log.warn("Editor window placement failed: {t}", .{err});
     window_icon.apply(app.native.window);
     app.window = try dvui.Window.init(@src(), gpa, app.native.backend(), .{});
     errdefer app.window.deinit();
@@ -214,6 +233,7 @@ pub fn deinit(app: *App) void {
     app.activity.deinit(app.gpa);
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.flash.deinit();
+    app.linux_setup.deinit();
     if (app.build.resources) |*resources| resources.deinit();
     if (app.build.tools) |*tools| tools.deinit();
     app.jobs.cancel();
@@ -404,7 +424,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     // tutor aligned with the exact pixel edge, including on Retina displays.
     if (app.window.data().rect.w > 0) app.window.natural_scale = app.window.rect_pixels.w / app.window.data().rect.w;
     if (!app.fonts_installed and (app.frame_limit == null or app.mode.isTutorGallery() or app.mode.isStatus() or app.mode.isDrawers() or
-        app.mode.isOnboarding() or app.mode.is(.catalog)))
+        app.mode.isOnboarding() or app.mode.is(.catalog) or app.mode.is(.linux_setup)))
     {
         try editor_fonts.install(app.gpa, app.io);
         app.fonts_installed = true;
@@ -424,6 +444,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     const practice = try Tutor.prepareFrame(app, board);
     var screen = try screens.draw(app, board, practice, can_build, now_us);
     const flash_panel = Flash.drawPanel(app);
+    app.linux_setup.draw(app);
     try Flash.startTrial(app, can_build, &screen.rendered);
     try fixtures.requestBuild(app, can_build, &screen.rendered);
     try CompanionOverlay.update(app, board, practice);
@@ -441,12 +462,12 @@ fn fitWindow(app: *App) void {
     const available = window.backend.windowSize();
     const system_scale = window.backend.contentScale();
     // Match the reference editor: fit the whole design canvas, accounting for
-    // macOS display density. Menu zoom is relative to that fitted size.
+    // macOS display density.
     const fitted_scale = desktop.geometry.fitScale(available.w / system_scale, available.h / system_scale);
     // Practice has a responsive canvas; keep its controls readable in the
     // native minimum window instead of shrinking the editor's fixed canvas.
     const scale = if (app.practicing) @max(@as(f32, 0.8), fitted_scale) else fitted_scale;
-    window.content_scale = app.fixture.content_scale orelse scale * app.life.editor_scale;
+    window.content_scale = app.fixture.content_scale orelse scale;
     window.snap_to_pixels = window.content_scale == 1;
     window.themeSet(editor_ui.dvuiTheme(window, app.view.toolbar.light));
 }

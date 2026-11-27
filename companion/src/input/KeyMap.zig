@@ -39,6 +39,13 @@ pub const KeyMap = struct {
         if (km.os) |os| os.refresh();
     }
 
+    /// Discard pending dead-key state so the next translation stands alone.
+    /// Backends without a cheaper reset reload the layout instead.
+    pub fn resetState(km: *KeyMap) void {
+        const os = km.os orelse return;
+        if (@hasDecl(OsKeyMap, "resetState")) os.resetState() else os.refresh();
+    }
+
     /// Convert a single key event to a UTF-8 text result.
     ///
     /// - Keys with a fixed label (F1–F24, arrows, Escape, Tab, Backspace,

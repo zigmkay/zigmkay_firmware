@@ -27,6 +27,9 @@ pub const Phase = enum {
     rebooting,
     reconnecting,
     ready,
+    /// Firmware transfer completed and the keyboard restarted, but host
+    /// permissions (e.g. Linux udev) prevented opening live HID to verify it.
+    flashed_unverified,
     cancelling,
     cancelled,
     stale,
@@ -84,6 +87,9 @@ pub const Event = union(enum) {
     /// Bridge from a newly negotiated, coherent live Session. Identity must be
     /// the complete canonical artifact identity, not just a board or caption.
     reconnected: struct { operation_id: u64, session_token: u32, coherent: bool, identity: Identity },
+    /// Live HID reported permission denied while waiting for reconnect: the
+    /// keyboard re-enumerated after transfer, so live verification cannot run.
+    reconnect_permission_denied: u64,
 };
 
 /// Owns selected serial and frozen path. Returned effects borrow these strings
@@ -302,6 +308,15 @@ pub const Controller = struct {
                     return .none;
                 }
                 self.phase = .ready;
+                self.failure = null;
+                return .{ .stop_reconnect = self.operation() };
+            },
+            .reconnect_permission_denied => |id| {
+                if (id != self.operation_id or
+                    self.phase != .reconnecting or
+                    !self.fresh()) return .none;
+                if (now >= self.reconnect_deadline) return self.tick(now);
+                self.phase = .flashed_unverified;
                 self.failure = null;
                 return .{ .stop_reconnect = self.operation() };
             },
@@ -580,13 +595,13 @@ test "Windows copy completion rejects incorrect live firmware identity" {
         .selection_revision = controller.selection_revision,
     } });
     var result = successfulResult();
-    result.backend = .windows_bootsel;
+    result.backend = .bootsel_copy;
     _ = try controller.receive(.{ .managed_result = .{
         .operation_id = controller.operation_id,
         .result = &result,
     } }, 100);
     try t.expectEqual(Phase.reconnecting, controller.phase);
-    try t.expectEqual(jobs.flash_inputs.Backend.windows_bootsel, controller.transfer_backend);
+    try t.expectEqual(jobs.flash_inputs.Backend.bootsel_copy, controller.transfer_backend);
     var wrong = test_identity;
     wrong.digest[0] ^= 1;
     _ = try controller.receive(.{ .reconnected = .{
@@ -659,4 +674,31 @@ test "cancellation reaps before retry and reconnect timeout never flashes again"
     );
     try std.testing.expectEqual(Phase.reconnect_timeout, controller.phase);
     try std.testing.expectEqual(.none, std.meta.activeTag(controller.tick(1_000_000)));
+}
+
+test "reconnect permission denied settles as flashed_unverified without error" {
+    const t = std.testing;
+    var controller = Controller.init(t.allocator, test_context);
+    defer controller.deinit();
+    try reachFrozen(&controller);
+    _ = try controller.dispatch(.{ .select = .unique_bootsel });
+    _ = try controller.dispatch(.{ .confirm = .{
+        .operation_id = controller.operation_id,
+        .uf2_hash = @splat(4),
+        .selection_revision = controller.selection_revision,
+    } });
+    var result: jobs.picotool_job.Result = .{
+        .backend = .bootsel_copy,
+        .process = .{ .term = .{ .exited = 0 }, .stdout = "", .stderr = "" },
+        .snapshot_id = test_context.snapshot,
+        .cancelled = false,
+        .timed_out = false,
+        .diagnostics_truncated = false,
+    };
+    const watch = try controller.receive(.{ .managed_result = .{ .operation_id = controller.operation_id, .result = &result } }, 100);
+    try t.expectEqual(.watch_reconnect, std.meta.activeTag(watch));
+    const stop = try controller.receive(.{ .reconnect_permission_denied = controller.operation_id }, 200);
+    try t.expectEqual(.stop_reconnect, std.meta.activeTag(stop));
+    try t.expectEqual(Phase.flashed_unverified, controller.phase);
+    try t.expectEqual(@as(?Failure, null), controller.failure);
 }

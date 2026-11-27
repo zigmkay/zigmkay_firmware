@@ -20,6 +20,7 @@ pub const test_roots = [_][]const u8{
 pub const deferred_test_files = [_][]const u8{
     "tests/desktop_vectors.zig",
     "src/platform/window_placement.zig",
+    "src/platform/single_instance.zig",
     "src/desktop/application_icons.zig",
     "src/platform/events.zig",
     "tests/editor_frame.zig",
@@ -38,6 +39,8 @@ pub const deferred_test_files = [_][]const u8{
 /// SDL dummy/software fixtures of the application: flag and frame count.
 const fixtures = [_]struct { []const u8, []const u8 }{
     .{ "--offline-frames", "3" },
+    .{ "--offline-host-layout-frames", "3" },
+    .{ "--offline-linux-setup-frames", "8" },
     .{ "--offline-onboarding-frames", "24" },
     .{ "--offline-catalog-frames", "56" },
     .{ "--offline-status-frames", "68" },
@@ -86,8 +89,12 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     if (test_fixtures.app_tests) |run| step.dependOn(&run.step);
 
     const app = b.addExecutable(.{ .name = "zigmkay-companion", .root_module = mods.root("src/app/main.zig", g.app_deps) });
-    if (s.cfg.target.result.os.tag == .windows)
+    if (s.cfg.target.result.os.tag == .windows) {
         app.root_module.addWin32ResourceFile(.{ .file = g.icon_files.path(b, "application.rc") });
+        // A double-clicked release opens no console window next to the
+        // editor. Development builds keep the console for their log output.
+        if (s.cfg.release) app.subsystem = .windows;
+    }
     s.steps.check.dependOn(&app.step);
     for (fixtures) |fixture| step.dependOn(&tests.addGuiFixture(b, app, &.{ fixture[0], fixture[1] }).step);
 

@@ -14,6 +14,7 @@ pub const managed_build = @import("managed_build.zig");
 pub const compiler_cache = @import("compiler_cache.zig");
 pub const cache_retention = @import("cache_retention.zig");
 pub const build_context = @import("build_context.zig");
+pub const child_job = @import("child_job.zig");
 pub const output_limit = 1024 * 1024;
 pub const SnapshotId = [32]u8;
 
@@ -67,7 +68,15 @@ fn execute(gpa: std.mem.Allocator, io: std.Io, spec: Spec) anyerror!std.process.
         .stdout = .pipe,
         .stderr = .pipe,
         .pgid = if (posix_groups and spec.isolated_group) 0 else null,
+        // The Windows release is a GUI application without a console; a
+        // console child such as zig.exe would otherwise open its own window.
+        .create_no_window = true,
+        .start_suspended = child_job.suspended,
     });
+    child_job.adopt(&child) catch |err| {
+        child.kill(io);
+        return err;
+    };
     var reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
     var reader: std.Io.File.MultiReader = undefined;
     reader.init(gpa, io, reader_buffer.toStreams(), &.{ child.stdout.?, child.stderr.? });
@@ -262,7 +271,14 @@ pub const Session = struct {
             .stdin = .pipe,
             .stdout = .pipe,
             .stderr = .ignore,
+            .create_no_window = true,
+            .start_suspended = child_job.suspended,
         });
+        child_job.adopt(&self.child.?) catch |err| {
+            self.child.?.kill(io);
+            self.child = null;
+            return err;
+        };
         self.reader = self.child.?.stdout.?.readerStreaming(io, &self.buffer);
     }
 

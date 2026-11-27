@@ -138,7 +138,7 @@ pub const Source = struct {
         if (builtin.os.tag != .macos) {
             if (self.fallback) |*km| {
                 // Isolate each label from the existing backend's dead-key state.
-                km.refresh();
+                km.resetState();
                 return km.keyToText(input);
             }
             return .{};

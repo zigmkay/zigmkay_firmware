@@ -1,4 +1,4 @@
-//! Explicit Windows flash child; stdin EOF cancels the entire native I/O process.
+//! Explicit Windows and Linux flash child; stdin EOF cancels the entire native I/O process.
 const std = @import("std");
 const policy = @import("bootsel-policy");
 const native = @import("bootsel-native");
@@ -38,7 +38,7 @@ pub fn main(init: std.process.Init) !void {
     if ((try std.fmt.hexToBytes(&hash, args[3])).len != hash.len) return error.InvalidHash;
     var cancel = try std.Io.concurrent(init.io, cancellation, .{init.io});
     defer cancel.cancel(init.io);
-    // This watchdog also bounds synchronous Windows APIs if a device stops responding.
+    // This watchdog also bounds synchronous native I/O if a device stops responding.
     var guard = try std.Io.concurrent(init.io, watchdog, .{ init.io, discovery + command });
     defer guard.cancel(init.io);
     const bytes = try std.Io.Dir.cwd().readFileAlloc(init.io, args[1], a, .limited(16 * 1024 * 1024));
@@ -47,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
     if (!std.mem.eql(u8, &actual, &hash)) return error.HashMismatch;
     const deadline = std.Io.Clock.awake.now(init.io).toMilliseconds() + discovery;
     while (std.Io.Clock.awake.now(init.io).toMilliseconds() < deadline) {
-        if (try native.discover()) |volume| {
+        if (try native.discover(init.io)) |volume| {
             var diagnostics: [256]u8 = undefined;
             var stderr = std.Io.File.stderr().writer(init.io, &diagnostics);
             try stderr.interface.writeAll("phase: load-verify\nBOOTSEL copy; flash read-back unavailable\n");

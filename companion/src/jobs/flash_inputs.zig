@@ -6,7 +6,9 @@ pub const Digest = firmware.Digest;
 /// The picotool pin of the firmware's zigmkay package.
 pub const picotool_revision = @import("firmware-pins").picotool_revision;
 pub const picotool_package_hash = @import("firmware-pins").picotool_package_hash;
-pub const Backend = enum { picotool, windows_bootsel };
+/// `bootsel_copy`: Windows and Linux copy the UF2 onto the mounted RPI-RP2
+/// volume (`tools/bootsel_transfer.zig`); macOS flashes with picotool.
+pub const Backend = enum { picotool, bootsel_copy };
 
 pub const Record = struct {
     version: u16 = 1,
@@ -104,9 +106,14 @@ pub const Tools = struct {
 
     pub fn verify(self: Tools, gpa: std.mem.Allocator, io: std.Io) !void {
         try self.validate();
-        if (!std.mem.eql(u8, &self.record.wrapper_hash, &try fileHash(gpa, io, self.record.wrapper_path)))
+        const wrapper_hash = try fileHash(gpa, io, self.record.wrapper_path);
+        if (!std.mem.eql(u8, &self.record.wrapper_hash, &wrapper_hash))
             return error.WrapperChanged;
-        if (!std.mem.eql(u8, &self.record.picotool_hash, &try fileHash(gpa, io, self.record.picotool_path)))
+        const picotool_hash = if (std.mem.eql(u8, self.record.wrapper_path, self.record.picotool_path))
+            wrapper_hash
+        else
+            try fileHash(gpa, io, self.record.picotool_path);
+        if (!std.mem.eql(u8, &self.record.picotool_hash, &picotool_hash))
             return error.PicotoolChanged;
     }
 
@@ -163,6 +170,18 @@ pub const Frozen = struct {
         try request.validate();
         if (!std.mem.eql(u8, &self.build_key, &firmware.key(current))) return error.StaleBuild;
         try self.tools.verify(gpa, io);
+        try self.verifyArtifact(gpa, io, current, request);
+    }
+
+    fn verifyArtifact(
+        self: Frozen,
+        gpa: std.mem.Allocator,
+        io: std.Io,
+        current: firmware.Inputs,
+        request: Request,
+    ) !void {
+        try request.validate();
+        if (!std.mem.eql(u8, &self.build_key, &firmware.key(current))) return error.StaleBuild;
         const name = std.fmt.bytesToHex(self.uf2_hash, .lower);
         const basename = std.fs.path.basename(self.path);
         if (basename.len != name.len + 4 or
@@ -223,7 +242,7 @@ pub fn freeze(
         .uf2_hash = validated.uf2_hash,
         .uf2_size = validated.uf2_size,
     };
-    try frozen.verify(gpa, io, current, request);
+    try frozen.verifyArtifact(gpa, io, current, request);
     return frozen;
 }
 
@@ -308,7 +327,7 @@ test "tools provenance and frozen artifact reject edits stale requests and cance
     try std.testing.expectEqual(Backend.picotool, parsed.record.backend);
     var backend_record = parsed.record;
     backend_record.version = 2;
-    backend_record.backend = .windows_bootsel;
+    backend_record.backend = .bootsel_copy;
     backend_record.picotool_path = backend_record.wrapper_path;
     backend_record.picotool_hash = backend_record.wrapper_hash;
     var backend_tools = try Tools.clone(gpa, backend_record);
@@ -318,7 +337,7 @@ test "tools provenance and frozen artifact reject edits stale requests and cance
     var backend_parsed = try Tools.parse(gpa, backend_bytes);
     defer backend_parsed.deinit();
     try backend_parsed.verify(gpa, io);
-    try std.testing.expectEqual(Backend.windows_bootsel, backend_parsed.record.backend);
+    try std.testing.expectEqual(Backend.bootsel_copy, backend_parsed.record.backend);
     backend_record.version = 1;
     try std.testing.expectError(error.UnsupportedToolsVersion, backend_record.validate());
     var unsupported = parsed.record;

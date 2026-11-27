@@ -50,7 +50,19 @@ pub fn Native(comptime sdl: type) type {
             if (requested != null and selected == null) return .path_not_found;
             if (requested == null and count > 1) return .multiple_devices;
             if (selected) |path| {
-                self.device = sdl.SDL_hid_open_path(path) orelse return error.HidOpenFailed;
+                self.device = sdl.SDL_hid_open_path(path) orelse {
+                    // Linux enumerates /dev/hidraw* through udev even without
+                    // access; without the uaccess rule only the open fails.
+                    const node = std.mem.span(path);
+                    if (@import("builtin").os.tag == .linux and std.fs.path.isAbsolute(node)) {
+                        std.Io.Dir.accessAbsolute(self.io, node, .{ .read = true, .write = true }) catch |err| switch (err) {
+                            error.AccessDenied => return error.HidPermissionDenied,
+                            error.Canceled => return error.Canceled,
+                            else => {},
+                        };
+                    }
+                    return error.HidOpenFailed;
+                };
                 return .selected;
             }
             return .no_device;
