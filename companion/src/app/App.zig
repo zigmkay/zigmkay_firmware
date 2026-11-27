@@ -14,6 +14,7 @@ const boards = @import("catalog-project");
 const editor = @import("editor-frame-ui");
 const keyboard_onboarding = @import("onboarding-ui");
 const dialog = @import("folder-dialog");
+const window_placement = @import("window-placement");
 const Source = @import("input-source").Source;
 const installed = @import("app-paths");
 const tray_backend = @import("native-tray");
@@ -186,6 +187,12 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
         .persist_window_geometry = false,
     });
     errdefer app.native.deinit();
+    // The default size is larger than the usable area of small or highly
+    // scaled displays (a 2560x1600 laptop at 200% leaves 1504 px above the
+    // taskbar), so keep the first editor window on screen.
+    if (frame_limit == null and !mode.background())
+        window_placement.place(app.native.window, true) catch |err|
+            std.log.warn("Editor window placement failed: {t}", .{err});
     window_icon.apply(app.native.window);
     app.window = try dvui.Window.init(@src(), gpa, app.native.backend(), .{});
     errdefer app.window.deinit();

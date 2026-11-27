@@ -555,6 +555,7 @@ fn initGui(b: *std.Build, cfg: Config, deps: Deps, core: Core, host: Host, dvui_
             .{ .name = "dvui", .module = dvui },
             .{ .name = "native-events", .module = events },
             .{ .name = "folder-dialog", .module = folder_dialog },
+            .{ .name = "window-placement", .module = placement },
             .{ .name = "editor-fonts", .module = fonts },
             .{ .name = "flash-ui", .module = flash_ui },
             .{ .name = "app-paths", .module = app_paths },
