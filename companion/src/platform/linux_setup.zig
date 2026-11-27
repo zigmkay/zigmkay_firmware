@@ -143,7 +143,7 @@ test "pkexec outcomes" {
     try t.expectEqual(Grant.State.cancelled, outcome(.{ .exited = 126 }));
     try t.expectEqual(Grant.State.cancelled, outcome(.{ .exited = 127 }));
     try t.expectEqual(Grant.State.failed, outcome(.{ .exited = 1 }));
-    try t.expectEqual(Grant.State.failed, outcome(.{ .signal = .KILL }));
+    try t.expectEqual(Grant.State.failed, outcome(.{ .unknown = 1 }));
 }
 
 test desktopOf {
