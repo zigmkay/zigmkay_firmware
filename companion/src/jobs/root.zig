@@ -67,6 +67,9 @@ fn execute(gpa: std.mem.Allocator, io: std.Io, spec: Spec) anyerror!std.process.
         .stdout = .pipe,
         .stderr = .pipe,
         .pgid = if (posix_groups and spec.isolated_group) 0 else null,
+        // The Windows release is a GUI application without a console; a
+        // console child such as zig.exe would otherwise open its own window.
+        .create_no_window = true,
     });
     var reader_buffer: std.Io.File.MultiReader.Buffer(2) = undefined;
     var reader: std.Io.File.MultiReader = undefined;
@@ -262,6 +265,7 @@ pub const Session = struct {
             .stdin = .pipe,
             .stdout = .pipe,
             .stderr = .ignore,
+            .create_no_window = true,
         });
         self.reader = self.child.?.stdout.?.readerStreaming(io, &self.buffer);
     }

@@ -136,6 +136,7 @@ pub const Job = struct {
             .stdin = .pipe,
             .stdout = .pipe,
             .stderr = .pipe,
+            .create_no_window = true,
         });
         // If scheduling fails, EOF still requests controlled cleanup.
         self.future = std.Io.concurrent(self.io, work, .{self}) catch |err| {

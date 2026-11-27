@@ -88,8 +88,12 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     if (test_fixtures.app_tests) |run| step.dependOn(&run.step);
 
     const app = b.addExecutable(.{ .name = "zigmkay-companion", .root_module = mods.root("src/app/main.zig", g.app_deps) });
-    if (s.cfg.target.result.os.tag == .windows)
+    if (s.cfg.target.result.os.tag == .windows) {
         app.root_module.addWin32ResourceFile(.{ .file = g.icon_files.path(b, "application.rc") });
+        // A double-clicked release opens no console window next to the
+        // editor. Development builds keep the console for their log output.
+        if (s.cfg.release) app.subsystem = .windows;
+    }
     s.steps.check.dependOn(&app.step);
     for (fixtures) |fixture| step.dependOn(&tests.addGuiFixture(b, app, &.{ fixture[0], fixture[1] }).step);
 
