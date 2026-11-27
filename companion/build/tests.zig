@@ -27,8 +27,16 @@ pub const Suite = struct {
     mods: Modules,
     steps: Steps,
     entries: std.ArrayList(Entry) = .empty,
+    /// Test roots this target leaves out on purpose; see `skip`.
+    skipped: std.ArrayList([]const u8) = .empty,
 
     const Entry = struct { area: Area, root: []const u8, compile: *Compile };
+
+    /// Record that the test root at `path` is not built for this target, so
+    /// `tests-reached` does not count its tests as unreached.
+    pub fn skip(s: *Suite, path: []const u8) void {
+        s.skipped.append(s.b.allocator, path) catch @panic("OOM");
+    }
 
     /// Compile `module` as a test, run it for `step` and compile it for `check`.
     pub fn add(s: *Suite, step: *std.Build.Step, area: Area, module: *std.Build.Module) *std.Build.Step.Run {
@@ -85,6 +93,10 @@ pub const Suite = struct {
                 run.addArg("--deferred");
                 run.addFileArg(b.path(file));
             }
+        }
+        for (s.skipped.items) |file| {
+            run.addArg("--deferred");
+            run.addFileArg(b.path(file));
         }
         for (s.entries.items) |entry| {
             if (entry.area != .core and !inventoryConfigured(inventories, entry.area)) continue;
@@ -178,7 +190,7 @@ pub fn addCore(s: *Suite) Fixtures {
         const wrapper = s.mods.root("src/jobs/test_picotool_flash.zig", &.{.{ .name = "flash-picotool", .module = flash }});
         wrapper.addOptions("options", picotool);
         _ = s.add(steps.test_jobs, .core, wrapper);
-    }
+    } else s.skip("src/jobs/test_picotool_flash.zig");
     const jobs_all = s.mods.root("src/jobs/test_all.zig", core.jobs_deps);
     jobs_all.addOptions("options", picotool);
     _ = s.add(steps.test_jobs, .core, jobs_all);
