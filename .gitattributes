@@ -1,0 +1,5 @@
+# Check text files out with LF on every platform. Git for Windows defaults to
+# core.autocrlf=true, which turns LF into CRLF in the working tree: hashed test
+# fixtures then no longer match and generators that write LF leave tracked
+# files modified.
+* text=auto eol=lf
