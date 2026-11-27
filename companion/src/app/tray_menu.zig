@@ -7,8 +7,9 @@ const project = @import("project");
 const App = @import("App.zig");
 const LiveKeyboard = @import("LiveKeyboard.zig");
 
-pub fn handle(app: *App) void {
-    const action = app.tray.poll() orelse return;
+/// Applies a tray menu action; whether there was one.
+pub fn handle(app: *App) bool {
+    const action = app.tray.poll() orelse return false;
     switch (action) {
         .open_editor => {
             app.life.action(action);
@@ -23,6 +24,7 @@ pub fn handle(app: *App) void {
         .bind_saved_project => bindSavedProject(app),
         .zoom_out, .zoom_in, .zoom_reset => app.life.action(action),
     }
+    return true;
 }
 
 /// Binds the live session to the project saved at the editor's project path.
@@ -58,14 +60,24 @@ pub fn updateResidency(app: *App) void {
 }
 
 /// An idle resident does not construct editor frames or redraw hidden
-/// windows. SDL waits for native events between bounded tray polls.
+/// windows. SDL waits for native events between bounded tray polls; live
+/// monitoring polls the keyboard and the tray in between and returns to the
+/// frame loop only on change or after the resident wait budget.
 pub fn waitWhileIdle(app: *App) !App.Flow {
     if (app.frame_limit != null or app.life.editor_visible or app.life.companion_visible) return .proceed;
-    if (app.jobs.busy() or !app.flash.idle() or app.draft_runtime.owner != null) return .proceed;
+    if (app.jobs.busy() or app.flash.working()) return .proceed;
     app.tray.update(.{ .live_mode = app.live_enabled, .status = app.live.status(), .companion_visible = false });
     var event: Backend.c.SDL_Event = undefined;
     while (Backend.c.SDL_PollEvent(&event)) _ = try app.events.raw(event);
     if (app.events.quit or app.events.close) return .proceed;
-    app.interrupted = try app.native.waitEventTimeout(desktop.live_keyboard.waitBudget(app.live_enabled, false, true));
+    const resident_us = desktop.live_keyboard.waitBudget(false, false, true);
+    const poll_us = desktop.live_keyboard.waitBudget(app.live_enabled, false, true);
+    const start_us = app.clockUs();
+    while (true) {
+        const left_us: u32 = @intCast(resident_us -| (app.clockUs() -| start_us));
+        if (left_us == 0) break;
+        app.interrupted = try app.native.waitEventTimeout(@min(poll_us, left_us));
+        if (app.interrupted or try app.pollLiveChanged() or handle(app)) break;
+    }
     return .next_frame;
 }

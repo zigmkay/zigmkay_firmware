@@ -11,7 +11,7 @@ const std = @import("std");
 pub const source_root = "src";
 
 /// Directories below `source_root` that the runtime build compiles from.
-pub const closure = [_][]const u8{ "project", "layout", "runner", "importer", "firmware" };
+pub const closure = [_][]const u8{ "project", "layout", "importer", "firmware" };
 
 /// Where the bundled `build/` tree keeps the firmware package.
 pub const firmware_root = "firmware";

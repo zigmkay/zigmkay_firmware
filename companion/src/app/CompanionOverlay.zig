@@ -1,5 +1,6 @@
 //! The companion window: a passive layout reference beside other
 //! applications, optionally as a borderless always-on-top overlay.
+const std = @import("std");
 const dvui = @import("dvui");
 const Backend = @import("dvui_backend");
 const desktop = @import("desktop-core");
@@ -15,9 +16,9 @@ const window_icon = @import("window_icon.zig");
 window: ?u32 = null,
 view: companion_ui.View = .{},
 
-/// The companion stays hidden while a run hides all assistance.
+/// The companion stays hidden while a tutor run is in Free (no hints) mode.
 pub fn suppressed(app: *const App) bool {
-    return !app.life.companion_visible or (app.practicing and app.tutor.controller.config.assistance == .hidden);
+    return !app.life.companion_visible or (app.practicing and app.tutor.controller.config.mode == .tutor and app.tutor.controller.config.guidance == .free);
 }
 
 pub fn hideIfSuppressed(app: *App) void {
@@ -30,12 +31,12 @@ pub fn hideIfSuppressed(app: *App) void {
 pub fn update(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void {
     if (app.live_enabled and !app.live.verified()) app.life.companion_visible = false;
     hideIfSuppressed(app);
-    if (suppressed(app)) return;
+    if (suppressed(app)) return keepHidden();
     // Child creation inherits this flag from the backend's saved options.
     // The editor's existing native window remains opaque.
     const parent_transparent = app.native.init_opts_save.?.transparent;
     app.native.init_opts_save.?.transparent = true;
-    const child = dvui.osWindow(@src(), .{
+    const child = dvui.osWindow(windowSource(), .{
         .title = "Zigmkay Companion",
         .size = .{ .w = 880, .h = 300 },
         .min_size = .{ .w = 400, .h = 180 },
@@ -65,41 +66,67 @@ pub fn update(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame)
     }
 }
 
-/// Shows the live keyboard when monitoring, otherwise the editor project with
-/// the draft runner's state.
+/// The source location that identifies the companion's child window in DVUI.
+fn windowSource() std.builtin.SourceLocation {
+    return @src();
+}
+
+/// DVUI destroys a child window that a frame does not declare. A hidden
+/// companion keeps its native window, renderer, fonts and glyph caches, so
+/// showing it again only draws one frame. The hidden window is neither drawn
+/// nor presented, and it never shortens the frame loop's wait.
+fn keepHidden() void {
+    const parent = dvui.currentWindow();
+    const child = parent.child_os_wins.getPtr(parent.data().id.extendId(windowSource(), 0)) orelse return;
+    child.end_micros = null;
+}
+
+/// Shows the live keyboard when monitoring, otherwise the editor project.
 fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void {
     const arena = dvui.currentWindow().arena();
     const live = app.live_enabled;
-    const draft = &app.draft_runtime;
     const model = if (live) &app.live.model else &app.model;
     const held = try arena.alloc(bool, app.model.document().key_ids.len);
     @memset(held, false);
-    if (draft.owner) |active| if (active.pressed.len == held.len) @memcpy(held, active.pressed);
     const labels = if (live) &app.live.captions.labels else &app.captions.labels;
-    const layer = if (live) app.live.frame.layer else if (draft.owner != null) draft.highest_layer else app.model.layer;
+    const layer = if (live) app.live.frame.layer else app.model.layer;
     const Modifiers = @TypeOf(app.live.frame.modifiers);
-    const modifiers: Modifiers = if (live) app.live.frame.modifiers else if (draft.owner != null) @bitCast(draft.modifiers) else .{};
+    const modifiers: Modifiers = if (live) app.live.frame.modifiers else .{};
     const targets = try arena.alloc(bool, labels.key_count);
     const holds = try arena.alloc(bool, labels.key_count);
     @memset(targets, false);
     @memset(holds, false);
     const tutor = &app.tutor.controller;
-    if (app.practicing and tutor.config.assistance == .guided and tutor.active and tutor.session.state != .complete and
+    if (app.practicing and tutor.config.mode == .tutor and tutor.config.guidance != .free and tutor.active and tutor.session.state != .complete and
         (!live or practice.live) and labels == practice.labels)
     {
         const session = &tutor.session;
         const next = desktop.practice_view.focus(session);
-        const active_layers = if (live)
-            app.live.frame.active
-        else if (draft.owner != null) draft.active_layers else desktop.practice.layerMask(layer);
+        const active_layers = if (live) app.live.frame.active else desktop.practice.layerMask(layer);
         const hint = if (next < session.reference_len)
-            try desktop.practice.hint(labels.practiceLabels(), layer, modifiers.toByte(), session.reference[next], active_layers)
+            try desktop.practice.hintForDrill(
+                if (tutor.profile_bound) &tutor.profile else null,
+                labels.practiceLabels(),
+                layer,
+                modifiers.toByte(),
+                session.reference[next],
+                active_layers,
+                tutor.drillsCombos(),
+            )
         else
             null;
-        try desktop.practice.guidance(labels.practiceLabels(), practice.metadata, layer, modifiers.toByte(), hint, .{
-            .tap = targets,
-            .hold = holds,
-        });
+        try desktop.practice.guidanceWithProfile(
+            if (tutor.profile_bound) &tutor.profile else null,
+            labels.practiceLabels(),
+            practice.metadata,
+            layer,
+            modifiers.toByte(),
+            hint,
+            .{
+                .tap = targets,
+                .hold = holds,
+            },
+        );
     }
     companion_ui.draw(model, .{
         .snapshot = try model.id(),
@@ -111,8 +138,8 @@ fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame) !void
         .pressed = if (live) app.live.frame.pressed else held,
         .live = live,
         .active_layers = if (live) app.live.frame.active else null,
-        .practicing = app.practicing,
-        .assistance = tutor.config.assistance,
+        .practicing = app.practicing and tutor.config.mode == .tutor,
+        .guidance = tutor.config.guidance,
         .targets = targets,
         .holds = holds,
     }, app.view.toolbar.light) catch |err| app.view.report(err);

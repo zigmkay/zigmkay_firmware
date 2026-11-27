@@ -4,18 +4,16 @@ const std = @import("std");
 const target = @import("target_lock.zig");
 const firmware = @import("firmware.zig");
 const provenance = @import("build_context.zig");
-const runner = @import("runner_artifact.zig");
 pub const Replacement = enum { create, replace_supported };
 pub const lock_name = "target-lock.zon";
 pub const manifest_name = "firmware-manifest.zon";
 pub const receipt_name = "bundle-build.zon";
-pub const runner_name = "runner-manifest.zon";
 
 fn write(
     gpa: std.mem.Allocator,
     io: std.Io,
     dir: std.Io.Dir,
-    comptime kind: enum { lock, manifest, receipt, runner },
+    comptime kind: enum { lock, manifest, receipt },
     bytes: []const u8,
     replacement: Replacement,
 ) !void {
@@ -23,7 +21,6 @@ fn write(
         .lock => lock_name,
         .manifest => manifest_name,
         .receipt => receipt_name,
-        .runner => runner_name,
     };
     const old = dir.readFileAlloc(io, name, gpa, .limited(32 * 1024)) catch |err| switch (err) {
         error.FileNotFound => null,
@@ -38,9 +35,6 @@ fn write(
         } else if (kind == .manifest) {
             var parsed = try firmware.Manifest.parse(gpa, existing);
             defer parsed.deinit();
-        } else if (kind == .runner) {
-            var parsed = try runner.Manifest.parse(gpa, existing);
-            defer parsed.deinit();
         } else _ = try provenance.Receipt.parse(gpa, existing);
     }
     var atomic = try dir.createFileAtomic(io, name, .{
@@ -49,58 +43,6 @@ fn write(
     defer atomic.deinit(io);
     try atomic.file.writeStreamingAll(io, bytes);
     if (old != null and replacement == .replace_supported) try atomic.replace(io) else try atomic.link(io);
-}
-
-pub fn saveRunner(
-    gpa: std.mem.Allocator,
-    io: std.Io,
-    dir: std.Io.Dir,
-    manifest: runner.Manifest,
-    replacement: Replacement,
-) !void {
-    const bytes = try manifest.serialize(gpa);
-    defer gpa.free(bytes);
-    try write(gpa, io, dir, .runner, bytes, replacement);
-}
-
-test "runner sidecar creates supported records and preserves future provenance" {
-    const t = std.testing;
-    var tmp = t.tmpDir(.{});
-    defer tmp.cleanup();
-    const input = firmware.Inputs{
-        .project_digest = @splat(1),
-        .source_digest = @splat(2),
-        .build_inputs_digest = @splat(3),
-        .profile_id = @splat(4),
-        .identity_digest = @splat(5),
-        .lock = target.fixture(),
-    };
-    var manifest = try runner.Manifest.complete(
-        t.allocator,
-        .succeeded,
-        runner.key(input, runner.native_target),
-        input,
-        input,
-        "/cache/runner",
-        "executable",
-    );
-    defer manifest.deinit();
-    try saveRunner(t.allocator, t.io, tmp.dir, manifest, .replace_supported);
-    try t.expectError(error.SidecarAlreadyExists, saveRunner(t.allocator, t.io, tmp.dir, manifest, .create));
-    try saveRunner(t.allocator, t.io, tmp.dir, manifest, .replace_supported);
-    var future = manifest.record;
-    future.version = 2;
-    var encoded = std.Io.Writer.Allocating.init(t.allocator);
-    defer encoded.deinit();
-    try std.zon.stringify.serializeMaxDepth(future, .{}, &encoded.writer, 32);
-    try tmp.dir.writeFile(t.io, .{ .sub_path = runner_name, .data = encoded.written() });
-    try t.expectError(
-        error.UnsupportedRunnerManifest,
-        saveRunner(t.allocator, t.io, tmp.dir, manifest, .replace_supported),
-    );
-    const bytes = try tmp.dir.readFileAlloc(t.io, runner_name, t.allocator, .limited(32 * 1024));
-    defer t.allocator.free(bytes);
-    try t.expectEqualStrings(encoded.written(), bytes);
 }
 
 /// Keep bundled-build evidence separate from firmware bytes and project schema.

@@ -27,7 +27,7 @@ the [keymap guide](../docs/keymaps.md); for the design, see
 | `split_communication.zig` | `UartClient`: hardware UART, or a PIO UART transmitter for boards without a free UART pin pair (transmit only). |
 | `usb_if.zig` | The USB device: keyboard, consumer (media), mouse and 32-byte Raw HID interfaces on microzig's polled RP2040 driver (VID `0xFAFA`, PID `0x00F0`). |
 | `usb_command_executor.zig` | Drains the output command queue into HID reports, at most one command per 10 ms, and resets to the USB bootloader for `KC_BOOT`. |
-| `companion.zig` | The Raw HID companion session: silent until the host sends `connect`, then streams hello, state, key and signal reports. See the [companion protocol](../docs/development/companion-protocol.md). |
+| `companion.zig` | The Raw HID companion session: silent until the host sends `connect`, then streams hello, state, key, signal and tap/hold decision reports. See the [companion protocol](../docs/development/companion-protocol.md). |
 | `stats_collector.zig` | Counts main loop iterations per second; `KC_PRINT_STATS` types the lowest and highest scan rate. |
 | `string_printing.zig` | Types an ASCII string as key presses (used by `KC_PRINT_STATS`). |
 | `microzig_app_stub.zig` | An empty `app` module for microzig; nothing in the repository imports it at the moment. |

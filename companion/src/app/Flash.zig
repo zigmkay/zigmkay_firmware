@@ -102,13 +102,11 @@ pub fn buildSucceeded(self: *Flash, model: *const desktop.model.Model, generatio
     self.session = null;
 }
 
-/// The flash status shown in the toolbar.
-pub fn toolbarStatus(self: *const Flash, arena: std.mem.Allocator, building: bool, now_ms: u64) ![]const u8 {
-    if (building) return "";
-    if (self.session) |*session| return session.status(arena, now_ms);
-    if (self.pending != null) return "Building for Flash";
-    if (self.failure != null) return "Flash failed";
-    return "";
+/// Whether a flash operation is under way: a queued click, a confirmation
+/// waiting for the keyboard, or a session before its outcome. A finished
+/// session stays for its outcome panel but needs no frames of its own.
+pub fn working(self: *const Flash) bool {
+    return self.pending != null or self.retained_view != null or self.active();
 }
 
 fn finished(value: Phase) bool {
@@ -395,12 +393,10 @@ pub fn request(app: *App, captured: desktop.editor_dispatch.Request, board: *con
             app.view.report(error.FreshFirmwareBuildRequired);
             return .next_frame;
         }
-        const next_job = try std.math.add(u64, app.job_generation, 1);
-        app.jobs.build = workers.startBuild(app, app.build.plan.?.config, next_job) catch |err| {
+        workers.beginBuild(app, app.build.plan.?.config, .flash) catch |err| {
             app.view.report(err);
             return .next_frame;
         };
-        app.job_generation = next_job;
         flash.pending = .{ .snapshot = try app.model.id(), .generation = app.owner_generation };
         app.build.scheduler.manual(try app.model.id());
         flash.panel = true;

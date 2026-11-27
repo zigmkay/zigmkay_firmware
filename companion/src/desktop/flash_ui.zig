@@ -15,22 +15,28 @@ pub const Input = struct {
     light: bool = false,
 };
 
+/// The padding between the flash panel's frame and its contents.
+const panel_padding: dvui.Rect = .{ .x = 20, .y = 16, .w = 20, .h = 16 };
+
 /// The non-modal flash panel in the top-right corner, sized to fit the window.
-fn panelWindow(src: std.builtin.SourceLocation, theme: ui.Theme, preferred_height: f32) *dvui.FloatingWindowWidget {
+/// Its contents start `panel_padding` inside its rect.
+fn panelWindow(src: std.builtin.SourceLocation, theme: ui.Theme, preferred_height: f32) ui.Frame {
     const screen = dvui.windowRect();
     const width = @max(@as(f32, 1), @min(@as(f32, 600), screen.w - 32));
     const height = @max(@as(f32, 1), @min(preferred_height, screen.h - 32));
-    return dvui.floatingWindow(src, .{ .modal = false }, .{
-        .rect = .{ .x = @max(0, screen.w - width - 24), .y = @max(0, @min(108, screen.h - height)), .w = width, .h = height },
-        .padding = .{ .x = 20, .y = 16, .w = 20, .h = 16 },
-        .background = true,
-        .color_fill = .{ .color = theme.panel },
-        .color_text = .{ .color = theme.text },
-        .color_border = .{ .color = theme.border },
-        .border = .all(1),
-        .corners = .all(12),
-        .tag = "flash.panel",
-    });
+    const corner: f32 = 12;
+    var options = ui.frameOptions(theme.panel, corner, "flash.panel");
+    options.rect = .{ .x = @max(0, screen.w - width - 24), .y = @max(0, @min(108, screen.h - height)), .w = width, .h = height };
+    options.padding = panel_padding;
+    options.color_text = .{ .color = theme.text };
+    return .{
+        .window = dvui.floatingWindow(src, .{ .modal = false }, options),
+        .theme = theme,
+        .w = width,
+        .h = height,
+        .corner = corner,
+        .padding = panel_padding,
+    };
 }
 
 /// A line of wrapped text in the editor font.
@@ -142,14 +148,17 @@ pub fn draw(owner: *const Controller, input: Input) !?policy.controller.Intent {
     return null;
 }
 
+/// The scrolling details below the buttons, down to the panel's padding.
 fn drawDetails(owner: *const Controller, input: Input, bounds: dvui.Rect) !void {
-    const details_y = @max(@as(f32, 0), @min(@as(f32, 174), bounds.h - 17));
+    const content_w = bounds.w - panel_padding.x - panel_padding.w;
+    const content_h = bounds.h - panel_padding.y - panel_padding.h;
+    const details_y = @max(@as(f32, 0), @min(@as(f32, 174), content_h - 1));
     const area = dvui.scrollArea(@src(), .{}, .{
         .rect = .{
             .x = 0,
             .y = details_y,
-            .w = @max(@as(f32, 1), bounds.w - 32),
-            .h = @max(@as(f32, 1), bounds.h - details_y - 16),
+            .w = @max(@as(f32, 1), content_w),
+            .h = @max(@as(f32, 1), content_h - details_y),
         },
     });
     defer area.deinit();

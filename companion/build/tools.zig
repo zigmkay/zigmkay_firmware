@@ -22,6 +22,20 @@ pub fn add(s: *tests.Suite, catalog_export: ?*Compile) Tools {
         .strip = false,
         .imports = core.jobs_only,
     }) }));
+    // Regenerates a committed source only when asked: `gen-tutor-words -- <dir>`.
+    const words = b.addExecutable(.{ .name = "gen-tutor-words", .root_module = b.createModule(.{
+        .root_source_file = b.path("tools/gen_tutor_words.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseFast,
+    }) });
+    s.steps.check.dependOn(&words.step);
+    const gen_words = b.addRunArtifact(words);
+    gen_words.addPassthruArgs();
+    gen_words.addFileArg(b.path("tools/tutor_words_deny.txt"));
+    gen_words.setCwd(b.path("."));
+    gen_words.addArg("src/desktop/tutor_words_en.txt");
+    s.steps.gen_tutor_words.dependOn(&gen_words.step);
+
     if (cfg.only == .diagnostic) {
         Steps.unavailable(b, s.steps.run_project, "run-project is unavailable with -Donly=diagnostic");
         Steps.unavailable(b, s.steps.analyze_keymap, "analyze-keymap is unavailable with -Donly=diagnostic");

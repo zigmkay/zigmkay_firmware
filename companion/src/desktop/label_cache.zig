@@ -15,6 +15,8 @@ pub const CachedKeyContent = struct {
     hold_layer: ?core.LayerIndex = null,
     hold_mods: ?Modifiers = null,
     hold_signal: ?u8 = null,
+    one_shot_layer: ?core.LayerIndex = null,
+    one_shot_mods: ?Modifiers = null,
     hid_code: ?u8 = null,
     dead: bool = false,
     shortcut: bool = false,
@@ -38,6 +40,12 @@ pub const CachedKeyContent = struct {
         self.hold_layer = hold.hold_layer;
         self.hold_signal = hold.custom;
         self.hold_mods = if (hold.hold_modifiers.has_any()) hold.hold_modifiers else null;
+    }
+
+    fn setOneShot(self: *CachedKeyContent, maybe_hold: ?core.HoldDef) void {
+        const hold = maybe_hold orelse return;
+        self.one_shot_layer = hold.hold_layer;
+        self.one_shot_mods = if (hold.hold_modifiers.has_any()) hold.hold_modifiers else null;
     }
 };
 
@@ -186,6 +194,8 @@ pub const LabelCache = struct {
             .shortcut = entry.shortcut,
             .hold_layer = if (entry.hold_layer) |layer_index| @as(usize, layer_index) else null,
             .hold_modifiers = if (entry.hold_mods) |held| held.toByte() else null,
+            .one_shot_layer = if (entry.one_shot_layer) |layer_index| @as(usize, layer_index) else null,
+            .one_shot_modifiers = if (entry.one_shot_mods) |os| os.toByte() else 0,
         };
     }
 
@@ -246,12 +256,14 @@ pub fn computeKeyContent(
         .tap_only => |tap| {
             entry.unproven = tap.custom != null;
             entry.provider_unknown = tap.custom != null;
+            entry.setOneShot(tap.one_shot);
             if (tapIcon(tap)) |name| return entry.withIconName(name);
             if (tap.mouse_action != null) entry.label = "MS";
             fire = tap.key_press;
         },
         .tap_hold => |th| {
             entry.unproven = th.tap.custom != null;
+            entry.setOneShot(th.tap.one_shot);
             // The reference adds icons only for companion custom tap holds.
             if (companionIcon(th.tap.custom)) |name| entry.icon_name = name else fire = th.tap.key_press;
             entry.setHold(th.hold);
@@ -259,6 +271,7 @@ pub fn computeKeyContent(
         .tap_with_autofire => |af| {
             entry.unproven = af.tap.custom != null;
             entry.provider_unknown = af.tap.custom != null;
+            entry.setOneShot(af.tap.one_shot);
             fire = af.tap.key_press;
         },
         .hold_only => |held| entry.setHold(held),

@@ -3,6 +3,7 @@
 const std = @import("std");
 const uf2 = @import("firmware-uf2");
 const target_lock = @import("target_lock.zig");
+const compiler_cache = @import("compiler_cache.zig");
 pub const Digest = [32]u8;
 
 pub fn digest(bytes: []const u8) Digest {
@@ -41,6 +42,8 @@ fn validateInputs(input: Inputs) !void {
 pub const Command = struct {
     /// Index of the build step name in `argv`.
     pub const step_arg = 4;
+    /// Index of the `-j` build step parallelism in `argv`.
+    pub const jobs_arg = 7;
     /// Index of the local cache directory in `argv`.
     pub const cache_dir_arg = 9;
 
@@ -79,7 +82,7 @@ pub const Command = struct {
         args[step_arg] = "build-project";
         args[5] = try std.fmt.allocPrint(a, "-Dproject-board={s}", .{input.lock.board});
         args[6] = try std.fmt.allocPrint(a, "-Dproject-export={s}", .{export_directory});
-        args[7] = "-j2";
+        args[jobs_arg] = try std.fmt.allocPrint(a, "-j{d}", .{compiler_cache.hostParallelism(false)});
         args[8] = "--cache-dir";
         args[cache_dir_arg] = try std.fs.path.join(a, &.{ install_directory, "local-cache" });
         args[10] = "-p";
@@ -281,6 +284,8 @@ test "firmware argv preserves literal metacharacters and selects build only" {
         "/cache ; output/firmware/project.uf2";
     try std.testing.expectEqualStrings(expected_uf2, command.uf2_path);
     try std.testing.expectEqual(@as(usize, 12), command.argv.len);
+    const jobs = try std.fmt.parseInt(u16, command.argv[Command.jobs_arg]["-j".len..], 10);
+    try std.testing.expect(jobs >= 2);
     try std.testing.expectError(
         error.InvalidBuildPath,
         Command.init(std.testing.allocator, publishedInputs(), "zig", "/repo", "/export", "/cache"),

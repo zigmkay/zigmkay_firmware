@@ -54,8 +54,7 @@ fn switchProject(app: *App, opened: *desktop.onboarding.Opened) !void {
     app.owner = try desktop.editor_dispatch.State.init(&app.model);
     app.owner_generation = try std.math.add(u64, app.owner_generation, 1);
     app.accepted_editor_generation = app.owner_generation;
-    if (app.tutor.controller.active or app.draft_runtime.owner != null)
-        app.draft_runtime.fail(&app.tutor.controller, error.PracticeProjectSwitched, 0);
+    app.interruptPractice(error.PracticeProjectSwitched, 0);
     app.practicing = false;
     try keyboard_onboarding.State.set(&app.view.paths.project, opened.path);
     onboarding.selected = true;
@@ -85,12 +84,10 @@ pub fn apply(app: *App, action: keyboard_onboarding.Action) !void {
     switch (action) {
         .none => {},
         .cancel => onboarding.reset(),
-        .cancel_tutor => cancelRunnerBuild(app),
         .editor => if (onboarding.selected) {
-            cancelRunnerBuild(app);
             onboarding.active = false;
         },
-        .tutor => try prepareTutor(app),
+        .tutor => openTutor(app),
         .toggle_theme => app.view.toolbar.light = !app.view.toolbar.light,
         .open => if (app.unsavedChanges() and commands.autosaves(app)) {
             onboarding.open_when_saved = true;
@@ -102,20 +99,12 @@ pub fn apply(app: *App, action: keyboard_onboarding.Action) !void {
     }
 }
 
-fn cancelRunnerBuild(app: *App) void {
-    if (app.jobs.runner) |job| job.worker.destroy();
-    app.jobs.runner = null;
-}
-
-/// Builds the native tutor runner of the selected project.
-fn prepareTutor(app: *App) !void {
+/// Opens the Tutor on the selected project. Practice always types on the
+/// connected keyboard; the Tutor points out when it runs another layout.
+fn openTutor(app: *App) void {
     if (!app.onboarding.selected or app.jobs.busy()) return;
-    const plan = app.build.plan orelse return app.onboarding.report(error.MissingApplicationBundle);
-    var config = plan.config;
-    config.request.native_only = true;
-    const next_job = try std.math.add(u64, app.job_generation, 1);
-    app.jobs.runner = workers.startBuild(app, config, next_job) catch |err| return app.onboarding.report(err);
-    app.job_generation = next_job;
+    app.practicing = true;
+    app.onboarding.active = false;
 }
 
 fn chooseFolder(app: *App, target: desktop.folder_selection.Target) !void {

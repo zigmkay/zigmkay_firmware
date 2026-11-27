@@ -15,9 +15,30 @@
 //!               (little endian) [6..22]=pressed keys, one bit per key index
 //!   0x22 key    [1]=seq [2]=pressed [3]=key index [4]=layer [5]=modifiers
 //!   0x23 signal [1]=seq [2]=signal (1 log toggle, 2 overlay toggle, 3 shutdown) [3]=pressed
+//!               [4]=source (version 2: 1 the key's tap action, 2 its hold action;
+//!               0 unknown, which earlier keyboards send as padding)
+//!   0x24 decision (version 2) a tap/hold key resolved
+//!               [1]=seq [2]=key index [3]=outcome (1 tap, 2 hold, 3 retro tap)
+//!               [4]=reason (see below) [5..7]=ms from the press to the decision
+//!               (u16 little endian, saturating) [7]=the other key index, or 0xFF
+//!               [8..10]=the key's tapping term in ms (u16 little endian)
+//!               [10]=layer the key was taken from [11]=flags (bit 0: a combo)
+//!
+//! Decision reasons:
+//!   1 the key was released within the tapping term: tap
+//!   2 the tapping term elapsed while the key was held: hold
+//!   3 another key on the other side (or a key without a side) was pressed and
+//!     released within the tapping term: hold (permissive hold)
+//!   4 another key on the same side was pressed and released: tap
+//!   5 a hold was released with no other key in between: retro tap
 //!
 //! Signals come from keys bound to the reserved CUSTOM_ID_COMPANION_* ids (as tap
 //! or hold) or to KC_COMPANION / KC_SHUTDOWN_COMPANION, after tap/hold decisions.
+//! A tap signal is pressed and released when the tap action starts and ends,
+//! a hold signal for as long as the hold lasts; hosts toggle on a tap and
+//! follow a hold.
+//! A decision follows the key report of the press it belongs to and precedes
+//! the signals and state the decision causes. Version 1 keyboards never send it.
 //!
 //! A state report is sent after connecting, whenever the layer or modifiers
 //! change, and after key events were dropped because the host stopped reading.
@@ -25,7 +46,8 @@
 const std = @import("std");
 const core = @import("core.zig");
 
-pub const protocol_version: u8 = 1;
+/// 2 added the tap/hold decision message and the signal source.
+pub const protocol_version: u8 = 2;
 pub const Report = [32]u8;
 
 pub const Command = enum(u8) {
@@ -40,12 +62,54 @@ pub const MessageId = enum(u8) {
     state = 0x21,
     key = 0x22,
     signal = 0x23,
+    decision = 0x24,
 };
 
 pub const Signal = enum(u8) {
     log_toggle = 1,
     overlay_toggle = 2,
     shutdown = 3,
+};
+
+/// Which action of its key a signal came from.
+pub const SignalSource = enum(u8) {
+    /// Not reported: version 1 keyboards and earlier version 2 builds.
+    unknown = 0,
+    tap = 1,
+    hold = 2,
+};
+
+pub const DecisionOutcome = enum(u8) {
+    tap = 1,
+    hold = 2,
+    retro_tap = 3,
+};
+
+pub const DecisionReason = enum(u8) {
+    released_within_term = 1,
+    term_elapsed = 2,
+    permissive_hold = 3,
+    same_side_tap = 4,
+    released_after_term = 5,
+};
+
+/// The other key byte when no other key took part.
+pub const no_other_key: u8 = 0xFF;
+
+/// How the processor resolved a tap/hold key.
+pub const Decision = struct {
+    key_index: core.KeyIndex,
+    outcome: DecisionOutcome,
+    reason: DecisionReason,
+    /// From the press to the decision, saturating.
+    elapsed_ms: u16,
+    /// The key whose press and release decided it, for reasons 3 and 4.
+    other_key: ?core.KeyIndex = null,
+    tapping_term_ms: u16,
+    /// The layer the key definition was taken from.
+    layer: core.LayerIndex = 0,
+    /// The key is the first key of a combo.
+    combo: bool = false,
 };
 
 pub const Info = struct {
@@ -63,7 +127,8 @@ const Event = union(enum) {
         layer: core.LayerIndex,
         modifiers: u8,
     },
-    signal: struct { signal: Signal, pressed: bool },
+    signal: struct { signal: Signal, pressed: bool, source: SignalSource },
+    decision: Decision,
 };
 
 fn custom_signal(id: ?u8) ?Signal {
@@ -137,14 +202,19 @@ pub const Session = struct {
 
     /// Records companion signals from the processor's tap and hold decisions.
     pub fn processor_event(self: *Session, event: core.ProcessorEvent) void {
-        const signal: Signal, const pressed = switch (event) {
-            .OnTapEnterAfter => |e| .{ tap_signal(e.tap) orelse return, true },
-            .OnTapExitBefore => |e| .{ tap_signal(e.tap) orelse return, false },
-            .OnHoldEnterAfter => |e| .{ custom_signal(e.hold.custom) orelse return, true },
-            .OnHoldExitBefore => |e| .{ custom_signal(e.hold.custom) orelse return, false },
+        const signal: Signal, const pressed, const source: SignalSource = switch (event) {
+            .OnTapEnterAfter => |e| .{ tap_signal(e.tap) orelse return, true, .tap },
+            .OnTapExitBefore => |e| .{ tap_signal(e.tap) orelse return, false, .tap },
+            .OnHoldEnterAfter => |e| .{ custom_signal(e.hold.custom) orelse return, true, .hold },
+            .OnHoldExitBefore => |e| .{ custom_signal(e.hold.custom) orelse return, false, .hold },
             else => return,
         };
-        self.push(.{ .signal = .{ .signal = signal, .pressed = pressed } });
+        self.push(.{ .signal = .{ .signal = signal, .pressed = pressed, .source = source } });
+    }
+
+    /// Records a tap/hold decision of the processor.
+    pub fn tap_hold_decision(self: *Session, decision: Decision) void {
+        self.push(.{ .decision = decision });
     }
 
     fn push(self: *Session, event: Event) void {
@@ -199,6 +269,18 @@ pub const Session = struct {
                     report[0] = @backingInt(MessageId.signal);
                     report[2] = @backingInt(signal.signal);
                     report[3] = @intFromBool(signal.pressed);
+                    report[4] = @backingInt(signal.source);
+                },
+                .decision => |decision| {
+                    report[0] = @backingInt(MessageId.decision);
+                    report[2] = decision.key_index;
+                    report[3] = @backingInt(decision.outcome);
+                    report[4] = @backingInt(decision.reason);
+                    std.mem.writeInt(u16, report[5..7], decision.elapsed_ms, .little);
+                    report[7] = if (decision.other_key) |other| other else no_other_key;
+                    std.mem.writeInt(u16, report[8..10], decision.tapping_term_ms, .little);
+                    report[10] = decision.layer;
+                    report[11] = @intFromBool(decision.combo);
                 },
             }
         } else if (self.state_pending) {

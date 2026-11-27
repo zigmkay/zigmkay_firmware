@@ -32,6 +32,9 @@ pub const View = struct {
     diagnostic: [128]u8 = @splat(0),
     pending: bool = false,
     close_requested: bool = false,
+    /// Focuses the tapping term field the next time it is drawn (the Tutor's
+    /// tapping term suggestion opens the key this way).
+    focus_term: bool = false,
 };
 
 pub const Frame = struct {
@@ -277,18 +280,14 @@ fn drawPopover(self: *Context, part: Part, anchor: dvui.Rect.Physical) !void {
         .w = w,
         .h = h,
     };
-    const popover = dvui.floatingWindow(@src(), .{ .resize = .none }, .{
-        .rect = rect,
-        .padding = .{},
-        .background = true,
-        .color_fill = .{ .color = self.theme.panel },
-        .color_border = .{ .color = ui.mix(self.theme.border, self.theme.text, 0.12) },
-        .border = .all(1),
-        .corners = .all(14),
-        .box_shadow = .{ .offset = .{ .x = 0, .y = 8 }, .fade = 24, .alpha = 0.35 },
-        .tag = "key.editor",
-    });
+    var frame = ui.frameOptions(self.theme.panel, 14, "key.editor");
+    frame.rect = rect;
+    frame.box_shadow = .{ .offset = .{ .x = 0, .y = 8 }, .fade = 24, .alpha = 0.35 };
+    const popover = dvui.floatingWindow(@src(), .{ .resize = .none }, frame);
     defer popover.deinit();
+    var edge = self.theme;
+    edge.border = ui.mix(self.theme.border, self.theme.text, 0.12);
+    defer ui.frameBorder(edge, rect.w, rect.h, 14);
     if (header(self, part, width)) {
         dropFocus();
         close(self.view);
@@ -905,6 +904,10 @@ fn timing(self: *Context, action: ?p.Action, y: f32, inner: f32) void {
         .tag = "key.editor.tapping_term",
         .padding = number_padding,
     }).changed) self.session.mutate(.{ .tapping_term = term });
+    if (self.view.focus_term) if (dvui.tagGet("key.editor.tapping_term")) |field| {
+        dvui.focusWidget(field.id, null, null);
+        self.view.focus_term = false;
+    };
     ui.label(self.muted, "ms", .{ .x = margin + 92, .y = y + 26, .w = 30, .h = 18 }, 13);
     var retro = value.tap_hold.retro_tapping;
     if (dvui.checkbox(@src(), &retro, "Send the tap if released alone", .{

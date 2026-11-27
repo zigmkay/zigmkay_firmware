@@ -212,6 +212,24 @@ fn printReport(_: ?*anyopaque, result: IOReturn, _: ?*anyopaque, _: u32, _: u32,
                 std.debug.print("0x{x:0>2}", .{bytes[2]});
             std.debug.print(" {s}\n", .{if (bytes[3] != 0) "pressed" else "released"});
         },
+        .decision => {
+            std.debug.print("decide seq={d:>3} key={d} layer={d} ", .{ bytes[1], bytes[2], bytes[10] });
+            if (std.enums.fromInt(companion.DecisionOutcome, bytes[3])) |outcome|
+                std.debug.print("{t}", .{outcome})
+            else
+                std.debug.print("0x{x:0>2}", .{bytes[3]});
+            std.debug.print(" ", .{});
+            if (std.enums.fromInt(companion.DecisionReason, bytes[4])) |reason|
+                std.debug.print("{t}", .{reason})
+            else
+                std.debug.print("0x{x:0>2}", .{bytes[4]});
+            std.debug.print(" after={d}ms term={d}ms", .{
+                std.mem.readInt(u16, bytes[5..7], .little),
+                std.mem.readInt(u16, bytes[8..10], .little),
+            });
+            if (bytes[7] != companion.no_other_key) std.debug.print(" other={d}", .{bytes[7]});
+            std.debug.print("{s}\n", .{if (bytes[11] & 1 != 0) " combo" else ""});
+        },
     }
 }
 

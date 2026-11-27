@@ -63,7 +63,7 @@ pub fn build(b: *std.Build) !void {
 fn disableUnconfigured(b: *std.Build, cfg: Config, steps: Steps) void {
     if (cfg.only) |only| {
         const message = b.fmt("this step is unavailable with -Donly={t}", .{only});
-        for ([_]*std.Build.Step{ steps.check, steps.@"test", steps.test_desktop, steps.test_native, steps.run, steps.bundle, steps.check_firmware, steps.check_firmware_defaults, steps.build_project, steps.hardware_tools }) |step|
+        for ([_]*std.Build.Step{ steps.check, steps.@"test", steps.test_tutor_learner, steps.test_desktop, steps.test_native, steps.doc_screenshots, steps.run, steps.bundle, steps.check_firmware, steps.check_firmware_defaults, steps.build_project, steps.hardware_tools }) |step|
             Steps.unavailable(b, step, message);
         if (only == .diagnostic) for ([_]*std.Build.Step{ steps.test_practice, steps.test_jobs }) |step|
             Steps.unavailable(b, step, message);
@@ -72,6 +72,7 @@ fn disableUnconfigured(b: *std.Build, cfg: Config, steps: Steps) void {
     if (!cfg.desktop) {
         Steps.unavailable(b, steps.test_desktop, "test-desktop requires -Ddesktop");
         Steps.unavailable(b, steps.test_native, "test-native requires -Ddesktop for the native tray fixture");
+        Steps.unavailable(b, steps.doc_screenshots, "doc-screenshots requires -Ddesktop");
         Steps.unavailable(b, steps.hardware_tools, "hardware-tools requires -Dfirmware -Ddesktop");
     }
     if (!cfg.firmware) {

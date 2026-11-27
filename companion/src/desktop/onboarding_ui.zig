@@ -20,7 +20,6 @@ pub const Action = enum {
     open,
     add_existing,
     cancel,
-    cancel_tutor,
     editor,
     tutor,
     choose_source,
@@ -82,7 +81,6 @@ pub const State = struct {
     discard: bool = false,
     add_existing: bool = false,
     review_details: bool = false,
-    preparing_tutor: bool = false,
 
     pub fn deinit(self: *State) void {
         if (self.worker) |worker| worker.destroy();

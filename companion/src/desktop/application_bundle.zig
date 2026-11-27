@@ -57,6 +57,7 @@ pub fn plan(
             .export_directory = try std.fs.path.join(a, &.{ cache, "exports" }),
             .expected_export_tree = @splat(0),
             .install_directory = try std.fs.path.join(a, &.{ cache, "builds" }),
+            .compiler_identity = bundle.manifest.compiler_hash,
         },
     } });
 }

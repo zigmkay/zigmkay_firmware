@@ -15,6 +15,7 @@ test {
     _ = @import("test_processing_basics_trans_none.zig");
     _ = @import("test_processing_boot_key.zig");
     _ = @import("test_processing_combos_single.zig");
+    _ = @import("test_processing_companion_decisions.zig");
     _ = @import("test_processing_custom_functions.zig");
     _ = @import("test_processing_dead_keys.zig");
     _ = @import("test_processing_encoders.zig");

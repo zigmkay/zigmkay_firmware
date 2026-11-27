@@ -28,6 +28,10 @@ pub const deferred_test_files = [_][]const u8{
     "src/desktop/onboarding_ui.zig",
     "src/desktop/keyboard_ui.zig",
     "src/desktop/key_editor_ui.zig",
+    "src/desktop/practice_keyboard_ui.zig",
+    "src/desktop/practice_sheets_ui.zig",
+    "src/desktop/practice_key_change_ui.zig",
+    "src/desktop/practice_tap_hold_ui.zig",
     "src/platform/companion_window.zig",
 };
 
@@ -36,10 +40,32 @@ const fixtures = [_]struct { []const u8, []const u8 }{
     .{ "--offline-frames", "3" },
     .{ "--offline-onboarding-frames", "24" },
     .{ "--offline-catalog-frames", "56" },
-    .{ "--offline-status-frames", "24" },
+    .{ "--offline-status-frames", "68" },
     .{ "--offline-practice-frames", "3" },
+    .{ "--offline-tutor-frames", "124" },
     .{ "--offline-companion-frames", "9" },
     .{ "--offline-source-refresh-frames", "3" },
+};
+
+/// Dark gallery scenes (`src/app/fixtures.zig`) the documentation shows,
+/// relative to the companion directory.
+const doc_screenshots = [_]struct { []const u8, []const u8 }{
+    .{ "0", "docs/screenshots/typing-practice/active-practice.png" },
+    .{ "0", "../assets/screenshots/tutor.png" },
+    .{ "1", "docs/screenshots/typing-practice/shift-guidance.png" },
+    .{ "2", "docs/screenshots/typing-practice/layers-combos.png" },
+    .{ "3", "docs/screenshots/typing-practice/next-lesson.png" },
+    .{ "4", "docs/screenshots/typing-practice/stages.png" },
+    .{ "5", "docs/screenshots/typing-practice/progress.png" },
+    .{ "6", "docs/screenshots/typing-practice/test-keys.png" },
+    .{ "22", "docs/screenshots/typing-practice/test-layout-released.png" },
+    .{ "15", "docs/screenshots/typing-practice/tap-hold-test-layout.png" },
+    .{ "16", "docs/screenshots/typing-practice/tap-hold-tutor.png" },
+    .{ "17", "docs/screenshots/typing-practice/tap-hold-progress.png" },
+    .{ "24", "docs/screenshots/typing-practice/new-profile.png" },
+    .{ "25", "docs/screenshots/typing-practice/profiles.png" },
+    .{ "26", "docs/screenshots/typing-practice/refresh-lesson.png" },
+    .{ "7", "docs/screenshots/typing-practice/settings.png" },
 };
 
 /// Returns the application executable.
@@ -47,7 +73,6 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     const b = s.b;
     const mods = s.mods;
     const g = mods.gui.?;
-    const h = mods.host.?;
     const step = s.steps.test_desktop;
 
     const desktop_gui_tests = mods.root("src/desktop/test_gui_all.zig", g.desktop_gui_test_deps);
@@ -66,13 +91,21 @@ pub fn add(s: *tests.Suite, test_fixtures: tests.Fixtures) *Compile {
     s.steps.check.dependOn(&app.step);
     for (fixtures) |fixture| step.dependOn(&tests.addGuiFixture(b, app, &.{ fixture[0], fixture[1] }).step);
 
-    // Draft scoring through the real native processor.
-    const manifest_fixture = b.addExecutable(.{ .name = "runner-manifest-fixture", .root_module = mods.root("src/runner/manifest_fixture.zig", h.manifest_fixture_deps) });
-    const prepare = b.addRunArtifact(manifest_fixture);
-    prepare.addArtifactArg(test_fixtures.runner.?);
-    const draft = tests.addGuiFixture(b, app, &.{ "--offline-draft-frames", "600" });
-    draft.addFileArg2(prepare.addOutputFileArg("runner-manifest.zon"), .{ .make_absolute = true });
-    step.dependOn(&draft.step);
+    // Renders the Tutor gallery again and rewrites the PNGs the docs show.
+    const gallery = tests.addGuiFixture(b, app, &.{ "--offline-tutor-frames", "124" });
+    gallery.setCwd(b.path("."));
+    const converter = b.addExecutable(.{ .name = "doc-screenshots", .root_module = b.createModule(.{
+        .root_source_file = b.path("tools/doc_screenshots.zig"),
+        .target = b.graph.host,
+        .optimize = .ReleaseFast,
+    }) });
+    s.steps.check.dependOn(&converter.step);
+    const convert = b.addRunArtifact(converter);
+    convert.setCwd(b.path("."));
+    convert.addArg(".zig-cache/typing-practice-gallery");
+    for (doc_screenshots) |shot| convert.addArg(b.fmt("{s}-dark.bmp={s}", .{ shot[0], shot[1] }));
+    convert.step.dependOn(&gallery.step);
+    s.steps.doc_screenshots.dependOn(&convert.step);
 
     // Installs and removes a real tray icon with a hidden window.
     const tray = b.addRunArtifact(app);

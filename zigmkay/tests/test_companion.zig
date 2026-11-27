@@ -128,13 +128,22 @@ test "companion session reports companion signals from tap and hold decisions" {
     session.processor_event(.{ .OnHoldExitBefore = .{ .hold = overlay_hold } });
     session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .custom = core.CUSTOM_ID_COMPANION_SHUTDOWN } } });
     session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .key_press = core.KC_COMPANION } } });
+    session.processor_event(.{ .OnTapExitBefore = .{ .tap = .{ .key_press = core.KC_COMPANION } } });
+    session.processor_event(.{ .OnTapExitBefore = .{ .tap = .{ .custom = core.CUSTOM_ID_COMPANION_TOGGLE } } });
 
+    // Byte 4 tells the host whether the tap or the hold action sent it.
     const signal = @backingInt(companion.MessageId.signal);
     const overlay = @backingInt(companion.Signal.overlay_toggle);
-    try std.testing.expectEqualSlices(u8, &.{ signal, 1, overlay, 1 }, take(&session).?[0..4]);
-    try std.testing.expectEqualSlices(u8, &.{ signal, 2, overlay, 0 }, take(&session).?[0..4]);
-    try std.testing.expectEqualSlices(u8, &.{ signal, 3, @backingInt(companion.Signal.shutdown), 1 }, take(&session).?[0..4]);
-    try std.testing.expectEqualSlices(u8, &.{ signal, 4, overlay, 1 }, take(&session).?[0..4]);
+    const tap = @backingInt(companion.SignalSource.tap);
+    const hold = @backingInt(companion.SignalSource.hold);
+    try std.testing.expectEqual(1, tap);
+    try std.testing.expectEqual(2, hold);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 1, overlay, 1, hold, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 2, overlay, 0, hold, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 3, @backingInt(companion.Signal.shutdown), 1, tap, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 4, overlay, 1, tap, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 5, overlay, 0, tap, 0 }, take(&session).?[0..6]);
+    try std.testing.expectEqualSlices(u8, &.{ signal, 6, overlay, 0, tap, 0 }, take(&session).?[0..6]);
     try std.testing.expectEqual(null, session.next_report());
 }
 
@@ -150,4 +159,32 @@ test "companion session ignores ordinary keys and signals while disconnected" {
     session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .key_press = .{ .tap_keycode = 0x04 } } } });
     session.processor_event(.{ .OnHoldEnterAfter = .{ .hold = .{ .hold_layer = 1 } } });
     try std.testing.expectEqual(null, session.next_report());
+}
+
+test "companion session encodes tap/hold decisions in sequence with keys" {
+    var session = companion.Session.init(info);
+    session.tap_hold_decision(.{ .key_index = 4, .outcome = .tap, .reason = .released_within_term, .elapsed_ms = 50, .tapping_term_ms = 200 });
+    _ = session.receive(&command(.connect));
+    _ = take(&session);
+    _ = take(&session);
+
+    session.key_event(true, 12, 0, .{});
+    session.tap_hold_decision(.{
+        .key_index = 12,
+        .outcome = .hold,
+        .reason = .permissive_hold,
+        .elapsed_ms = 0x0123,
+        .other_key = 20,
+        .tapping_term_ms = 0x0201,
+        .layer = 3,
+        .combo = true,
+    });
+    session.tap_hold_decision(.{ .key_index = 5, .outcome = .retro_tap, .reason = .released_after_term, .elapsed_ms = 0xFFFF, .tapping_term_ms = 250 });
+
+    const decision = @backingInt(companion.MessageId.decision);
+    try std.testing.expectEqual(@backingInt(companion.MessageId.key), take(&session).?[0]);
+    try std.testing.expectEqualSlices(u8, &.{ decision, 2, 12, 2, 3, 0x23, 0x01, 20, 0x01, 0x02, 3, 1, 0 }, take(&session).?[0..13]);
+    try std.testing.expectEqualSlices(u8, &.{ decision, 3, 5, 3, 5, 0xFF, 0xFF, companion.no_other_key, 250, 0, 0, 0 }, take(&session).?[0..12]);
+    try std.testing.expectEqual(null, session.next_report());
+    try std.testing.expectEqual(2, companion.protocol_version);
 }

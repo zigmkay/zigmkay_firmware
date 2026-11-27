@@ -25,6 +25,8 @@ pub fn init_with_config(comptime keymap_dimensions: core.KeymapDimensions, compt
         encoder_event_queue: zigmkay.core.EncoderEventQueue = zigmkay.core.EncoderEventQueue.Create(),
         actions_queue: zigmkay.core.OutputCommandQueue = zigmkay.core.OutputCommandQueue.Create(),
         _inner_processor: ?ProcessorType = null,
+        /// Set before the first key to observe the companion reports.
+        companion_session: ?*zigmkay.companion.Session = null,
         pub fn press_key(self: *Self, key_index: zigmkay.core.KeyIndex, time: core.TimeSinceBoot) !void {
             ensure_processor(self);
             try self.matrix_change_queue.enqueue(.{ .time = time, .pressed = true, .key_index = key_index });
@@ -43,6 +45,7 @@ pub fn init_with_config(comptime keymap_dimensions: core.KeymapDimensions, compt
                     .input_matrix_changes = &self.matrix_change_queue,
                     .output_usb_commands = &self.actions_queue,
                     .encoder_event_changes = &self.encoder_event_queue,
+                    .companion_session = self.companion_session,
                 };
         }
     };

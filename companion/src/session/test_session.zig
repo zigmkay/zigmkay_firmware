@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Session reducer regressions for the companion Raw HID session, protocol
-//! version 1. Keyboard reports come from the firmware's own session
+//! versions 1 and 2. Keyboard reports come from the firmware's own session
 //! (`zigmkay/src/companion.zig`, reached as `protocol.firmware`), driven the way
 //! the firmware main loop drives it, so they define the wire independently of
 //! the companion codec. Byte literals remain only for reports a correct
@@ -99,6 +99,16 @@ const Fixture = struct {
     /// held then released.
     overlay_hold: protocol.Report,
     overlay_release: protocol.Report,
+    /// After `overlay_release`: key 3 held past its tapping term.
+    decision: protocol.Report,
+};
+
+const term_hold = protocol.TapHoldDecision{
+    .key_index = 3,
+    .outcome = .hold,
+    .reason = .term_elapsed,
+    .elapsed_ms = 210,
+    .tapping_term_ms = 200,
 };
 
 const fixture: Fixture = blk: {
@@ -134,6 +144,8 @@ const fixture: Fixture = blk: {
     signalling.hold(core.CUSTOM_ID_COMPANION_TOGGLE, false);
     result.overlay_hold = signalling.take();
     result.overlay_release = signalling.take();
+    signalling.session.tap_hold_decision(term_hold);
+    result.decision = signalling.take();
     break :blk result;
 };
 
@@ -157,14 +169,15 @@ test "firmware reports pin golden bytes, decode and reencode exactly" {
     const t = std.testing;
     // Golden bytes: the wire layout itself, so a change on both sides at once
     // still fails here.
-    try t.expectEqual(literal(&(.{ 0x20, 1, 36, 4 } ++ keymap_id)), hello);
+    try t.expectEqual(literal(&(.{ 0x20, 2, 36, 4 } ++ keymap_id)), hello);
     try t.expectEqual(blk: {
         var report = literal(&.{ 0x21, 0, 2, 0x02, 0b0111, 0 });
         report[6 + 1] = 0b10;
         break :blk report;
     }, first_state);
     try t.expectEqual(literal(&.{ 0x22, 1, 1, 5, 1, 0 }), press);
-    try t.expectEqual(literal(&.{ 0x23, 1, 2, 1 }), overlay_hold);
+    try t.expectEqual(literal(&.{ 0x23, 1, 2, 1, 2 }), overlay_hold);
+    try t.expectEqual(literal(&.{ 0x24, 3, 3, 2, 2, 210, 0, 0xFF, 200, 0, 0, 0 }), fixture.decision);
     try t.expectEqual(literal(&.{0x10}), protocol.encodeCommand(.connect));
     try t.expectEqual(literal(&.{0x11}), protocol.encodeCommand(.disconnect));
     try t.expectEqual(literal(&.{0x12}), protocol.encodeCommand(.enter_bootloader));
@@ -199,7 +212,7 @@ test "firmware reports pin golden bytes, decode and reencode exactly" {
     );
     for ([_]protocol.Report{
         hello,         first_state,           press,        release,         fixture.release_9, layer_state,
-        dropped_state, fixture.after_dropped, overlay_hold, overlay_release,
+        dropped_state, fixture.after_dropped, overlay_hold, overlay_release, fixture.decision,
     }) |report| {
         try t.expectEqual(
             report,
@@ -255,13 +268,39 @@ test "companion key signals pass through in sequence with keys" {
     _ = feed(&session, hello, 1);
     _ = feed(&session, first_state, 2);
     const held = feed(&session, overlay_hold, 3);
-    try t.expectEqualDeep(protocol.SignalEvent{ .kind = .overlay_toggle, .pressed = true }, held.signal.?);
+    try t.expectEqualDeep(protocol.SignalEvent{ .kind = .overlay_toggle, .pressed = true, .source = .hold }, held.signal.?);
     try t.expectEqualDeep(
-        protocol.SignalEvent{ .kind = .overlay_toggle, .pressed = false },
+        protocol.SignalEvent{ .kind = .overlay_toggle, .pressed = false, .source = .hold },
         feed(&session, overlay_release, 4).signal.?,
     );
     // A signal out of sequence resynchronises like a key.
     try t.expectEqual(@as(?protocol.Command, .connect), feed(&session, overlay_hold, 5).send);
+}
+
+test "tap/hold decisions pass through in sequence with signals and keys" {
+    const t = std.testing;
+    var session = try connected();
+    // Before the first state a decision is part of what that state reports.
+    _ = feed(&session, hello, 1);
+    try t.expectEqualDeep(companion.Outcome{}, feed(&session, fixture.decision, 2));
+    _ = feed(&session, first_state, 3);
+    _ = feed(&session, overlay_hold, 4);
+    _ = feed(&session, overlay_release, 5);
+    const decided = feed(&session, fixture.decision, 6);
+    try t.expectEqualDeep(term_hold, decided.decision.?);
+    try t.expect(decided.send == null and decided.key == null and decided.signal == null);
+    // A decision out of sequence resynchronises like a key.
+    try t.expectEqual(@as(?protocol.Command, .connect), feed(&session, fixture.decision, 7).send);
+}
+
+test "a version 1 keyboard connects; it simply never sends decisions" {
+    const t = std.testing;
+    var session = try connected();
+    try t.expectEqualDeep(companion.Outcome{}, feed(&session, literal(&(.{ 0x20, 1, 36, 4 } ++ keymap_id)), 1));
+    try t.expectEqual(companion.Phase.synchronizing, session.phase);
+    _ = feed(&session, first_state, 2);
+    try t.expect(session.hasCoherentState());
+    try t.expectEqual(@as(u8, 1), session.observed.?.version);
 }
 
 test "hello is matched against the open project and all-zero ids are unknown" {
@@ -274,8 +313,8 @@ test "hello is matched against the open project and all-zero ids are unknown" {
         .{ .report = firmwareHello(.{ .key_count = 36, .layer_count = 3, .keymap_id = keymap_id }), .mismatch = .dimensions },
         .{ .report = firmwareHello(.{ .key_count = 36, .layer_count = 4 }), .mismatch = .unknown_keymap },
         .{ .report = firmwareHello(.{ .key_count = 36, .layer_count = 4, .keymap_id = other_id }), .mismatch = .keymap_id },
-        // No firmware speaks another version yet.
-        .{ .report = literal(&(.{ 0x20, 2, 36, 4 } ++ keymap_id)), .mismatch = .unsupported_version },
+        // No firmware speaks a later version yet.
+        .{ .report = literal(&(.{ 0x20, 3, 36, 4 } ++ keymap_id)), .mismatch = .unsupported_version },
     }) |case| {
         var session = try connected();
         try t.expectEqual(@as(?protocol.Command, .disconnect), feed(&session, case.report, 1).send);

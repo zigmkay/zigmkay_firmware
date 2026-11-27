@@ -12,6 +12,8 @@ const paths = @import("paths-ui");
 const callbacks = @import("callback-ui");
 const App = @import("App.zig");
 const onboarding_flow = @import("onboarding_flow.zig");
+const maintenance = @import("maintenance.zig");
+const build_status = @import("build_status.zig");
 
 pub const FileJob = struct {
     worker: *desktop.project_worker.Owner,
@@ -33,25 +35,25 @@ pub const BuildJob = struct {
     worker: *desktop.build_worker.Owner,
     editor_generation: u64,
     first_build: bool,
+    trigger: desktop.build_activity.Trigger,
+    /// Start on the awake clock, in milliseconds.
+    started_ms: u64,
 };
 
 pub const Jobs = struct {
     file: ?FileJob = null,
     source: ?SourceJob = null,
     build: ?BuildJob = null,
-    /// Native tutor runner build started from onboarding.
-    runner: ?BuildJob = null,
 
     pub fn busy(self: *const Jobs) bool {
         return self.file != null or self.source != null or
-            self.build != null or self.runner != null;
+            self.build != null;
     }
 
     pub fn cancel(self: *Jobs) void {
         if (self.file) |job| job.worker.destroy();
         if (self.source) |job| job.worker.destroy();
         if (self.build) |job| job.worker.destroy();
-        if (self.runner) |job| job.worker.destroy();
         self.* = .{};
     }
 };
@@ -106,7 +108,7 @@ pub fn startFile(app: *App, action: paths.Action, generation: u64) !FileJob {
     };
 }
 
-pub fn startBuild(app: *App, config: desktop.build_worker.Config, generation: u64) !BuildJob {
+pub fn startBuild(app: *App, config: desktop.build_worker.Config, generation: u64, trigger: desktop.build_activity.Trigger) !BuildJob {
     var request = try desktop.build_worker.Request.capture(&app.model, config, app.environ_map, generation);
     errdefer request.deinit();
     const first_build = jobs_api.managed_build.isFirstBuild(app.gpa, app.io, config.request);
@@ -114,7 +116,19 @@ pub fn startBuild(app: *App, config: desktop.build_worker.Config, generation: u6
         .worker = try desktop.build_worker.Owner.create(app.gpa, app.io, &request, generation),
         .editor_generation = app.owner_generation,
         .first_build = first_build,
+        .trigger = trigger,
+        .started_ms = build_status.awakeMs(app),
     };
+}
+
+/// Starts the user's build. A background warm-up of the same snapshot
+/// becomes this build; any other build waits for the warm-up's cache lease.
+pub fn beginBuild(app: *App, config: desktop.build_worker.Config, trigger: desktop.build_activity.Trigger) !void {
+    if (try maintenance.adopt(app)) return;
+    const next_job = try std.math.add(u64, app.job_generation, 1);
+    app.jobs.build = try startBuild(app, config, next_job, trigger);
+    app.job_generation = next_job;
+    build_status.buildStarted(app, app.jobs.build.?);
 }
 
 pub fn startSource(app: *App, action: callbacks.Action, generation: u64) !SourceJob {
@@ -138,39 +152,10 @@ fn captureSource(view: *editor.View, model: *desktop.model.Model, action: callba
 
 /// Accepts finished job results. A failed or stale result skips the frame.
 pub fn poll(app: *App) !App.Flow {
-    inline for (.{ pollRunner, pollBuild, pollFile, pollSource }) |pollJob| {
+    inline for (.{ pollBuild, pollFile, pollSource }) |pollJob| {
         const flow = try pollJob(app);
         if (flow != .proceed) return flow;
     }
-    return .proceed;
-}
-
-fn pollRunner(app: *App) !App.Flow {
-    const job = app.jobs.runner orelse return .proceed;
-    const event = job.worker.poll() orelse return .proceed;
-    app.jobs.runner = null;
-    defer job.worker.destroy();
-    var prepared = event.result catch |err| {
-        app.onboarding.report(err);
-        return .next_frame;
-    };
-    defer prepared.deinit();
-    if (job.editor_generation != app.owner_generation or !std.meta.eql(event.ticket, job.worker.ticket) or
-        !std.mem.eql(u8, &event.ticket.snapshot, &(try app.model.id())))
-    {
-        app.onboarding.report(error.StaleBuild);
-        return .next_frame;
-    }
-    const runner = prepared.runner orelse {
-        app.onboarding.report(error.RunnerArtifactNotPrepared);
-        return .next_frame;
-    };
-    prepared.runner = null;
-    if (app.build.runner) |*old| old.deinit();
-    app.build.runner = runner;
-    _ = try app.tutor.controller.choose(.{ .source = .draft }, 0);
-    app.practicing = true;
-    app.onboarding.active = false;
     return .proceed;
 }
 
@@ -180,28 +165,31 @@ fn pollBuild(app: *App) !App.Flow {
     app.jobs.build = null;
     defer job.worker.destroy();
     var prepared = event.result catch |err| {
+        build_status.buildFinished(app, job, err);
         app.flash.buildFailed(&app.view, err);
         return .next_frame;
     };
     defer prepared.deinit();
     if (job.editor_generation != app.owner_generation or !std.meta.eql(event.ticket, job.worker.ticket)) {
+        build_status.buildFinished(app, job, error.StaleBuild);
         app.flash.buildFailed(&app.view, error.StaleBuild);
         return .next_frame;
     }
     const snapshot = try app.model.id();
     const bundle = prepared.takeBundle(&app.model, .{ .generation = app.job_generation, .snapshot = snapshot }) catch |err| {
+        build_status.buildFinished(app, job, err);
         app.flash.buildFailed(&app.view, err);
         return .next_frame;
     };
+    build_status.buildFinished(app, job, bundle.firmware.uf2_size);
     try app.flash.buildSucceeded(&app.model, app.owner_generation);
     if (app.build.artifact) |*previous| previous.deinit();
-    if (app.build.runner) |*previous| previous.deinit();
     app.build.artifact = bundle.firmware;
-    app.build.runner = bundle.runner;
     app.build.generation = app.job_generation;
     app.build.tree = bundle.expected_export_tree;
     app.flash.panel = false;
     app.view.diagnostic = @splat(0);
+    maintenance.startCleanup(app);
     return .proceed;
 }
 

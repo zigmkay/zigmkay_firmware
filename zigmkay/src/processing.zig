@@ -99,18 +99,24 @@ pub fn CreateProcessorType(
                         return ProcessContinuation{ .DequeueAndRunAgain = .{ .dequeue_count = next_key_info.consumed_event_count } };
                     },
                     .hold_only => |hold| {
-                        try decide_hold_decided(self, hold, key_def, head_event);
+                        try decide_hold_decided(self, hold, key_def, head_event, null);
                         return ProcessContinuation{ .DequeueAndRunAgain = .{ .dequeue_count = next_key_info.consumed_event_count } };
                     },
                     .tap_hold => |tap_and_hold| {
                         const tail = data[next_key_info.consumed_event_count..];
+                        const decided: DecidedKey = .{
+                            .event = head_event,
+                            .tapping_term = tap_and_hold.tapping_term,
+                            .combo = next_key_info.consumed_event_count > 1,
+                        };
 
                         // Iterate tail
                         for (tail, 0..) |ev, outer_idx| {
 
                             // Exceeding tapping term?
                             if (try head_event.time.up_til_ms(&ev.time) >= tap_and_hold.tapping_term.ms) {
-                                try decide_hold_decided(self, tap_and_hold.hold, key_def, head_event);
+                                report_decision(self, decided, .hold, .term_elapsed, ev.time, null);
+                                try decide_hold_decided(self, tap_and_hold.hold, key_def, head_event, decided);
                                 return ProcessContinuation{ .DequeueAndRunAgain = .{ .dequeue_count = next_key_info.consumed_event_count } };
                             }
 
@@ -124,9 +130,11 @@ pub fn CreateProcessorType(
                                 if (press_and_release_same_key_detected) {
                                     const tapped_key_same_side_as_first_key = sides[earlier_event.key_index] == sides[head_event.key_index] and sides[head_event.key_index] != .X;
                                     if (!tapped_key_same_side_as_first_key) {
-                                        try decide_hold_decided(self, tap_and_hold.hold, key_def, head_event);
+                                        report_decision(self, decided, .hold, .permissive_hold, ev.time, ev.key_index);
+                                        try decide_hold_decided(self, tap_and_hold.hold, key_def, head_event, decided);
                                         return ProcessContinuation{ .DequeueAndRunAgain = .{ .dequeue_count = next_key_info.consumed_event_count } };
                                     } else {
+                                        report_decision(self, decided, .tap, .same_side_tap, ev.time, ev.key_index);
                                         try decide_tap_press(self, tap_and_hold.tap, head_event, TapReleaseMode.AwaitKeyReleased);
                                         return ProcessContinuation{ .DequeueAndRunAgain = .{ .dequeue_count = next_key_info.consumed_event_count } };
                                     }
@@ -135,6 +143,7 @@ pub fn CreateProcessorType(
 
                             // Same key released within tapping term?
                             if (ev.key_index == head_event.key_index) {
+                                report_decision(self, decided, .tap, .released_within_term, ev.time, null);
                                 try decide_tap_press(self, tap_and_hold.tap, head_event, TapReleaseMode.AwaitKeyReleased);
                                 return ProcessContinuation{ .DequeueAndRunAgain = .{ .dequeue_count = next_key_info.consumed_event_count } };
                             }
@@ -142,7 +151,8 @@ pub fn CreateProcessorType(
 
                         // Exceeding tapping term?
                         if (try head_event.time.up_til_ms(&current_time) >= tap_and_hold.tapping_term.ms) {
-                            try decide_hold_decided(self, tap_and_hold.hold, key_def, head_event);
+                            report_decision(self, decided, .hold, .term_elapsed, current_time, null);
+                            try decide_hold_decided(self, tap_and_hold.hold, key_def, head_event, decided);
                             return ProcessContinuation{ .DequeueAndRunAgain = .{ .dequeue_count = next_key_info.consumed_event_count } };
                         }
 
@@ -165,8 +175,9 @@ pub fn CreateProcessorType(
                                 try hold_remove_modifiers_and_layers(self, hold_def.hold);
 
                                 if (release_info.action_id_when_pressed == self.current_action_id - 1) {
-                                    if (hold_def.retro_tap) |tap| {
-                                        try decide_tap_press(self, tap, head_event, TapReleaseMode.ForceInstant);
+                                    if (hold_def.retro_tap) |retro| {
+                                        report_retro_tap(self, retro, head_event);
+                                        try decide_tap_press(self, retro.tap, head_event, TapReleaseMode.ForceInstant);
                                     }
                                 }
 
@@ -321,19 +332,27 @@ pub fn CreateProcessorType(
             }
         }
 
-        fn decide_hold_decided(self: *Self, hold: core.HoldDef, key_def: core.KeyDef, event: core.MatrixStateChange) !void {
-            on_event(self, .{ .OnHoldEnterBefore = .{ .hold = hold } });
-            try hold_apply_modifiers_and_layers(self, hold);
-
-            var retro_tap: ?core.TapDef = null;
+        fn decide_hold_decided(self: *Self, hold: core.HoldDef, key_def: core.KeyDef, event: core.MatrixStateChange, decided: ?DecidedKey) !void {
+            var retro_tap: ?RetroTap = null;
             switch (key_def) {
                 .tap_hold => |tap_hold| {
                     if (tap_hold.retro_tapping) {
-                        retro_tap = tap_hold.tap;
+                        retro_tap = .{
+                            .tap = tap_hold.tap,
+                            .pressed_at = event.time,
+                            .tapping_term = tap_hold.tapping_term,
+                            // Taken before the hold changes the layers.
+                            .layer = if (decided) |d| decision_layer(self, d) else 0,
+                            .combo = if (decided) |d| d.combo else false,
+                        };
                     }
                 },
                 else => {},
             }
+
+            on_event(self, .{ .OnHoldEnterBefore = .{ .hold = hold } });
+            try hold_apply_modifiers_and_layers(self, hold);
+
             self.release_map[event.key_index] = .{
                 .Release = .{
                     .release_action = KeyReleaseAction{ .ReleaseHold = .{ .hold = hold, .retro_tap = retro_tap } },
@@ -383,6 +402,49 @@ pub fn CreateProcessorType(
         }
 
         // AUTOFIRE END
+
+        /// The layer a decided key's definition came from: the top layer for
+        /// combos, which only match there, else the layer `determine_key_def` uses.
+        fn decision_layer(self: *Self, decided: DecidedKey) core.LayerIndex {
+            if (decided.combo) return self.layers_activations.get_top_most_active_layer();
+            var layer_index: core.LayerIndex = keymap_dimensions.layer_count - 1;
+            while (layer_index > 0) : (layer_index -= 1) {
+                if (self.layers_activations.is_layer_active(layer_index) and keymap[layer_index][decided.event.key_index] != null) return layer_index;
+            }
+            return 0;
+        }
+
+        /// Tells a connected companion how a tap/hold key resolved. Call it
+        /// before acting on the decision, so the layer is the one pressed on.
+        fn report_decision(self: *Self, decided: DecidedKey, outcome: companion.DecisionOutcome, reason: companion.DecisionReason, decided_at: core.TimeSinceBoot, other_key: ?core.KeyIndex) void {
+            const session = self.companion_session orelse return;
+            if (!session.connected) return;
+            session.tap_hold_decision(.{
+                .key_index = decided.event.key_index,
+                .outcome = outcome,
+                .reason = reason,
+                .elapsed_ms = elapsed_ms(decided.event.time, decided_at),
+                .other_key = other_key,
+                .tapping_term_ms = decided.tapping_term.ms,
+                .layer = decision_layer(self, decided),
+                .combo = decided.combo,
+            });
+        }
+
+        fn report_retro_tap(self: *Self, retro: RetroTap, release: core.MatrixStateChange) void {
+            const session = self.companion_session orelse return;
+            if (!session.connected) return;
+            session.tap_hold_decision(.{
+                .key_index = release.key_index,
+                .outcome = .retro_tap,
+                .reason = .released_after_term,
+                .elapsed_ms = elapsed_ms(retro.pressed_at, release.time),
+                .tapping_term_ms = retro.tapping_term.ms,
+                .layer = retro.layer,
+                .combo = retro.combo,
+            });
+        }
+
         fn on_event(self: *Self, event: core.ProcessorEvent) void {
             if (self.companion_session) |session| session.processor_event(event);
             if (custom.on_event) |ev| {
@@ -410,9 +472,31 @@ const RS = 0x00E5;
 const RA = 0x00E6;
 const RG = 0x00E7;
 
+/// A tap/hold key being decided, for the companion's decision report.
+const DecidedKey = struct {
+    event: core.MatrixStateChange,
+    tapping_term: core.TimeSpan,
+    combo: bool,
+};
+
+/// The tap a held key sends when it is released with nothing in between,
+/// and what the companion needs to report it.
+const RetroTap = struct {
+    tap: core.TapDef,
+    pressed_at: core.TimeSinceBoot,
+    tapping_term: core.TimeSpan,
+    layer: core.LayerIndex,
+    combo: bool,
+};
+
+fn elapsed_ms(from: core.TimeSinceBoot, to: core.TimeSinceBoot) u16 {
+    const ms = (to.time_since_boot_us -| from.time_since_boot_us) / 1000;
+    return @intCast(@min(ms, std.math.maxInt(u16)));
+}
+
 const KeyReleaseAction = union(enum) {
     ReleaseTap: core.TapDef,
-    ReleaseHold: struct { hold: core.HoldDef, retro_tap: ?core.TapDef },
+    ReleaseHold: struct { hold: core.HoldDef, retro_tap: ?RetroTap },
 };
 const ReleaseMapEntry = union(enum) {
     Release: struct {

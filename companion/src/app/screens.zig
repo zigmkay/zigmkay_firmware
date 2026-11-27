@@ -11,6 +11,7 @@ const Tutor = @import("Tutor.zig");
 const commands = @import("commands.zig");
 const desktop = @import("desktop-core");
 const fixtures = @import("fixtures.zig");
+const build_status = @import("build_status.zig");
 
 const Toolbar = @FieldType(editor.Frame, "toolbar");
 const Choice = std.meta.Elem(@FieldType(Toolbar, "layouts"));
@@ -26,7 +27,6 @@ pub fn draw(app: *App, board: *const boards.OwnedBoard, practice: Tutor.Frame, c
     var toolbar = try toolbarFrame(app, board, can_build, now_us);
     fixtures.statusToolbar(app, &toolbar);
     var screen: Screen = .{};
-    app.onboarding.preparing_tutor = app.jobs.runner != null;
     if (app.onboarding.active) {
         screen.onboarding = try keyboard_onboarding.draw(&app.onboarding, .{
             .dirty = app.unsavedChanges(),
@@ -78,23 +78,16 @@ fn keyboardName(board: *const boards.OwnedBoard) ![]const u8 {
 }
 
 fn toolbarFrame(app: *App, board: *const boards.OwnedBoard, can_build: bool, now_us: u64) !Toolbar {
-    const flash = &app.flash;
-    const build_job = app.jobs.build;
     return .{
         .keyboard_name = board.entry.display.name,
         .connection = connectionLabel(app),
         .layouts = (try layoutChoices(app, board, dvui.currentWindow().arena())).choices,
         .save = saveState(app),
-        .can_build = can_build,
-        .can_flash = app.build.tools != null and app.build.plan != null and can_build and app.frame_limit == null,
-        .flash_active = flash.active(),
-        .build_active = build_job != null,
-        .first_build = if (build_job) |job| job.first_build else false,
-        .flash_succeeded = flash.phase() == .ready,
-        .flash_failed = flash.failed(),
+        .state = try build_status.state(app, can_build),
+        .activity = &app.activity,
         .now_ms = now_us / 1000,
-        .flash_status = try flash.toolbarStatus(dvui.currentWindow().arena(), build_job != null, now_us / 1000),
-        .build_status = try buildStatus(app),
+        // Motion only where someone sees it.
+        .animate = app.frame_limit == null and app.life.editor_visible and app.focused(),
     };
 }
 
@@ -156,17 +149,4 @@ fn connectionLabel(app: *const App) []const u8 {
         .disconnected => "Keyboard disconnected",
         .incompatible => "Keyboard layout mismatch",
     };
-}
-
-fn buildStatus(app: *App) ![]const u8 {
-    if (app.jobs.build) |job| return if (job.first_build)
-        "First build: this can take a few minutes. Later builds are faster."
-    else
-        "Building";
-    if (app.build.artifact) |artifact| return if (std.mem.eql(u8, &artifact.inputs.project_digest, &(try app.model.id())))
-        "Built snapshot"
-    else
-        "Build outdated";
-    if (app.build.plan != null) return "Ready to build and Flash";
-    return "Application bundle is missing build resources";
 }

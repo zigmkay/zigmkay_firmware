@@ -37,6 +37,8 @@ const preferences = @import("preferences.zig");
 const screens = @import("screens.zig");
 const tray_menu = @import("tray_menu.zig");
 const workers = @import("workers.zig");
+const maintenance = @import("maintenance.zig");
+const build_status = @import("build_status.zig");
 
 const App = @This();
 
@@ -55,12 +57,18 @@ pub const Build = struct {
     resources: ?desktop.application_bundle.Bundle = null,
     tools: ?jobs_api.flash_inputs.Tools = null,
     artifact: ?desktop.build_worker.Artifact = null,
-    /// Native tutor runner of the accepted build.
-    runner: ?desktop.build_worker.Runner = null,
     /// Job generation of the accepted build.
     generation: u64 = 0,
     tree: jobs_api.firmware.Digest = @splat(0),
     scheduler: desktop.auto_build.Scheduler = .{},
+    /// The quiet background build that fills the compiler cache; never
+    /// counted as a busy job.
+    warmup: ?maintenance.Warmup = null,
+    warmup_attempted: bool = false,
+    cleanup: ?*desktop.cache_cleanup.Owner = null,
+    first_frame_ms: ?u64 = null,
+    /// Queued clicks, the accepted and failed builds, warm-up timing.
+    status: build_status.Status = .{},
 };
 
 gpa: std.mem.Allocator,
@@ -97,6 +105,8 @@ life: desktop.tray_lifecycle.Lifecycle,
 companion: CompanionOverlay = .{},
 events: Events,
 interrupted: bool = false,
+/// Builds frames only on change while live monitoring polls every 10 ms.
+pacer: desktop.live_keyboard.Pacer = .{},
 fonts_installed: bool = false,
 count: usize = 0,
 
@@ -104,13 +114,14 @@ live: LiveKeyboard,
 
 practicing: bool,
 tutor: Tutor,
-draft_runtime: desktop.runner_runtime.Runtime,
 
 job_generation: u64 = 0,
 jobs: workers.Jobs = .{},
 build: Build = .{},
 flash: Flash = .{},
 fixture: fixtures.State = .{},
+/// The Build and Flash timeline of this session and the last compiler output.
+activity: desktop.build_activity.Log = .{},
 
 pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     const gpa = process.gpa;
@@ -136,9 +147,8 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
         .life = undefined,
         .events = undefined,
         .live = undefined,
-        .practicing = mode.is(.practice) or mode.is(.native_tutor) or mode.is(.draft) or mode.light() == .tutor,
+        .practicing = mode.is(.practice) or mode.isTutorGallery() or mode.light() == .tutor,
         .tutor = undefined,
-        .draft_runtime = undefined,
     };
     errdefer app.model.deinit();
     errdefer app.registry.deinit();
@@ -156,6 +166,10 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     app.captions = try app.captionsFor(&app.model, "Offline launch fixture");
     errdefer app.captions.deinit();
     if (builtin.os.tag == .linux) _ = Backend.c.SDL_SetHint(Backend.c.SDL_HINT_APP_ID, "zigmkay");
+    // Closing the editor window hides it while the tray keeps the app
+    // resident (`handleWindowRequests`). SDL would otherwise also post a quit
+    // when the last visible window closes, and the app would quit.
+    _ = Backend.c.SDL_SetHint(Backend.c.SDL_HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0");
     app.native = try Backend.initWindow(.{
         .io = io,
         .size = if (frame_limit != null) .{ .w = 1536, .h = 1024 } else .{
@@ -190,20 +204,14 @@ pub fn init(app: *App, process: std.process.Init, mode: cli.Mode) !void {
     errdefer if (app.build.tools) |*tools| tools.deinit();
     errdefer if (app.build.resources) |*resources| resources.deinit();
     try app.loadBundle();
-    errdefer if (app.build.runner) |*runner| runner.deinit();
-    app.draft_runtime = desktop.runner_runtime.Runtime.init(gpa, io, app.events.root, frame_limit != null);
-    errdefer app.draft_runtime.deinit();
-    app.events.draft = &app.draft_runtime;
-    app.events.practice = &app.tutor.controller;
-    app.events.model = &app.model;
-    app.events.view = &app.view;
-    if (mode.fixtureKind()) |kind| if (kind == .draft) try app.loadRunnerManifest(kind.draft);
+    build_status.startup(app);
+    maintenance.startup(app);
 }
 
 /// Releases everything in the reverse order of `init`.
 pub fn deinit(app: *App) void {
-    app.draft_runtime.deinit();
-    if (app.build.runner) |*runner| runner.deinit();
+    maintenance.deinit(app);
+    app.activity.deinit(app.gpa);
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.flash.deinit();
     if (app.build.resources) |*resources| resources.deinit();
@@ -226,7 +234,14 @@ pub fn deinit(app: *App) void {
 }
 
 fn initialModel(gpa: std.mem.Allocator, mode: cli.Mode) !desktop.model.Model {
-    var template = try project.profiles.create(gpa, if (mode.is(.draft)) .eurkey else .qwerty);
+    if (mode.isTutorGallery()) {
+        var selected = try boards.OwnedBoard.init(gpa, "keycaprio_colemak_0_7");
+        defer selected.deinit();
+        var template = try boards.createDefault(gpa, selected);
+        defer template.deinit();
+        return desktop.model.Model.init(gpa, selected.board, template.snapshot);
+    }
+    var template = try project.profiles.create(gpa, .qwerty);
     defer template.deinit();
     return desktop.model.Model.init(gpa, project.profiles.board, template.snapshot);
 }
@@ -306,7 +321,7 @@ fn initLive(app: *App) !void {
 fn initTutor(app: *App) !void {
     app.tutor = .{ .controller = desktop.practice_controller.Controller.init(try app.model.id()) };
     const practice = &app.tutor.controller;
-    if (app.mode.is(.practice)) _ = try practice.dispatch(practice.action(.{ .start = true }), null, 0);
+    if (app.mode.is(.practice)) _ = try practice.dispatch(practice.action(.start), 0);
     if (app.frame_limit == null) try std.Io.randomSecure(app.io, std.mem.asBytes(&practice.seed));
 }
 
@@ -331,14 +346,6 @@ fn loadBundle(app: *App) !void {
     app.build.tools = try desktop.application_bundle.tools(app.gpa, app.build.resources.?);
 }
 
-/// Prepares a draft run on the runner of the `--offline-draft-frames` manifest.
-fn loadRunnerManifest(app: *App, path: []const u8) !void {
-    const bytes = try std.Io.Dir.cwd().readFileAlloc(app.io, path, app.gpa, .limited(32 * 1024));
-    defer app.gpa.free(bytes);
-    app.build.runner = try desktop.build_worker.Runner.parse(app.gpa, bytes);
-    try fixtures.startDraftRun(app, app.build.runner.?.record.inputs.project_digest, 0);
-}
-
 pub fn run(app: *App) !void {
     while (!app.owner.closed) {
         if (try app.frame() == .stop) break;
@@ -352,13 +359,14 @@ fn frame(app: *App) !Flow {
     if (try Flash.monitorTrial(app) == .stop) return .stop;
     try app.pollLive();
     try fixtures.checkBuild(app);
-    if (app.draftFinished()) return .stop;
+    if (app.mode.is(.build) and app.fixture.build_checked) return .stop;
     if (app.frame_limit) |limit| if (app.count == limit) return .stop;
     app.count += 1;
 
-    tray_menu.handle(app);
+    _ = tray_menu.handle(app);
     tray_menu.updateResidency(app);
     try app.refreshBuildPlan();
+    try maintenance.step(app);
     if (try tray_menu.waitWhileIdle(app) == .next_frame) return .next_frame;
     try fixtures.script(app);
     const polled = try workers.poll(app);
@@ -367,16 +375,16 @@ fn frame(app: *App) !Flow {
     const now_us: u64 = @intCast(@max(0, app.native.nanoTime()) / 1000);
     app.acceptEditorGeneration(now_us);
     try Flash.step(app, now_us);
+    build_status.observe(app);
     try app.refreshSource(now_us);
-    const control_model = try Tutor.observe(app, now_us);
-    app.prepareEvents(control_model, now_us);
+    try Tutor.observe(app, now_us);
     try app.refreshCaptions();
     try app.pollFolderDialog();
 
     var board = try boards.OwnedBoard.fromDocument(app.gpa, app.model.document());
     defer board.deinit();
     const drawn = try app.draw(&board, now_us);
-    return app.finishFrame(&board, drawn, control_model, now_us);
+    return app.finishFrame(&board, drawn, now_us);
 }
 
 /// Values of the displayed frame that are acted on after it.
@@ -392,10 +400,10 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     app.fitWindow();
     try app.window.begin(if (app.frame_limit == null) app.window.beginWait(app.interrupted) else app.native.nanoTime());
     errdefer _ = app.window.end(.{ .manage_backend = app.frame_limit == null }) catch {};
-    // DVUI rounds its render scale to hundredths. Keep the fitted editor
-    // aligned with the exact pixel edge, including on Retina displays.
-    if (!app.practicing and app.window.data().rect.w > 0) app.window.natural_scale = app.window.rect_pixels.w / app.window.data().rect.w;
-    if (!app.fonts_installed and (app.frame_limit == null or app.mode.is(.native_tutor) or app.mode.isStatus() or app.mode.isDrawers() or
+    // DVUI rounds its render scale to hundredths. Keep the fitted editor and
+    // tutor aligned with the exact pixel edge, including on Retina displays.
+    if (app.window.data().rect.w > 0) app.window.natural_scale = app.window.rect_pixels.w / app.window.data().rect.w;
+    if (!app.fonts_installed and (app.frame_limit == null or app.mode.isTutorGallery() or app.mode.isStatus() or app.mode.isDrawers() or
         app.mode.isOnboarding() or app.mode.is(.catalog)))
     {
         try editor_fonts.install(app.gpa, app.io);
@@ -407,7 +415,7 @@ fn draw(app: *App, board: *const boards.OwnedBoard, now_us: u64) !Drawn {
     try fixtures.injectText(app);
     if (app.events.lost_focus) {
         app.events.lost_focus = false;
-        app.applyPractice(app.tutor.controller.pause(now_us), &app.model, now_us);
+        app.tutor.controller.pause(now_us);
     }
 
     const can_build = app.canBuild(board);
@@ -438,16 +446,21 @@ fn fitWindow(app: *App) void {
     // Practice has a responsive canvas; keep its controls readable in the
     // native minimum window instead of shrinking the editor's fixed canvas.
     const scale = if (app.practicing) @max(@as(f32, 0.8), fitted_scale) else fitted_scale;
-    window.content_scale = scale * app.life.editor_scale;
+    window.content_scale = app.fixture.content_scale orelse scale * app.life.editor_scale;
     window.snap_to_pixels = window.content_scale == 1;
     window.themeSet(editor_ui.dvuiTheme(window, app.view.toolbar.light));
 }
 
-fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, control_model: *desktop.model.Model, now_us: u64) !Flow {
-    Tutor.finishFrame(app, drawn.screen.tutor, control_model, now_us);
+fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, now_us: u64) !Flow {
+    Tutor.finishFrame(app, drawn.screen.tutor, now_us);
     try Flash.afterFrame(app, drawn.flash_panel, now_us);
     try onboarding_flow.apply(app, drawn.screen.onboarding);
-    if (try commands.apply(app, drawn.screen.rendered, board, drawn.can_build) != .proceed) return .next_frame;
+    // A click queued behind the cache warm-up runs once the warm-up ended.
+    const rendered = if (drawn.screen.rendered == .effect and drawn.screen.rendered.effect == .none)
+        try build_status.takeQueued(app) orelse drawn.screen.rendered
+    else
+        drawn.screen.rendered;
+    if (try commands.apply(app, rendered, board, drawn.can_build) != .proceed) return .next_frame;
     try app.handleWindowRequests(now_us);
     try app.scheduleBuild(drawn.can_build, now_us);
     // Never enter SDL's potentially unbounded wait after accepting Quit.
@@ -456,28 +469,46 @@ fn finishFrame(app: *App, board: *const boards.OwnedBoard, drawn: Drawn, control
         return .stop;
     }
     if (app.frame_limit == null) {
-        const busy = app.jobs.busy() or app.draft_runtime.owner != null;
-        const budget = desktop.live_keyboard.waitBudget(app.live_enabled, busy, false);
-        app.interrupted = try app.native.waitEventTimeout(@min(app.window.waitTime(drawn.delay), budget));
+        const dvui_wait = app.window.waitTime(drawn.delay);
+        app.pacer.drew(app.clockUs(), dvui_wait);
+        try app.waitForChange();
     }
-    if (app.mode.isDraft()) try std.Io.sleep(app.io, .fromMilliseconds(10), .awake);
     return .proceed;
 }
 
-fn draftFinished(app: *const App) bool {
-    return app.checkingDraft() and app.fixture.draft_phase == .paused and
-        app.tutor.controller.session.state == .paused and app.draft_runtime.owner == null;
+pub fn clockUs(app: *App) u64 {
+    return @intCast(@max(0, app.native.nanoTime()) / 1000);
 }
 
-/// Whether a draft fixture is feeding key events through the runner.
-pub fn checkingDraft(app: *const App) bool {
-    return app.mode.is(.draft) or (app.mode.is(.build) and app.fixture.build_checked);
+/// Waits until the next frame is due. HID reports do not wake SDL, so live
+/// monitoring polls the keyboard and the tray every `waitBudget` in between
+/// and builds a frame only when a poll changed something.
+fn waitForChange(app: *App) !void {
+    while (true) {
+        const busy = app.jobs.busy() or app.flash.working();
+        const poll_us = desktop.live_keyboard.waitBudget(app.live_enabled, busy, false);
+        app.interrupted = try app.native.waitEventTimeout(app.pacer.timeout(app.clockUs(), poll_us));
+        var wake: desktop.live_keyboard.Pacer.Wake = .{ .event = app.interrupted, .busy = busy };
+        if (!wake.event and !wake.busy) {
+            wake.live = try app.pollLiveChanged();
+            wake.tray = tray_menu.handle(app);
+        }
+        if (app.pacer.due(app.clockUs(), wake)) return;
+    }
 }
 
 fn pollLive(app: *App) !void {
     const visible = try app.live.poll() orelse return;
     app.life.companion_visible = visible;
     CompanionOverlay.hideIfSuppressed(app);
+}
+
+/// Polls the live keyboard; whether the poll changed what a frame shows.
+pub fn pollLiveChanged(app: *App) !bool {
+    const before = app.live.presentation();
+    const visible = app.life.companion_visible;
+    try app.pollLive();
+    return app.live.receivedEvents() or visible != app.life.companion_visible or before != app.live.presentation();
 }
 
 /// Plans builds for the editor's board with the bundled toolchain.
@@ -501,8 +532,15 @@ fn acceptEditorGeneration(app: *App, now_us: u64) void {
     app.closePopups();
     app.view.host.drag = null;
     app.view.keyboard.drag = null;
-    if (app.tutor.controller.active or app.draft_runtime.owner != null)
-        app.draft_runtime.fail(&app.tutor.controller, error.PracticeProjectSwitched, now_us);
+    app.interruptPractice(error.PracticeProjectSwitched, now_us);
+}
+
+/// Pauses a running exercise whose project or input changed under it.
+pub fn interruptPractice(app: *App, reason: anyerror, now_us: u64) void {
+    const practice = &app.tutor.controller;
+    if (!practice.active) return;
+    practice.pause(now_us);
+    practice.failure = reason;
 }
 
 /// A host input source change pauses the run, which can no longer be scored.
@@ -511,18 +549,11 @@ fn refreshSource(app: *App, now_us: u64) !void {
     if (!source.refresh()) return;
     app.revision = try std.math.add(u64, app.revision, 1);
     const practice = &app.tutor.controller;
-    app.applyPractice(practice.pause(now_us), &app.model, now_us);
+    practice.pause(now_us);
     if (practice.active) {
         practice.session.scored = false;
         practice.failure = error.PracticeContextChanged;
     }
-}
-
-fn prepareEvents(app: *App, control_model: *desktop.model.Model, now_us: u64) void {
-    app.events.now_us = now_us;
-    app.events.model = control_model;
-    app.draft_runtime.router.owns_practice_input = app.practicing;
-    app.draft_runtime.router.focused = app.focused();
 }
 
 fn refreshCaptions(app: *App) !void {
@@ -585,7 +616,7 @@ fn handleWindowRequests(app: *App, now_us: u64) !void {
 fn leaveEditorModes(app: *App, now_us: u64) void {
     app.closePopups();
     app.practicing = false;
-    app.applyPractice(app.tutor.controller.pause(now_us), &app.model, now_us);
+    app.tutor.controller.pause(now_us);
 }
 
 /// Starts an automatic build once the editor settles on a new snapshot.
@@ -593,13 +624,11 @@ fn scheduleBuild(app: *App, can_build: bool, now_us: u64) !void {
     const scheduler = &app.build.scheduler;
     scheduler.observe(try app.model.id(), now_us / 1000);
     const blocked = app.onboarding.active or !app.onboarding.selected or !app.view.toolbar.auto_build or
-        app.build.plan == null or !can_build or app.jobs.busy() or app.flash.pending != null or
+        app.build.plan == null or !can_build or app.jobs.busy() or app.build.warmup != null or app.flash.pending != null or
         desktop.flash_presenter.blocksAutoBuild(app.flash.phase()) or app.practicing or app.view.modal != .none or
         app.owner.closed or app.owner.close_requested != null or app.editorBusy();
     if (!scheduler.take(now_us / 1000, blocked)) return;
-    const next_job = try std.math.add(u64, app.job_generation, 1);
-    app.jobs.build = workers.startBuild(app, app.build.plan.?.config, next_job) catch |err| return app.view.report(err);
-    app.job_generation = next_job;
+    workers.beginBuild(app, app.build.plan.?.config, .auto_build) catch |err| return app.view.report(err);
     app.flash.discard();
     app.view.diagnostic = @splat(0);
 }
@@ -610,14 +639,6 @@ fn canBuild(app: *App, board: *const boards.OwnedBoard) bool {
     const plan = app.build.plan orelse return false;
     return !app.jobs.busy() and std.mem.eql(u8, &plan.config.board_id, &app.model.board.id) and
         std.mem.eql(u8, plan.config.build_board, board.entry.selector);
-}
-
-pub fn applyPractice(app: *App, effect: desktop.practice_controller.Effect, model: *const desktop.model.Model, now_us: u64) void {
-    const practice = &app.tutor.controller;
-    app.draft_runtime.apply(practice, effect, app.build.runner, model, now_us) catch |err| {
-        app.draft_runtime.fail(practice, err, now_us);
-        app.view.report(err);
-    };
 }
 
 pub fn focused(app: *const App) bool {
@@ -643,12 +664,16 @@ pub fn discardEditorWork(app: *App) void {
     app.jobs.cancel();
     if (app.build.artifact) |*artifact| artifact.deinit();
     app.build.artifact = null;
-    if (app.build.runner) |*runner| runner.deinit();
-    app.build.runner = null;
     app.exported = null;
     app.flash.pending = null;
     app.flash.advance = false;
     app.build.scheduler = .{};
+    // Builds, failures and queued clicks belonged to the previous project.
+    const status = &app.build.status;
+    status.queued = null;
+    status.accepted = null;
+    status.failed = null;
+    status.flashed_ms = null;
 }
 
 pub fn closePopups(app: *App) void {

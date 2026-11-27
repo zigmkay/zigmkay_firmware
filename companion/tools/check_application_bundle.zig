@@ -75,13 +75,12 @@ fn checkImports(
     const exe_suffix = if (@import("builtin").os.tag == .windows) ".exe" else "";
     // Share the global Zig cache already populated by firmware builds so
     // `analyze-keymap` does not recompile the Zig standard library cold.
-    const shared_global_cache = try std.fs.path.join(a, &.{
-        cache,
-        "builds",
-        "compiler-cache",
-        &std.fmt.bytesToHex(resources.manifest.id, .lower),
-        "global",
-    });
+    const compiler_cache: jobs.compiler_cache.Layout = try .init(
+        a,
+        try std.fs.path.join(a, &.{ cache, "builds" }),
+        resources.manifest.compiler_hash orelse resources.manifest.id,
+    );
+    const shared_global_cache = try compiler_cache.global(a);
     inline for (.{ "us", "de" }) |name| {
         if (comptime representative_only and !std.mem.eql(u8, name, "us")) continue;
         const source_path = try std.fs.path.join(a, &.{ root_path, name });
@@ -132,7 +131,6 @@ fn checkImports(
                 prepared.board.board.id,
             );
             defer project.owned_zon.free(init.gpa, plan);
-            try checkImportedTutor(init, &model, plan.config);
             var firmware_request = try desktop.build_worker.Request.capture(
                 &model,
                 plan.config,
@@ -160,53 +158,6 @@ fn writeImportFixture(io: std.Io, path: []const u8, keymap: []const u8, manifest
     try source.writeFile(io, .{ .sub_path = "build.zig.zon", .data = manifest });
 }
 
-/// Builds the native tutor runner for an imported project and checks that it
-/// starts and turns one key press into typed text.
-fn checkImportedTutor(
-    init: std.process.Init,
-    model: *desktop.model.Model,
-    plan_config: desktop.build_worker.Config,
-) !void {
-    var config = plan_config;
-    config.request.native_only = true;
-    var runner_request = try desktop.build_worker.Request.capture(model, config, init.environ_map, 1);
-    defer runner_request.deinit();
-    var native = try runner_request.prepare(init.gpa, init.io);
-    defer native.deinit();
-    if (native.manifest != null) return error.NativeTutorBuiltFirmware;
-    const runner = native.runner orelse return error.RunnerArtifactNotPrepared;
-    var tutor = desktop.practice_controller.Controller.init(try model.id());
-    _ = try tutor.choose(.{ .source = .draft }, 0);
-    var runtime = desktop.runner_runtime.Runtime.init(init.gpa, init.io, 1, true);
-    defer runtime.deinit();
-    try runtime.apply(&tutor, try tutor.start(true, try model.id(), 0), runner, model, 0);
-    runtime.router.focused = true;
-    runtime.router.owns_practice_input = true;
-    for (0..5000) |tick| {
-        try runtime.poll(&tutor, model, tick * 1000);
-        if (runtime.router.runner_running) break;
-        try std.Io.sleep(init.io, .fromMilliseconds(1), .awake);
-    }
-    if (!runtime.router.runner_running) return error.ImportedTutorDidNotStart;
-    _ = try runtime.route(&tutor, model, .{ .key = .{
-        .window = 1,
-        .scancode = 20,
-        .down = true,
-    } }, 6_000_000);
-    _ = try runtime.route(&tutor, model, .{ .key = .{
-        .window = 1,
-        .scancode = 20,
-        .down = false,
-    } }, 6_001_000);
-    for (0..5000) |tick| {
-        try runtime.poll(&tutor, model, 6_002_000 + tick * 1000);
-        if (tutor.session.attempts != 0) break;
-        try std.Io.sleep(init.io, .fromMilliseconds(1), .awake);
-    }
-    if (tutor.session.attempts == 0) return error.ImportedTutorDidNotReceiveText;
-    try runtime.apply(&tutor, tutor.pause(12_000_000), runner, model, 12_000_000);
-}
-
 fn check(
     init: std.process.Init,
     resources: jobs.application_bundle.Bundle,
@@ -229,6 +180,5 @@ fn check(
     defer candidate.deinit();
     var result = try candidate.takeBundle(&model, .{ .generation = 1, .snapshot = request.captured });
     defer result.deinit();
-    try result.runner.verifyFile(a, init.io, result.firmware.inputs);
     std.log.info("Offline bundle build passed: {s}", .{selector});
 }

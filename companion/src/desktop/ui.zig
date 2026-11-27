@@ -365,6 +365,157 @@ pub fn turnedFace(r: dvui.Rect, radians: f32, corner: f32, fill: dvui.Color, bor
     turnedBox(r, .{ .radians = radians, .pivot = r.center() }, .round(corner), fill, border, thickness);
 }
 
+/// Share of a key's height taken by its upper tap half (shared across Editor and Tutor).
+pub const keycap_tap_share: f32 = 0.62;
+
+pub const CornerRect = @typeInfo(@FieldType(dvui.Options, "corners")).optional.child;
+
+pub fn topCorners(radius: f32) CornerRect {
+    return .{ .tl = .round(radius), .tr = .round(radius), .br = .square, .bl = .square };
+}
+
+pub fn bottomCorners(radius: f32) CornerRect {
+    return .{ .tl = .square, .tr = .square, .br = .round(radius), .bl = .round(radius) };
+}
+
+/// One part of a keycap: a DVUI box on an upright key, a turned path on a
+/// turned one. `part` tells the parts of one key apart.
+pub fn keycapPart(r: dvui.Rect, turn: Turn, id: u16, part: usize, corners: CornerRect, fill: dvui.Color, border: ?dvui.Color, thickness: f32) void {
+    if (turn.radians != 0) return turnedBox(r, turn, corners, fill, border, thickness);
+    const box = dvui.box(@src(), .{}, .{
+        .id_extra = @as(usize, id) * 8 + part,
+        .rect = r,
+        .background = true,
+        .color_fill = .{ .color = fill },
+        .color_border = if (border) |c| .{ .color = c } else null,
+        .border = if (border != null) .all(thickness) else .{},
+        .corners = corners,
+        .padding = .{},
+        .margin = .{},
+    });
+    box.deinit();
+}
+
+/// Visual styling for the shared Editor & Tutor Tap/Hold keycap face.
+pub const KeycapFace = struct {
+    fill: dvui.Color,
+    border: dvui.Color,
+    band_fill: dvui.Color,
+    divider: dvui.Color,
+    thickness: f32 = 1.5,
+    tap_highlight: ?dvui.Color = null,
+};
+
+/// Draws the shared Tap/Hold keycap shell (outer rounded face, lower hold band,
+/// optional active tap highlight, and hairline divider). Returns the tap/hold split Y offset.
+pub fn drawKeycapFace(rect_val: dvui.Rect, turn: Turn, id: u16, face: KeycapFace) f32 {
+    const corner = @max(4.0, rect_val.w * 0.12);
+    const split = @round(rect_val.h * keycap_tap_share);
+    const inner_corner = @max(0.0, corner - face.thickness);
+    keycapPart(rect_val, turn, id, 0, .round(corner), face.fill, face.border, face.thickness);
+    keycapPart(
+        .{
+            .x = rect_val.x + face.thickness,
+            .y = rect_val.y + split,
+            .w = @max(0.0, rect_val.w - face.thickness * 2),
+            .h = @max(0.0, rect_val.h - split - face.thickness),
+        },
+        turn,
+        id,
+        1,
+        bottomCorners(inner_corner),
+        face.band_fill,
+        null,
+        0,
+    );
+    if (face.tap_highlight) |hi| {
+        keycapPart(
+            .{
+                .x = rect_val.x + face.thickness,
+                .y = rect_val.y + face.thickness,
+                .w = @max(0.0, rect_val.w - face.thickness * 2),
+                .h = @max(0.0, split - face.thickness),
+            },
+            turn,
+            id,
+            2,
+            topCorners(inner_corner),
+            hi,
+            null,
+            0,
+        );
+    }
+    keycapPart(
+        .{
+            .x = rect_val.x + face.thickness,
+            .y = rect_val.y + split,
+            .w = @max(0.0, rect_val.w - face.thickness * 2),
+            .h = 1,
+        },
+        turn,
+        id,
+        3,
+        .square,
+        face.divider,
+        null,
+        0,
+    );
+    return split;
+}
+
+/// Draws the shared upper tap and lower hold keycap legends at the Editor's exact scale.
+pub fn drawKeycapLegends(
+    theme: Theme,
+    rect_val: dvui.Rect,
+    turn: Turn,
+    id: u16,
+    item_scale: f32,
+    split: f32,
+    tap: []const u8,
+    hold: []const u8,
+    tap_color: dvui.Color,
+    hold_color: dvui.Color,
+    layer_colors: bool,
+    bottom_reserve: f32,
+) void {
+    const inset = @max(3.0, rect_val.w * 0.08);
+    const scale = @min(@as(f32, 1.2), item_scale);
+    if (tap.len != 0) {
+        const tap_bounds: dvui.Rect = .{
+            .x = rect_val.x + inset,
+            .y = rect_val.y + inset * 0.7,
+            .w = @max(1.0, rect_val.w - inset * 2),
+            .h = @max(1.0, split - inset * 1.2),
+        };
+        caption(tap, tap_bounds, .{
+            .color = tap_color,
+            .secondary = hold_color,
+            .size = 24 * scale,
+            .id_extra = id,
+            .layer_colors = layer_colors,
+            .layers = theme.layers,
+            .turn = turn,
+        });
+    }
+    if (hold.len != 0) {
+        const hold_bounds: dvui.Rect = .{
+            .x = rect_val.x + inset,
+            .y = rect_val.y + split + 2,
+            .w = @max(1.0, rect_val.w - inset * 2),
+            .h = @max(1.0, rect_val.h - split - 5 - bottom_reserve),
+        };
+        caption(hold, hold_bounds, .{
+            .color = hold_color,
+            .secondary = hold_color,
+            .size = 16 * scale,
+            .id_extra = @as(usize, id) + 0x20000,
+            .layer_colors = layer_colors,
+            .layers = theme.layers,
+            .turn = turn,
+        });
+    }
+}
+
 /// Base options for an absolutely placed control in theme colors.
 pub fn options(t: Theme, r: dvui.Rect, size: f32) dvui.Options {
     return .{
@@ -456,40 +607,82 @@ pub fn panel(t: Theme, which: geometry.Panel) *dvui.BoxWidget {
     return dvui.box(@src(), .{}, opts);
 }
 
-pub fn drawer(src: std.builtin.SourceLocation, t: Theme, bounds: dvui.Rect, modal: bool) *dvui.FloatingWindowWidget {
-    return dvui.floatingWindow(src, .{ .modal = modal }, .{
-        .rect = bounds,
-        .padding = .all(18),
-        .background = true,
-        .color_fill = .{ .color = t.panel },
-    });
-}
+/// A floating window of `w` × `h` made with `frameOptions`, plus `padding`
+/// when it has any. `deinit` draws its border over the children and then
+/// ends the window.
+pub const Frame = struct {
+    window: *dvui.FloatingWindowWidget,
+    theme: Theme,
+    w: f32,
+    h: f32,
+    corner: f32,
+    padding: dvui.Rect = .{},
 
-/// A modal drawer centered in the window, at most `width` wide and 960 high.
-pub fn editDrawer(src: std.builtin.SourceLocation, t: Theme, width: f32) *dvui.FloatingWindowWidget {
-    const screen = dvui.windowRect();
-    const w = @min(width, screen.w - 48);
-    const h = @min(@as(f32, 960), screen.h - 48);
-    return drawer(src, t, .{ .x = (screen.w - w) / 2, .y = (screen.h - h) / 2, .w = w, .h = h }, true);
-}
+    pub fn data(self: Frame) *dvui.WidgetData {
+        return self.window.data();
+    }
 
-/// A modal sheet of `w` × `h` canvas units, centered in the window. Its
-/// children are placed in canvas units from its top left corner.
-pub fn sheet(src: std.builtin.SourceLocation, t: Theme, w: f32, h: f32, tag: []const u8) *dvui.FloatingWindowWidget {
+    pub fn deinit(self: Frame) void {
+        frameEdge(self.theme, .{ .x = -self.padding.x, .y = -self.padding.y, .w = self.w, .h = self.h }, self.corner);
+        self.window.deinit();
+    }
+};
+
+/// A modal sheet of `w` × `h` canvas units, centered in the window and at
+/// least 16 units inside its edges. Its children are placed in canvas units
+/// from its top left corner.
+pub fn sheet(src: std.builtin.SourceLocation, t: Theme, w: f32, h: f32, tag: []const u8) Frame {
     const scale = dvui.parentGet().screenRectScale(.{}).s / dvui.windowNaturalScale();
     const screen = dvui.windowRect();
     const width = @min(w * scale, screen.w - 32);
     const height = @min(h * scale, screen.h - 32);
-    return dvui.floatingWindow(src, .{ .modal = true }, .{
-        .rect = .{ .x = (screen.w - width) / 2, .y = (screen.h - height) / 2, .w = width, .h = height },
+    const corner: f32 = 14;
+    var window = frameOptions(t.panel, corner, tag);
+    window.rect = .{ .x = (screen.w - width) / 2, .y = (screen.h - height) / 2, .w = width, .h = height };
+    return .{
+        .window = dvui.floatingWindow(src, .{ .modal = true }, window),
+        .theme = t,
+        .w = width,
+        .h = height,
+        .corner = corner,
+    };
+}
+
+/// Options of a floating window whose children are placed from its top left
+/// corner across its whole rect. dvui gives a floating window's box a margin
+/// of 2 inside it plus the border, which would move every child 3 units in
+/// and push the right and bottom ones past the frame. End the frame with
+/// `frameBorder`, which draws the border over the children.
+pub fn frameOptions(fill: dvui.Color, corner: f32, tag: []const u8) dvui.Options {
+    return .{
         .padding = .{},
+        .margin = .{},
+        .border = .{},
         .background = true,
-        .color_fill = .{ .color = t.panel },
-        .color_border = .{ .color = t.border },
-        .border = .all(1),
-        .corners = .all(14),
+        .color_fill = .{ .color = fill },
+        .corners = .all(corner),
         .tag = tag,
+    };
+}
+
+/// The 1-unit border of a `frameOptions` window of `w` × `h`, drawn over its
+/// children so that nothing reaching the edge covers it.
+pub fn frameBorder(t: Theme, w: f32, h: f32, corner: f32) void {
+    frameEdge(t, .{ .w = w, .h = h }, corner);
+}
+
+/// The 1-unit border of a `frameOptions` window, at `r` relative to where its
+/// children start: offset by minus the padding of a padded window.
+fn frameEdge(t: Theme, r: dvui.Rect, corner: f32) void {
+    const edge = dvui.box(@src(), .{}, .{
+        .rect = r,
+        .border = .all(1),
+        .color_border = .{ .color = t.border },
+        .corners = .all(corner),
+        .padding = .{},
+        .margin = .{},
     });
+    edge.deinit();
 }
 
 /// A filled line, such as a divider between sheet sections.

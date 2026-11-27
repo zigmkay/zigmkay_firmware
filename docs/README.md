@@ -15,7 +15,7 @@ ask on the [ZigMkay Discord](https://discord.gg/bJCZUtJD65) or open an issue.
 | [Supported keyboards](../README.md#supported-keyboards) | Every board target in `keyboards/boards.zig` |
 | [Keymap guide](keymaps.md) | Key types, layers, combos, encoders, custom code |
 | [Companion README](../companion/README.md) | The visual editor, live overlay, tray and typing tutor |
-| [Typing practice](../companion/docs/typing-practice.md) | Tutor controls, keyboard guide and input sources |
+| [Typing practice](../companion/docs/typing-practice.md) | Adaptive 6-stage typing tutor, Test keys mode, local progress & input sources |
 
 ## Developing ZigMkay
 

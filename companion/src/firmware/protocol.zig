@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Companion-owned host codec for the zigmkay companion Raw HID session,
-//! protocol version 1 (zigmkay_firmware PR #60, `zigmkay/src/companion.zig`).
+//! protocol versions 1 and 2 (`zigmkay/src/companion.zig`).
 //!
 //! Every report is 32 bytes on the existing Raw HID interface (vendor page
 //! 0xFF31, usage 0x74) and starts with a message id. The keyboard sends
@@ -17,10 +17,22 @@
 //!               (u16 little endian, bit 0 always set) [6..22] pressed keys
 //!   0x22 key    [1] seq [2] pressed [3] key index [4] layer [5] modifiers
 //!   0x23 signal [1] seq [2] kind (1 log toggle, 2 overlay toggle, 3 shutdown)
-//!               [3] pressed
+//!               [3] pressed [4] source (version 2: 1 tap action, 2 hold
+//!               action; 0 and other values are unknown, which version 1
+//!               keyboards and earlier version 2 builds send as padding)
+//!   0x24 decision (version 2) [1] seq [2] key index [3] outcome (1 tap,
+//!               2 hold, 3 retro tap) [4] reason (1 released within the
+//!               tapping term, 2 term elapsed, 3 permissive hold, 4 same-side
+//!               tap, 5 released after the term) [5..7] ms from press to
+//!               decision (u16 little endian, saturating) [7] other key index
+//!               or 0xFF [8..10] tapping term ms (u16 little endian)
+//!               [10] layer of the key [11] flags (bit 0 combo; other bits
+//!               are ignored)
 //!
-//! State, key and signal reports share a u8 sequence that wraps. Key reports carry the
-//! layer and modifiers at scan time, before processing. Unknown report ids,
+//! A version 1 keyboard never sends decisions; the host accepts both versions.
+//! State, key, signal and decision reports share a u8 sequence that wraps.
+//! Key reports carry the layer and modifiers at scan time, before processing.
+//! A decision follows the key report of its press. Unknown report ids,
 //! for example the legacy 0x03 trace, are ignored. Bytes after a message's
 //! fields are not interpreted.
 const std = @import("std");
@@ -30,7 +42,14 @@ pub const identity = @import("identity.zig");
 /// taken from it; byte offsets are not named there and stay spelled out here.
 pub const firmware = @import("zigmkay").companion;
 
+/// The version this host speaks and its fakes send in hello.
 pub const protocol_version: u8 = firmware.protocol_version;
+/// The oldest keyboard version the host accepts; it never sends decisions.
+pub const min_protocol_version: u8 = 1;
+
+pub fn supportsVersion(version: u8) bool {
+    return version >= min_protocol_version and version <= protocol_version;
+}
 pub const report_size = @sizeOf(firmware.Report);
 pub const Report = firmware.Report;
 pub const KeymapId = @FieldType(firmware.Info, "keymap_id");
@@ -48,7 +67,10 @@ pub const MessageId = firmware.MessageId;
 
 /// Companion keys on the keyboard, reported after its tap/hold decision.
 pub const SignalKind = firmware.Signal;
-pub const SignalEvent = struct { kind: SignalKind, pressed: bool };
+/// Whether the key's tap or hold action sent a signal; unknown when the
+/// keyboard does not say.
+pub const SignalSource = firmware.SignalSource;
+pub const SignalEvent = struct { kind: SignalKind, pressed: bool, source: SignalSource = .unknown };
 
 pub const KeyEvent = struct {
     pressed: bool,
@@ -80,11 +102,22 @@ pub const State = struct {
 pub const Key = struct { sequence: u8, event: KeyEvent };
 pub const Signal = struct { sequence: u8, event: SignalEvent };
 
+pub const DecisionOutcome = firmware.DecisionOutcome;
+pub const DecisionReason = firmware.DecisionReason;
+
+/// How the keyboard resolved a tap/hold key (protocol version 2): key index,
+/// outcome, reason, ms from press to decision (saturating), the other key of
+/// a permissive hold or same-side tap, tapping term, layer and combo flag.
+pub const TapHoldDecision = firmware.Decision;
+
+pub const Decision = struct { sequence: u8, event: TapHoldDecision };
+
 pub const Message = union(MessageId) {
     hello: Hello,
     state: State,
     key: Key,
     signal: Signal,
+    decision: Decision,
 
     /// Hello carries no sequence number.
     pub fn sequence(self: Message) ?u8 {
@@ -93,11 +126,12 @@ pub const Message = union(MessageId) {
             .state => |state| state.sequence,
             .key => |key| key.sequence,
             .signal => |signal| signal.sequence,
+            .decision => |decision| decision.sequence,
         };
     }
 };
 
-pub const WireError = error{ InvalidLength, InvalidDimensions, UnsupportedVersion, InvalidBoolean, InvalidKeyIndex, InvalidLayer, InvalidLayerMask, InvalidSignal };
+pub const WireError = error{ InvalidLength, InvalidDimensions, UnsupportedVersion, InvalidBoolean, InvalidKeyIndex, InvalidLayer, InvalidLayerMask, InvalidSignal, InvalidDecision };
 pub const ProtocolError = WireError || identity.Error;
 
 pub const Identity = identity.Identity;
@@ -138,7 +172,7 @@ pub fn validate(message: Message, dimensions: core.KeymapDimensions) WireError!v
     try validateDimensions(dimensions);
     switch (message) {
         .hello => |hello| {
-            if (hello.version != protocol_version) return error.UnsupportedVersion;
+            if (!supportsVersion(hello.version)) return error.UnsupportedVersion;
             try validateDimensions(hello.dimensions);
         },
         .state => |state| {
@@ -152,6 +186,12 @@ pub fn validate(message: Message, dimensions: core.KeymapDimensions) WireError!v
             if (key.event.layer >= dimensions.layer_count) return error.InvalidLayer;
         },
         .signal => {},
+        .decision => |decision| {
+            const event = decision.event;
+            if (event.key_index >= dimensions.key_count) return error.InvalidKeyIndex;
+            if (event.other_key) |other| if (other >= dimensions.key_count) return error.InvalidKeyIndex;
+            if (event.layer >= dimensions.layer_count) return error.InvalidLayer;
+        },
     }
 }
 
@@ -163,7 +203,7 @@ pub fn decode(bytes: []const u8, dimensions: core.KeymapDimensions) WireError!?M
     const id = std.enums.fromInt(MessageId, bytes[0]) orelse return null;
     const message: Message = switch (id) {
         .hello => blk: {
-            if (bytes[1] != protocol_version) return error.UnsupportedVersion;
+            if (!supportsVersion(bytes[1])) return error.UnsupportedVersion;
             if (bytes[2] == 0 or
                 bytes[2] > std.math.maxInt(core.KeyIndex) or
                 bytes[3] == 0 or
@@ -200,8 +240,34 @@ pub fn decode(bytes: []const u8, dimensions: core.KeymapDimensions) WireError!?M
             if (bytes[3] > 1) return error.InvalidBoolean;
             break :blk .{ .signal = .{
                 .sequence = bytes[1],
-                .event = .{ .kind = kind, .pressed = bytes[3] == 1 },
+                .event = .{
+                    .kind = kind,
+                    .pressed = bytes[3] == 1,
+                    .source = std.enums.fromInt(SignalSource, bytes[4]) orelse .unknown,
+                },
             } };
+        },
+        .decision => blk: {
+            const outcome = std.enums.fromInt(DecisionOutcome, bytes[3]) orelse return error.InvalidDecision;
+            const reason = std.enums.fromInt(DecisionReason, bytes[4]) orelse return error.InvalidDecision;
+            if (bytes[2] > std.math.maxInt(core.KeyIndex)) return error.InvalidKeyIndex;
+            const other: ?core.KeyIndex = if (bytes[7] == firmware.no_other_key)
+                null
+            else if (bytes[7] > std.math.maxInt(core.KeyIndex))
+                return error.InvalidKeyIndex
+            else
+                @intCast(bytes[7]);
+            if (bytes[10] > std.math.maxInt(core.LayerIndex)) return error.InvalidLayer;
+            break :blk .{ .decision = .{ .sequence = bytes[1], .event = .{
+                .key_index = @intCast(bytes[2]),
+                .outcome = outcome,
+                .reason = reason,
+                .elapsed_ms = std.mem.readInt(u16, bytes[5..7], .little),
+                .other_key = other,
+                .tapping_term_ms = std.mem.readInt(u16, bytes[8..10], .little),
+                .layer = @intCast(bytes[10]),
+                .combo = bytes[11] & 1 != 0,
+            } } };
         },
     };
     try validate(message, dimensions);
@@ -239,6 +305,19 @@ pub fn encode(message: Message, dimensions: core.KeymapDimensions) WireError!Rep
             report[1] = signal.sequence;
             report[2] = @backingInt(signal.event.kind);
             report[3] = @intFromBool(signal.event.pressed);
+            report[4] = @backingInt(signal.event.source);
+        },
+        .decision => |decision| {
+            const event = decision.event;
+            report[1] = decision.sequence;
+            report[2] = event.key_index;
+            report[3] = @backingInt(event.outcome);
+            report[4] = @backingInt(event.reason);
+            std.mem.writeInt(u16, report[5..7], event.elapsed_ms, .little);
+            report[7] = if (event.other_key) |other| other else firmware.no_other_key;
+            std.mem.writeInt(u16, report[8..10], event.tapping_term_ms, .little);
+            report[10] = event.layer;
+            report[11] = @intFromBool(event.combo);
         },
     }
     return report;
@@ -270,7 +349,7 @@ fn literal(prefix: []const u8) Report {
 }
 
 test "hello decodes version dimensions and keymap id" {
-    const bytes = literal(&(.{ 0x20, 1, 36, 4 } ++ @as([16]u8, @splat(0xAB))));
+    const bytes = literal(&(.{ 0x20, 2, 36, 4 } ++ @as([16]u8, @splat(0xAB))));
     const message = (try decode(&bytes, test_dimensions)).?;
     try std.testing.expectEqualDeep(Message{ .hello = .{
         .dimensions = test_dimensions,
@@ -322,8 +401,61 @@ test "signal decodes sequence kind and press" {
     try std.testing.expectError(error.InvalidBoolean, decode(&literal(&.{ 0x23, 4, 2, 2 }), test_dimensions));
 }
 
+test "signal decodes its tap or hold source, anything else is unknown" {
+    const t = std.testing;
+    for ([_]u8{ 1, 2 }, [_]SignalSource{ .tap, .hold }) |byte, source| {
+        const bytes = literal(&.{ 0x23, 5, 2, 0, byte });
+        const signal = (try decode(&bytes, test_dimensions)).?.signal;
+        try t.expectEqualDeep(SignalEvent{ .kind = .overlay_toggle, .pressed = false, .source = source }, signal.event);
+        try t.expectEqual(bytes, try encode(.{ .signal = signal }, test_dimensions));
+    }
+    // Older keyboards pad with zero; unassigned values are not an error.
+    for ([_]u8{ 0, 3, 0xFF }) |byte| {
+        const signal = (try decode(&literal(&.{ 0x23, 5, 2, 1, byte }), test_dimensions)).?.signal;
+        try t.expectEqual(SignalSource.unknown, signal.event.source);
+        try t.expectEqual(literal(&.{ 0x23, 5, 2, 1, 0 }), try encode(.{ .signal = signal }, test_dimensions));
+    }
+}
+
+test "decision decodes outcome reason timing other key term layer and combo" {
+    const t = std.testing;
+    const bytes = literal(&.{ 0x24, 7, 12, 2, 3, 0x2C, 0x01, 20, 0xC8, 0x00, 3, 1 });
+    const decision = (try decode(&bytes, test_dimensions)).?.decision;
+    try t.expectEqual(@as(u8, 7), decision.sequence);
+    try t.expectEqualDeep(TapHoldDecision{
+        .key_index = 12,
+        .outcome = .hold,
+        .reason = .permissive_hold,
+        .elapsed_ms = 300,
+        .other_key = 20,
+        .tapping_term_ms = 200,
+        .layer = 3,
+        .combo = true,
+    }, decision.event);
+    try t.expectEqual(bytes, try encode(.{ .decision = decision }, test_dimensions));
+    // No other key, and flag bits other than the combo bit are ignored.
+    const alone = (try decode(&literal(&.{ 0x24, 8, 1, 1, 1, 40, 0, 0xFF, 0xC8, 0, 0, 0xFE }), test_dimensions)).?.decision;
+    try t.expectEqual(@as(?core.KeyIndex, null), alone.event.other_key);
+    try t.expect(!alone.event.combo);
+    try t.expectEqual(@as(?u8, 8), (Message{ .decision = alone }).sequence());
+    try t.expectError(error.InvalidDecision, decode(&literal(&.{ 0x24, 1, 1, 0, 1, 0, 0, 0xFF }), test_dimensions));
+    try t.expectError(error.InvalidDecision, decode(&literal(&.{ 0x24, 1, 1, 4, 1, 0, 0, 0xFF }), test_dimensions));
+    try t.expectError(error.InvalidDecision, decode(&literal(&.{ 0x24, 1, 1, 1, 6, 0, 0, 0xFF }), test_dimensions));
+    try t.expectError(error.InvalidKeyIndex, decode(&literal(&.{ 0x24, 1, 36, 1, 1, 0, 0, 0xFF }), test_dimensions));
+    try t.expectError(error.InvalidKeyIndex, decode(&literal(&.{ 0x24, 1, 1, 2, 3, 0, 0, 36 }), test_dimensions));
+    try t.expectError(error.InvalidKeyIndex, decode(&literal(&.{ 0x24, 1, 1, 2, 3, 0, 0, 0x80 }), test_dimensions));
+    try t.expectError(error.InvalidLayer, decode(&literal(&.{ 0x24, 1, 1, 1, 1, 0, 0, 0xFF, 0, 0, 4 }), test_dimensions));
+}
+
+test "a version 1 hello is accepted: such keyboards never send decisions" {
+    const hello = (try decode(&literal(&.{ 0x20, 1, 36, 4 }), test_dimensions)).?.hello;
+    try std.testing.expectEqual(@as(u8, 1), hello.version);
+    try std.testing.expect(supportsVersion(1) and supportsVersion(2) and !supportsVersion(3));
+    try std.testing.expectEqual(literal(&.{ 0x20, 1, 36, 4 }), try encode(.{ .hello = hello }, test_dimensions));
+}
+
 test "decoder ignores unknown report ids including the legacy trace" {
-    for ([_]u8{ 0x00, 0x03, 0x10, 0x11, 0x12, 0x24, 0x7F, 0xA7, 0xFF }) |id| {
+    for ([_]u8{ 0x00, 0x03, 0x10, 0x11, 0x12, 0x25, 0x7F, 0xA7, 0xFF }) |id| {
         const bytes = literal(&.{ id, 1, 2, 3 });
         try std.testing.expectEqual(@as(?Message, null), try decode(&bytes, test_dimensions));
     }
@@ -335,7 +467,8 @@ test "decoder rejects bad lengths versions dimensions and values" {
     try t.expectError(error.InvalidLength, decode(valid[0..31], test_dimensions));
     try t.expectError(error.InvalidLength, decode(&(valid ++ .{0}), test_dimensions));
     try t.expectError(error.InvalidDimensions, decode(&valid, .{ .key_count = 0, .layer_count = 4 }));
-    try t.expectError(error.UnsupportedVersion, decode(&literal(&.{ 0x20, 2, 36, 4 }), test_dimensions));
+    try t.expectError(error.UnsupportedVersion, decode(&literal(&.{ 0x20, 3, 36, 4 }), test_dimensions));
+    try t.expectError(error.UnsupportedVersion, decode(&literal(&.{ 0x20, 0, 36, 4 }), test_dimensions));
     try t.expectError(error.InvalidDimensions, decode(&literal(&.{ 0x20, 1, 0, 4 }), test_dimensions));
     try t.expectError(error.InvalidDimensions, decode(&literal(&.{ 0x20, 1, 36, 0 }), test_dimensions));
     try t.expectError(error.InvalidDimensions, decode(&literal(&.{ 0x20, 1, 128, 4 }), test_dimensions));
@@ -386,7 +519,7 @@ test "host and firmware agree on every shared constant" {
     const t = std.testing;
     // Golden: the wire itself, independent of either side.
     try t.expectEqual(32, report_size);
-    try t.expectEqual(1, protocol_version);
+    try t.expectEqual(2, protocol_version);
     try t.expectEqual(16, @sizeOf(KeymapId));
     try t.expectEqual(@sizeOf(KeymapId), @sizeOf(@FieldType(identity.Identity, "digest")));
     // Every firmware command is known to the host under the same name and id.
@@ -433,11 +566,22 @@ test "firmware reports decode to the events that produced them" {
     session.processor_event(.{ .OnHoldEnterAfter = .{ .hold = .{ .custom = core.CUSTOM_ID_COMPANION_TOGGLE } } });
     session.processor_event(.{ .OnTapExitBefore = .{ .tap = .{ .custom = core.CUSTOM_ID_COMPANION_LOG_TOGGLE } } });
     session.processor_event(.{ .OnTapEnterAfter = .{ .tap = .{ .key_press = core.KC_SHUTDOWN_COMPANION } } });
+    const decision = TapHoldDecision{
+        .key_index = 5,
+        .outcome = .tap,
+        .reason = .same_side_tap,
+        .elapsed_ms = 95,
+        .other_key = 7,
+        .tapping_term_ms = 220,
+        .layer = 1,
+    };
+    session.tap_hold_decision(decision);
     for ([_]Message{
         .{ .key = .{ .sequence = 1, .event = .{ .pressed = true, .key_index = 5, .layer = 1, .modifiers = modifiers } } },
-        .{ .signal = .{ .sequence = 2, .event = .{ .kind = .overlay_toggle, .pressed = true } } },
-        .{ .signal = .{ .sequence = 3, .event = .{ .kind = .log_toggle, .pressed = false } } },
-        .{ .signal = .{ .sequence = 4, .event = .{ .kind = .shutdown, .pressed = true } } },
+        .{ .signal = .{ .sequence = 2, .event = .{ .kind = .overlay_toggle, .pressed = true, .source = .hold } } },
+        .{ .signal = .{ .sequence = 3, .event = .{ .kind = .log_toggle, .pressed = false, .source = .tap } } },
+        .{ .signal = .{ .sequence = 4, .event = .{ .kind = .shutdown, .pressed = true, .source = .tap } } },
+        .{ .decision = .{ .sequence = 5, .event = decision } },
     }) |expected| {
         const report = takeFirmware(&session).?;
         try t.expectEqualDeep(expected, (try decode(&report, test_dimensions)).?);
