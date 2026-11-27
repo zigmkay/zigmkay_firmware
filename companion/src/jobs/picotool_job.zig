@@ -1,5 +1,6 @@
 //! Controlled picotool_flash wrapper job. This module never transfers firmware itself.
 const std = @import("std");
+const child_job = @import("child_job.zig");
 pub const output_limit = 64 * 1024;
 
 /// unique_bootsel delegates zero/multiple-device handling to the wrapper's
@@ -137,7 +138,13 @@ pub const Job = struct {
             .stdout = .pipe,
             .stderr = .pipe,
             .create_no_window = true,
+            .start_suspended = child_job.suspended,
         });
+        child_job.adopt(&self.child.?) catch |err| {
+            self.child.?.kill(self.io);
+            self.child = null;
+            return err;
+        };
         // If scheduling fails, EOF still requests controlled cleanup.
         self.future = std.Io.concurrent(self.io, work, .{self}) catch |err| {
             self.child.?.stdin.?.close(self.io);
