@@ -30,7 +30,7 @@ pub fn main(init: std.process.Init) !void {
     const mount_point = if (std.fs.path.isAbsolute(mount_point_or_label))
         try waitForMountPoint(io, allocator, mount_point_or_label)
     else
-        try waitForLabel(io, allocator, init.environ_map, mount_point_or_label);
+        try waitForLabel(io, allocator, mount_point_or_label);
     defer allocator.free(mount_point);
 
     // Give the host a moment to finish mounting before writing to the volume.
@@ -64,7 +64,7 @@ fn waitForMountPoint(io: std.Io, allocator: std.mem.Allocator, mount_point: []co
 }
 
 /// Waits for a volume labelled `label` to be mounted and returns its mount point.
-fn waitForLabel(io: std.Io, allocator: std.mem.Allocator, environ_map: *std.process.Environ.Map, label: []const u8) ![]const u8 {
+fn waitForLabel(io: std.Io, allocator: std.mem.Allocator, label: []const u8) ![]const u8 {
     switch (builtin.os.tag) {
         .windows => {
             std.debug.print("Waiting for a drive labelled '{s}'...\n", .{label});
@@ -84,27 +84,90 @@ fn waitForLabel(io: std.Io, allocator: std.mem.Allocator, environ_map: *std.proc
             return waitForMountPoint(io, allocator, mount_point);
         },
         .linux => {
-            const user = environ_map.get("USER") orelse std.process.fatal("USER is not set; pass an absolute mount point instead", .{});
-            const mount_point = try std.fs.path.join(allocator, &.{ "/run/media", user, label });
-            defer allocator.free(mount_point);
             const device = try std.fs.path.join(allocator, &.{ "/dev/disk/by-label", label });
             defer allocator.free(device);
-
-            std.debug.print("Waiting for the bootloader volume at {s}...\n", .{mount_point});
+            std.debug.print("Waiting for the bootloader volume labelled '{s}'...\n", .{label});
+            var requested: ?[]u8 = null;
+            defer if (requested) |path| allocator.free(path);
             while (true) {
-                if (std.Io.Dir.accessAbsolute(io, mount_point, .{})) |_| {
-                    return allocator.dupe(u8, mount_point);
-                } else |_| {}
-                // Desktops without an automounter (e.g. COSMIC) leave the volume
-                // unmounted, so mount it via udisksctl when available.
-                if (std.Io.Dir.accessAbsolute(io, device, .{})) |_| {
-                    udisksctlMount(io, device);
+                // Distributions mount removable media in different places
+                // (/run/media/$USER on Arch and Fedora, /media/$USER on Debian
+                // and Ubuntu), so ask the kernel where the device is mounted.
+                if (std.Io.Dir.realPathFileAbsoluteAlloc(io, device, allocator)) |source| {
+                    defer allocator.free(source);
+                    if (try mountPointOf(io, allocator, source)) |mount_point| return mount_point;
+                    // Desktops without an automounter (e.g. COSMIC) leave the
+                    // volume unmounted; ask udisks once per device node.
+                    if (requested == null or !std.mem.eql(u8, requested.?, source)) {
+                        if (requested) |path| allocator.free(path);
+                        requested = try allocator.dupe(u8, source);
+                        udisksctlMount(io, source);
+                    }
                 } else |_| {}
                 try std.Io.sleep(io, poll_interval, .awake);
             }
         },
         else => std.process.fatal("finding a volume by label is unsupported on {t}; pass an absolute mount point", .{builtin.os.tag}),
     }
+}
+
+/// The mount point of block device `source` (e.g. /dev/sdb1), if it is mounted.
+fn mountPointOf(io: std.Io, allocator: std.mem.Allocator, source: []const u8) !?[]const u8 {
+    const mountinfo = std.Io.Dir.cwd().readFileAlloc(io, "/proc/self/mountinfo", allocator, .limited(4 * 1024 * 1024)) catch return null;
+    defer allocator.free(mountinfo);
+    var buffer: [std.fs.max_path_bytes]u8 = undefined;
+    const mount_point = mountPointIn(mountinfo, source, &buffer) orelse return null;
+    return try allocator.dupe(u8, mount_point);
+}
+
+/// Parses /proc/self/mountinfo text: "id parent major:minor root mount-point
+/// options ... - fstype source super-options". Only whole-filesystem mounts count.
+fn mountPointIn(mountinfo: []const u8, source: []const u8, out: []u8) ?[]const u8 {
+    var lines = std.mem.tokenizeScalar(u8, mountinfo, '\n');
+    while (lines.next()) |line| {
+        const separator = std.mem.indexOf(u8, line, " - ") orelse continue;
+        var tail = std.mem.tokenizeScalar(u8, line[separator + 3 ..], ' ');
+        _ = tail.next() orelse continue;
+        const mounted = tail.next() orelse continue;
+        if (!std.mem.eql(u8, mounted, source)) continue;
+        var head = std.mem.tokenizeScalar(u8, line[0..separator], ' ');
+        _ = head.next(); // mount id
+        _ = head.next(); // parent id
+        _ = head.next(); // major:minor
+        const root = head.next() orelse continue;
+        const point = head.next() orelse continue;
+        if (!std.mem.eql(u8, root, "/")) continue;
+        return unescape(point, out);
+    }
+    return null;
+}
+
+/// Decodes mountinfo's octal escapes such as \040 for a space.
+fn unescape(escaped: []const u8, out: []u8) ?[]const u8 {
+    var i: usize = 0;
+    var n: usize = 0;
+    while (i < escaped.len) : (n += 1) {
+        if (n == out.len) return null;
+        if (escaped[i] == '\\' and i + 4 <= escaped.len) {
+            out[n] = std.fmt.parseInt(u8, escaped[i + 1 .. i + 4], 8) catch return null;
+            i += 4;
+        } else {
+            out[n] = escaped[i];
+            i += 1;
+        }
+    }
+    return out[0..n];
+}
+
+test mountPointIn {
+    const mountinfo =
+        "22 1 0:21 / / rw - btrfs /dev/nvme0n1p2 rw\n" ++
+        "88 22 8:17 / /media/lisa\\040smith/RPI-RP2 rw,nosuid - vfat /dev/sdb1 rw\n" ++
+        "90 22 8:33 /sub /mnt/bind rw - vfat /dev/sdc1 rw\n";
+    var out: [256]u8 = undefined;
+    try std.testing.expectEqualStrings("/media/lisa smith/RPI-RP2", mountPointIn(mountinfo, "/dev/sdb1", &out).?);
+    try std.testing.expect(mountPointIn(mountinfo, "/dev/sdc1", &out) == null);
+    try std.testing.expect(mountPointIn(mountinfo, "/dev/sdd1", &out) == null);
 }
 
 fn udisksctlMount(io: std.Io, device: []const u8) void {
