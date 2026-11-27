@@ -2,8 +2,9 @@
 
 Start with the [README](../README.md#get-started-with-mise) for installation.
 This checkout contains the editor, resident companion, native UI, utilities and
-tests. First-party implementation uses exactly Zig 0.17.0; imported C bridges
-retain their existing scope. Follow [AGENTS.md](../AGENTS.md) when contributing.
+tests. First-party implementation uses exactly Zig 0.17.0; the imported C
+bridges grow only where Zig cannot reach a system API. Follow
+[AGENTS.md](../AGENTS.md) when contributing.
 
 ## CI and Windows finalization diagnostics
 

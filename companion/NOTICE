@@ -272,3 +272,9 @@ first-party sources keep their GPL-2.0-or-later grant and can be used under
 GPL version 2 without the list. The GPL-2.0-only fixture named above is test
 data and not part of the application; the firmware does not contain the list.
 The word list replaces src/desktop/practice_vocabulary.txt.
+
+Linux keymap bridge (2026-11-27): src/input/platform/linux.c, one of the
+three C bridges preserved above, is modified. It passes an explicit locale
+(LC_ALL, LC_CTYPE, LANG, then "C") to xkb_compose_table_new_from_locale and
+adds linuxKeyMapResetState, which clears pending compose input without
+recompiling the keymap. The macOS and Windows bridges remain unchanged.
