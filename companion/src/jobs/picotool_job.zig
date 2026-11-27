@@ -79,7 +79,7 @@ pub const Job = struct {
             },
             .unique_bootsel => {},
         }
-        if (spec.backend == .windows_bootsel and
+        if (spec.backend == .bootsel_copy and
             spec.selection != .unique_bootsel) return error.UnsupportedBootselSelection;
         var arena = std.heap.ArenaAllocator.init(gpa);
         errdefer arena.deinit();
@@ -151,7 +151,7 @@ pub const Job = struct {
     fn monitor(self: *Job, stdin: std.Io.File) anyerror!void {
         defer stdin.close(self.io);
         const start_time = std.Io.Clock.awake.now(self.io);
-        const command_count: i96 = if (self.spec.backend == .windows_bootsel) 1 else 3;
+        const command_count: i96 = if (self.spec.backend == .bootsel_copy) 1 else 3;
         const budget: i96 = (@as(i96, self.spec.discovery_ms) + command_count * @as(i96, self.spec.command_ms) + 1000) * std.time.ns_per_ms;
         while (!self.requested.load(.acquire)) {
             if (start_time.durationTo(std.Io.Clock.awake.now(self.io)).nanoseconds >= budget) {
@@ -221,7 +221,7 @@ pub const Job = struct {
         const stdout = try outputs[0].toOwnedSlice(self.gpa);
         errdefer self.gpa.free(stdout);
         const stderr = try outputs[1].toOwnedSlice(self.gpa);
-        const helper_timeout = self.spec.backend == .windows_bootsel and term == .exited and term.exited == 3;
+        const helper_timeout = self.spec.backend == .bootsel_copy and term == .exited and term.exited == 3;
         return .{
             .backend = self.spec.backend,
             .process = .{ .term = term, .stdout = stdout, .stderr = stderr },
@@ -282,7 +282,7 @@ test "unique BOOTSEL emits no selector arguments for wrapper discovery" {
 
 test "Windows backend invokes only the helper and refuses picotool selectors" {
     var spec: Spec = .{
-        .backend = .windows_bootsel,
+        .backend = .bootsel_copy,
         .wrapper = "/helper",
         .picotool = "/unused",
         .firmware = "/frozen.uf2",

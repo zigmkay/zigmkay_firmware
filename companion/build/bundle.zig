@@ -42,7 +42,7 @@ pub fn add(s: *tests.Suite, deps: Deps, mb: anytype, app: *Compile, bootsel: ?*C
     assemble.addDirectoryArg2(b.path("zig-pkg"), .{ .make_absolute = true });
     const application = assemble.addOutputDirectoryArg2("Zigmkay.app", .{ .make_absolute = true });
     assemble.addArtifactArg(app);
-    if (os == .windows) {
+    if (os == .windows or os == .linux) {
         assemble.addArtifactArg(bootsel.?);
         assemble.addArtifactArg(bootsel.?);
     } else {
@@ -87,7 +87,8 @@ fn pins(b: *std.Build, revision: []const u8, target_os: std.Target.Os.Tag) *std.
         manifest.dependencies.icons.hash,
         manifest.dependencies.inter.hash,
     };
-    const license_hashes: []const []const u8 = if (target_os == .windows)
+    // Windows and Linux copy onto the BOOTSEL volume and ship no picotool.
+    const license_hashes: []const []const u8 = if (target_os == .windows or target_os == .linux)
         &desktop_licenses
     else
         &(desktop_licenses ++ [_][]const u8{@import("zigmkay_firmware").zigmkay_manifest.dependencies.picotool.hash});

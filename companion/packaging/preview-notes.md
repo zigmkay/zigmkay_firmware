@@ -14,12 +14,11 @@ Developer ID, notarization or Authenticode signature.
 On Linux, make the AppImage executable with `chmod +x Zigmkay-*.AppImage`.
 If FUSE mounting is unavailable, run `./Zigmkay-*.AppImage --appimage-extract`,
 then `./squashfs-root/AppRun`. The static runtime does not require libfuse2.
-See the bundled `usr/share/zigmkay/70-zigmkay.rules` and the repository's preview
-documentation for manual Linux device permissions.
+Flashing needs no extra setup. The live keyboard connection needs the bundled
+`usr/share/zigmkay/70-zigmkay.rules`; see the repository's preview documentation.
 
-Windows flashing uses the RP2040 BOOTSEL USB mass-storage driver supplied with
-Windows. It copies the validated UF2 directly and then waits for a coherent
-firmware identity. Transfer completion alone does not establish success and
+Windows and Linux flashing copy the validated UF2 onto the RP2040 BOOTSEL USB
+mass-storage volume and then wait for a coherent firmware identity. Transfer completion alone does not establish success and
 cannot provide picotool's flash read-back. Disconnect additional BOOTSEL devices.
 
 The typing tutor saves its progress locally, per person and layout, in the

@@ -172,7 +172,7 @@ fn initCore(b: *std.Build, cfg: Config) Core {
     inline for (@typeInfo(@TypeOf(appimage_pins)).@"struct".field_names) |field|
         release_options.addOption([]const u8, field, @field(appimage_pins, field));
     const bootsel_policy = b.createModule(.{ .root_source_file = b.path("src/jobs/bootsel_transfer.zig"), .imports = dupe(b, &.{.{ .name = "firmware-uf2", .module = uf2 }}) });
-    const bootsel_native = b.createModule(.{ .root_source_file = b.path("src/jobs/bootsel_windows.zig"), .imports = dupe(b, &.{.{ .name = "bootsel-policy", .module = bootsel_policy }}) });
+    const bootsel_native = b.createModule(.{ .root_source_file = b.path(if (b.graph.host.result.os.tag == .windows) "src/jobs/bootsel_windows.zig" else "src/jobs/bootsel_linux.zig"), .imports = dupe(b, &.{.{ .name = "bootsel-policy", .module = bootsel_policy }}) });
     const flash_controller = b.createModule(.{ .root_source_file = b.path("src/desktop/flash_controller.zig"), .imports = jobs_only });
     return .{
         .owned_zon = owned_zon,

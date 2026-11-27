@@ -2,6 +2,9 @@
 const std = @import("std");
 const firmware = @import("firmware.zig");
 
+/// Bundle-relative BOOTSEL copy helper of the `bootsel_copy` backend.
+pub const bootsel_helper = "tools/bootsel-transfer" ++ if (@import("builtin").os.tag == .windows) ".exe" else "";
+
 pub const Manifest = struct {
     version: u16 = 1,
     backend: @import("flash_inputs.zig").Backend = .picotool,
